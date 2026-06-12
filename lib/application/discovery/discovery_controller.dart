@@ -6,18 +6,23 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sponzey_file_sharing/app/app_config.dart';
 import 'package:sponzey_file_sharing/application/auth/auth_controller.dart';
 import 'package:sponzey_file_sharing/application/auth/peer_auth_controller.dart';
+import 'package:sponzey_file_sharing/application/discovery/peer_route_candidate_projection.dart';
 import 'package:sponzey_file_sharing/application/discovery/discovery_sorting.dart';
+import 'package:sponzey_file_sharing/application/network/peer_connection_coordinator.dart';
 import 'package:sponzey_file_sharing/core/message_bus/app_event.dart';
 import 'package:sponzey_file_sharing/core/message_bus/message_bus.dart';
 import 'package:sponzey_file_sharing/core/logger/app_log_category.dart';
 import 'package:sponzey_file_sharing/core/logger/app_logger.dart';
-import 'package:sponzey_file_sharing/domain/entities/peer_auth_session.dart';
 import 'package:sponzey_file_sharing/domain/entities/peer_node.dart';
 import 'package:sponzey_file_sharing/domain/entities/user_account.dart';
-import 'package:sponzey_file_sharing/infrastructure/auth/shared_verifier_service.dart';
+import 'package:sponzey_file_sharing/domain/network/connectable_interface_policy.dart';
+import 'package:sponzey_file_sharing/domain/network/network_interface_models.dart';
+import 'package:sponzey_file_sharing/domain/network/peer_route_candidate.dart';
+import 'package:sponzey_file_sharing/infrastructure/discovery/discovery_group_tag_service.dart';
 import 'package:sponzey_file_sharing/infrastructure/discovery/discovery_packet.dart';
 import 'package:sponzey_file_sharing/infrastructure/discovery/local_instance_registry.dart';
 import 'package:sponzey_file_sharing/infrastructure/discovery/discovery_transport.dart';
+import 'package:sponzey_file_sharing/infrastructure/network/dart_io_network_interface_inventory.dart';
 import 'package:sponzey_file_sharing/infrastructure/platform/local_device_identity_service.dart';
 import 'package:sponzey_file_sharing/infrastructure/repositories/peer_repository.dart';
 
@@ -31,12 +36,15 @@ class DiscoveryState {
     this.isRunning = false,
     this.lastBroadcastAt,
     this.currentPairingUserId,
-    this.currentPairingProofPreview,
+    String? currentDiscoveryGroupTagPreview,
+    @Deprecated('Use currentDiscoveryGroupTagPreview.')
+    String? currentPairingProofPreview,
     this.receivedPacketCount = 0,
     this.localRegistryEntryCount = 0,
     this.lastPacketAt,
     this.lastDecision,
-  });
+  }) : currentDiscoveryGroupTagPreview =
+           currentDiscoveryGroupTagPreview ?? currentPairingProofPreview;
 
   const DiscoveryState.initial()
     : peers = const [],
@@ -45,7 +53,7 @@ class DiscoveryState {
       isRunning = false,
       lastBroadcastAt = null,
       currentPairingUserId = null,
-      currentPairingProofPreview = null,
+      currentDiscoveryGroupTagPreview = null,
       receivedPacketCount = 0,
       localRegistryEntryCount = 0,
       lastPacketAt = null,
@@ -57,7 +65,11 @@ class DiscoveryState {
   final bool isRunning;
   final DateTime? lastBroadcastAt;
   final String? currentPairingUserId;
-  final String? currentPairingProofPreview;
+  final String? currentDiscoveryGroupTagPreview;
+
+  @Deprecated('Use currentDiscoveryGroupTagPreview.')
+  String? get currentPairingProofPreview => currentDiscoveryGroupTagPreview;
+
   final int receivedPacketCount;
   final int localRegistryEntryCount;
   final DateTime? lastPacketAt;
@@ -70,6 +82,8 @@ class DiscoveryState {
     bool? isRunning,
     DateTime? lastBroadcastAt,
     String? currentPairingUserId,
+    String? currentDiscoveryGroupTagPreview,
+    @Deprecated('Use currentDiscoveryGroupTagPreview.')
     String? currentPairingProofPreview,
     int? receivedPacketCount,
     int? localRegistryEntryCount,
@@ -85,8 +99,10 @@ class DiscoveryState {
       isRunning: isRunning ?? this.isRunning,
       lastBroadcastAt: lastBroadcastAt ?? this.lastBroadcastAt,
       currentPairingUserId: currentPairingUserId ?? this.currentPairingUserId,
-      currentPairingProofPreview:
-          currentPairingProofPreview ?? this.currentPairingProofPreview,
+      currentDiscoveryGroupTagPreview:
+          currentDiscoveryGroupTagPreview ??
+          currentPairingProofPreview ??
+          this.currentDiscoveryGroupTagPreview,
       receivedPacketCount: receivedPacketCount ?? this.receivedPacketCount,
       localRegistryEntryCount:
           localRegistryEntryCount ?? this.localRegistryEntryCount,
@@ -141,6 +157,7 @@ class DiscoveryController extends Notifier<DiscoveryState> {
     if (!ref.mounted) {
       return;
     }
+    _expireRouteCandidates();
     ref.read(peerAuthControllerProvider.notifier).syncPeerPresence(updated);
     if (!_samePeerCollection(state.peers, updated)) {
       state = state.copyWith(peers: updated, clearError: true);
@@ -162,7 +179,7 @@ class DiscoveryController extends Notifier<DiscoveryState> {
     await _localInstanceRegistry?.publish(
       LocalInstancePresence(
         userId: packet.userId,
-        pairingProof: packet.pairingProof,
+        discoveryGroupTag: packet.discoveryGroupTag,
         instanceId: packet.instanceId,
         displayName: packet.displayName,
         deviceId: packet.deviceId,
@@ -197,14 +214,16 @@ class DiscoveryController extends Notifier<DiscoveryState> {
     _isStarting = true;
     var initStage = 'begin';
     String? currentPairingUserId;
-    String? currentPairingProofPreview;
+    String? currentDiscoveryGroupTagPreview;
 
     try {
       initStage = 'auth-state';
       final authState = ref.read(authControllerProvider);
       final user = authState.currentUser;
       currentPairingUserId = user?.userId;
-      currentPairingProofPreview = _pairingProofPreview(_currentPairingProof());
+      currentDiscoveryGroupTagPreview = _discoveryGroupTagPreview(
+        _currentDiscoveryGroupTag(),
+      );
       if (!authState.isAuthenticated || user == null) {
         state = const DiscoveryState(
           peers: <PeerNode>[],
@@ -247,7 +266,7 @@ class DiscoveryController extends Notifier<DiscoveryState> {
         isLoading: false,
         isRunning: true,
         currentPairingUserId: currentPairingUserId,
-        currentPairingProofPreview: currentPairingProofPreview,
+        currentDiscoveryGroupTagPreview: currentDiscoveryGroupTagPreview,
         lastDecision: 'init: cached peers loaded ${scopedPeers.length}',
       );
 
@@ -295,7 +314,7 @@ class DiscoveryController extends Notifier<DiscoveryState> {
         isLoading: false,
         isRunning: false,
         currentPairingUserId: currentPairingUserId,
-        currentPairingProofPreview: currentPairingProofPreview,
+        currentDiscoveryGroupTagPreview: currentDiscoveryGroupTagPreview,
         errorMessage:
             '디스커버리 엔진을 시작하지 못했습니다. [$initStage] ${error.runtimeType}: $error',
         lastDecision: 'init failed at $initStage: ${error.runtimeType}: $error',
@@ -334,6 +353,13 @@ class DiscoveryController extends Notifier<DiscoveryState> {
     }
 
     final peer = _peerFromPacket(packet, datagram.address);
+    final routeCandidates = await _ingestDiscoveryRouteCandidates(
+      datagram: datagram,
+      receivedAt: _now(),
+    );
+    if (!ref.mounted) {
+      return;
+    }
     final nextPeers = _mergePeer(state.peers, peer);
     state = state.copyWith(
       peers: nextPeers,
@@ -342,6 +368,12 @@ class DiscoveryController extends Notifier<DiscoveryState> {
       lastPacketAt: _now(),
       lastDecision: 'accepted peer: ${peer.id} ${peer.address}:${peer.port}',
     );
+    if (routeCandidates.isNotEmpty) {
+      logger.debug(
+        AppLogCategory.discovery,
+        'Projected ${routeCandidates.length} route candidate(s) for ${peer.id}',
+      );
+    }
     await ref.read(peerRepositoryProvider).upsert(peer);
     ref
         .read(messageBusProvider)
@@ -393,15 +425,15 @@ class DiscoveryController extends Notifier<DiscoveryState> {
     }
 
     final config = ref.read(appConfigProvider);
-    final pairingProof = _currentPairingProof();
-    if (pairingProof == null) {
+    final discoveryGroupTag = _currentDiscoveryGroupTag();
+    if (discoveryGroupTag == null) {
       return null;
     }
     return DiscoveryPacket(
       type: type,
       protocolVersion: config.protocolVersion,
       userId: user.userId,
-      pairingProof: pairingProof,
+      discoveryGroupTag: discoveryGroupTag,
       instanceId: localIdentity.instanceId,
       displayName: user.displayName,
       deviceId: localIdentity.deviceId,
@@ -510,6 +542,7 @@ class DiscoveryController extends Notifier<DiscoveryState> {
           now: _now(),
         ),
       );
+      _ingestLocalRegistryRouteCandidate(entry);
       merged = _mergePeer(merged, peer);
       if (!ref.mounted) {
         return _applyPresence(merged);
@@ -526,15 +559,146 @@ class DiscoveryController extends Notifier<DiscoveryState> {
     state = state.copyWith(
       localRegistryEntryCount: entries.length,
       currentPairingUserId: _currentUser()?.userId,
-      currentPairingProofPreview: _pairingProofPreview(_currentPairingProof()),
+      currentDiscoveryGroupTagPreview: _discoveryGroupTagPreview(
+        _currentDiscoveryGroupTag(),
+      ),
     );
 
     return _applyPresence(merged);
   }
 
+  Future<List<PeerRouteCandidate>> _ingestDiscoveryRouteCandidates({
+    required DiscoveryDatagram datagram,
+    required DateTime receivedAt,
+  }) async {
+    final packet = datagram.packet;
+    final previousCandidateIds = _currentRouteCandidateIds();
+    List<NetworkInterfaceSnapshot> interfaces;
+    try {
+      interfaces = await ref.read(networkInterfaceInventoryProvider).scan();
+    } catch (error, stackTrace) {
+      ref
+          .read(appLoggerProvider)
+          .warning(
+            AppLogCategory.discovery,
+            'Failed to scan network interfaces for route candidates',
+            error: error,
+            stackTrace: stackTrace,
+          );
+      interfaces = const <NetworkInterfaceSnapshot>[];
+    }
+    if (!ref.mounted) {
+      return const <PeerRouteCandidate>[];
+    }
+    final localCandidates = const ConnectableInterfacePolicy()
+        .candidatesForRemote(
+          remoteAddress: datagram.address.address,
+          interfaces: interfaces,
+        );
+    final candidates = ref
+        .read(peerRouteCandidateProjectionProvider.notifier)
+        .ingestDiscoveryPacketCandidates(
+          packet: packet,
+          remoteAddress: datagram.address.address,
+          remotePort: datagram.port,
+          receivedAt: receivedAt,
+          currentProtocolVersion: ref.read(appConfigProvider).protocolVersion,
+          localCandidates: localCandidates,
+        );
+    _publishRouteCandidateEvents(
+      candidates: candidates,
+      previousCandidateIds: previousCandidateIds,
+      correlationId: packet.messageId.isEmpty
+          ? '${packet.userId}@${packet.deviceId}'
+          : packet.messageId,
+      foundEventType: 'PeerRouteCandidateFound',
+      updatedEventType: 'PeerRouteCandidateUpdated',
+    );
+    return candidates;
+  }
+
+  void _ingestLocalRegistryRouteCandidate(LocalInstancePresence entry) {
+    final previousCandidateIds = _currentRouteCandidateIds();
+    final candidate = ref
+        .read(peerRouteCandidateProjectionProvider.notifier)
+        .ingestLocalRegistry(presence: entry, now: _now());
+    _publishRouteCandidateEvents(
+      candidates: [candidate],
+      previousCandidateIds: previousCandidateIds,
+      correlationId: '${entry.userId}@${entry.deviceId}',
+      foundEventType: 'PeerRouteCandidateFound',
+      updatedEventType: 'PeerRouteCandidateUpdated',
+    );
+  }
+
+  void _expireRouteCandidates() {
+    final expired = ref
+        .read(peerRouteCandidateProjectionProvider.notifier)
+        .expire(
+          now: _now(),
+          ttl: ref.read(appConfigProvider).discoveryOfflineAfter,
+        );
+    for (final candidate in expired) {
+      _publishRouteCandidateEvent(
+        candidate: candidate,
+        eventType: 'PeerRouteCandidateExpired',
+        correlationId: candidate.peerId,
+        reasonCode: 'ttlExceeded',
+      );
+    }
+  }
+
+  Set<String> _currentRouteCandidateIds() {
+    return ref
+        .read(peerRouteCandidateProjectionProvider)
+        .map((candidate) => candidate.candidateId)
+        .toSet();
+  }
+
+  void _publishRouteCandidateEvents({
+    required Iterable<PeerRouteCandidate> candidates,
+    required Set<String> previousCandidateIds,
+    required String correlationId,
+    required String foundEventType,
+    required String updatedEventType,
+  }) {
+    for (final candidate in candidates) {
+      _publishRouteCandidateEvent(
+        candidate: candidate,
+        eventType: previousCandidateIds.contains(candidate.candidateId)
+            ? updatedEventType
+            : foundEventType,
+        correlationId: correlationId,
+      );
+    }
+  }
+
+  void _publishRouteCandidateEvent({
+    required PeerRouteCandidate candidate,
+    required String eventType,
+    required String correlationId,
+    String? reasonCode,
+  }) {
+    ref
+        .read(messageBusProvider)
+        .publish(
+          PeerRouteCandidateAppEvent(
+            eventId: _eventId(eventType),
+            occurredAt: _now(),
+            correlationId: correlationId,
+            source: 'DiscoveryController',
+            severity: AppEventSeverity.debug,
+            eventType: eventType,
+            peerId: candidate.peerId,
+            candidateId: candidate.candidateId,
+            reasonCode: reasonCode,
+          ),
+        );
+  }
+
   UserAccount? _currentUser() => ref.read(authControllerProvider).currentUser;
 
-  String? _currentPairingProof() {
+  String? _currentDiscoveryGroupTag() {
     final authState = ref.read(authControllerProvider);
     final user = authState.currentUser;
     final password = authState.sessionPassword;
@@ -545,34 +709,39 @@ class DiscoveryController extends Notifier<DiscoveryState> {
       return null;
     }
     return ref
-        .read(sharedVerifierServiceProvider)
-        .deriveVerifierBase64(userId: user.userId, password: password);
+        .read(discoveryGroupTagServiceProvider)
+        .deriveTag(
+          protocolVersion: ref.read(appConfigProvider).protocolVersion,
+          userId: user.userId,
+          password: password,
+        );
   }
 
-  String? _pairingProofPreview(String? value) {
+  String? _discoveryGroupTagPreview(String? value) {
     if (value == null || value.isEmpty) {
       return null;
     }
-    final safeLength = value.length < 12 ? value.length : 12;
-    return value.substring(0, safeLength);
+    return ref.read(discoveryGroupTagServiceProvider).preview(value);
   }
 
   bool _matchesCurrentPairingGroup(DiscoveryPacket packet) {
     final user = _currentUser();
-    final pairingProof = _currentPairingProof();
-    if (user == null || pairingProof == null) {
+    final discoveryGroupTag = _currentDiscoveryGroupTag();
+    if (user == null || discoveryGroupTag == null) {
       return false;
     }
-    return packet.userId == user.userId && packet.pairingProof == pairingProof;
+    return packet.userId == user.userId &&
+        packet.discoveryGroupTag == discoveryGroupTag;
   }
 
   bool _matchesCurrentPairingGroupEntry(LocalInstancePresence entry) {
     final user = _currentUser();
-    final pairingProof = _currentPairingProof();
-    if (user == null || pairingProof == null) {
+    final discoveryGroupTag = _currentDiscoveryGroupTag();
+    if (user == null || discoveryGroupTag == null) {
       return false;
     }
-    return entry.userId == user.userId && entry.pairingProof == pairingProof;
+    return entry.userId == user.userId &&
+        entry.discoveryGroupTag == discoveryGroupTag;
   }
 
   List<PeerNode> _filterCachedPeersForCurrentUser(List<PeerNode> peers) {
@@ -600,24 +769,6 @@ class DiscoveryController extends Notifier<DiscoveryState> {
       return;
     }
 
-    final session = ref.read(peerAuthSessionByPeerIdProvider(peer.id));
-    if (session?.isAuthenticated == true) {
-      return;
-    }
-    switch (session?.status) {
-      case PeerAuthStatus.connecting:
-      case PeerAuthStatus.challengeIssued:
-      case PeerAuthStatus.tokenSent:
-      case PeerAuthStatus.verifying:
-        return;
-      case null:
-      case PeerAuthStatus.idle:
-      case PeerAuthStatus.authenticated:
-      case PeerAuthStatus.rejected:
-      case PeerAuthStatus.failed:
-        break;
-    }
-
     final now = _now();
     final cooldown = ref.read(appConfigProvider).discoveryBroadcastInterval;
     final lastAttemptAt = _lastAutoHandshakeAt[peer.id];
@@ -632,7 +783,7 @@ class DiscoveryController extends Notifier<DiscoveryState> {
           AppLogCategory.discovery,
           'Auto-starting peer handshake for ${peer.id} ${peer.address}:${peer.port}',
         );
-    await ref.read(peerAuthControllerProvider.notifier).startHandshake(peer);
+    await ref.read(peerConnectionCoordinatorProvider.notifier).connect(peer);
   }
 
   Future<void> _dispose() async {

@@ -6,6 +6,7 @@ import 'package:sponzey_file_sharing/core/network/udp_port_config.dart';
 import 'package:sponzey_file_sharing/domain/network/network_interface_models.dart';
 import 'package:sponzey_file_sharing/infrastructure/auth/auth_packet.dart';
 import 'package:sponzey_file_sharing/infrastructure/auth/auth_transport.dart';
+import 'package:sponzey_file_sharing/infrastructure/control/control_socket_bind_policy.dart';
 import 'package:sponzey_file_sharing/infrastructure/control/control_transport.dart';
 
 void main() {
@@ -48,6 +49,43 @@ void main() {
       expect(control.sent.single.localEndpoint, endpoint);
     },
   );
+
+  test(
+    'adapter rejects selected local endpoint instead of ignoring it',
+    () async {
+      final auth = _FakeAuthTransport();
+      final control = AuthControlTransportAdapter(authTransport: auth);
+
+      expect(
+        () => control.send(
+          _packet(),
+          address: InternetAddress.loopbackIPv4,
+          port: 38401,
+          localEndpoint: const UdpInterfaceEndpoint(
+            role: UdpPortRole.control,
+            localAddress: '10.0.1.10',
+            port: 38401,
+            bindMode: UdpInterfaceBindMode.specificAddress,
+          ),
+        ),
+        throwsA(isA<UnsupportedError>()),
+      );
+      expect(auth.sent, isEmpty);
+    },
+  );
+
+  test('control socket policy never enables reusePort on Windows', () {
+    const windows = ControlSocketBindPolicy(
+      platform: ControlSocketPlatform.windows,
+    );
+    const macos = ControlSocketBindPolicy(
+      platform: ControlSocketPlatform.macos,
+    );
+
+    expect(windows.receiveSocket().reusePort, isFalse);
+    expect(windows.senderSocket().reusePort, isFalse);
+    expect(macos.senderSocket().reusePort, isTrue);
+  });
 }
 
 class _SentAuth {

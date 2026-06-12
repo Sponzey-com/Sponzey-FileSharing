@@ -3,12 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:sponzey_file_sharing/app/theme/app_spacing.dart';
 import 'package:sponzey_file_sharing/application/auth/auth_controller.dart';
-import 'package:sponzey_file_sharing/application/auth/peer_auth_controller.dart';
 import 'package:sponzey_file_sharing/application/discovery/discovery_controller.dart';
 import 'package:sponzey_file_sharing/application/discovery/discovery_overview_provider.dart';
 import 'package:sponzey_file_sharing/application/discovery/discovery_sorting.dart';
+import 'package:sponzey_file_sharing/application/network/peer_connection_summary_provider.dart';
 import 'package:sponzey_file_sharing/application/transfer/transfer_controller.dart';
-import 'package:sponzey_file_sharing/domain/entities/peer_auth_session.dart';
 import 'package:sponzey_file_sharing/domain/entities/peer_node.dart';
 import 'package:sponzey_file_sharing/presentation/transfers/transfers_screen.dart';
 import 'package:sponzey_file_sharing/presentation/shared/page_header.dart';
@@ -152,22 +151,24 @@ class _PeersScreenState extends ConsumerState<PeersScreen> {
                       _DiscoveryDiagnosticsCard(state: discoveryState),
                     ],
                   )
-                : GridView.builder(
-                    controller: _scrollController,
-                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: MediaQuery.sizeOf(context).width < 1200
-                          ? 1
-                          : 2,
-                      mainAxisSpacing: AppSpacing.lg,
-                      crossAxisSpacing: AppSpacing.lg,
-                      childAspectRatio: MediaQuery.sizeOf(context).width < 1200
-                          ? 2.6
-                          : 1.72,
-                    ),
-                    itemCount: peers.length,
-                    itemBuilder: (context, index) {
-                      final peer = peers[index];
-                      return _PeerCard(peer: peer);
+                : LayoutBuilder(
+                    builder: (context, constraints) {
+                      return GridView.builder(
+                        controller: _scrollController,
+                        gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                          maxCrossAxisExtent: constraints.maxWidth < 720
+                              ? 720
+                              : 560,
+                          mainAxisExtent: 260,
+                          mainAxisSpacing: AppSpacing.lg,
+                          crossAxisSpacing: AppSpacing.lg,
+                        ),
+                        itemCount: peers.length,
+                        itemBuilder: (context, index) {
+                          final peer = peers[index];
+                          return _PeerCard(peer: peer);
+                        },
+                      );
                     },
                   ),
           ),
@@ -221,8 +222,8 @@ class _DiscoveryDiagnosticsCard extends StatelessWidget {
                 value: state.currentPairingUserId ?? '-',
               ),
               _DiagnosticsLine(
-                label: 'Proof Preview',
-                value: state.currentPairingProofPreview ?? '-',
+                label: 'Group Tag Preview',
+                value: state.currentDiscoveryGroupTagPreview ?? '-',
               ),
               _DiagnosticsLine(
                 label: 'Last Broadcast',
@@ -287,7 +288,7 @@ class _PeerCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Consumer(
       builder: (context, ref, _) {
-        final authSession = ref.watch(peerAuthSessionByPeerIdProvider(peer.id));
+        final summary = ref.watch(peerConnectionSummaryProvider(peer));
 
         return SponzeyCard(
           child: Column(
@@ -306,8 +307,8 @@ class _PeerCard extends StatelessWidget {
                     ),
                   ),
                   StatusBadge(
-                    label: _statusLabel(authSession, peer),
-                    backgroundColor: _sessionBadgeBackground(authSession, peer),
+                    label: summary.label,
+                    backgroundColor: _statusBackground(summary.status),
                   ),
                 ],
               ),
@@ -327,24 +328,18 @@ class _PeerCard extends StatelessWidget {
               ),
               const SizedBox(height: AppSpacing.md),
               Text(
-                _statusDescription(authSession),
+                summary.description,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
               const SizedBox(height: AppSpacing.xs),
-              Text(
-                _routeDescription(authSession, peer),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
               NetworkPathSummary(peerId: peer.id),
               const Spacer(),
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: authSession?.isAuthenticated == true
+                  onPressed: summary.canSendFiles
                       ? () {
                           ref
                               .read(transferControllerProvider.notifier)
@@ -353,9 +348,7 @@ class _PeerCard extends StatelessWidget {
                         }
                       : null,
                   child: Text(
-                    authSession?.isAuthenticated == true
-                        ? '파일 보내기'
-                        : '자동 연결 대기 중',
+                    summary.canSendFiles ? '파일 보내기' : '자동 연결 대기 중',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -368,72 +361,19 @@ class _PeerCard extends StatelessWidget {
     );
   }
 
-  Color _badgeBackground(PeerPresence presence) {
-    switch (presence) {
-      case PeerPresence.online:
+  Color _statusBackground(PeerConnectionProductStatus status) {
+    switch (status) {
+      case PeerConnectionProductStatus.connected:
         return const Color(0xFFE8F7EE);
-      case PeerPresence.stale:
+      case PeerConnectionProductStatus.checking:
+      case PeerConnectionProductStatus.authenticating:
+      case PeerConnectionProductStatus.stale:
         return const Color(0xFFFFF4D6);
-      case PeerPresence.offline:
+      case PeerConnectionProductStatus.failed:
+      case PeerConnectionProductStatus.offline:
         return const Color(0xFFFDEBE8);
-      case PeerPresence.incompatible:
+      case PeerConnectionProductStatus.incompatible:
         return const Color(0xFFEAF1FF);
-    }
-  }
-
-  String _statusLabel(PeerAuthSession? authSession, PeerNode peer) {
-    if (authSession != null) {
-      return authSession.statusLabel;
-    }
-    return peer.statusLabel;
-  }
-
-  String _statusDescription(PeerAuthSession? authSession) {
-    if (authSession == null) {
-      return '피어를 발견했습니다. 자동 연결을 준비하는 중입니다.';
-    }
-    if (authSession.message != null && authSession.message!.trim().isNotEmpty) {
-      return authSession.message!;
-    }
-    if (authSession.isAuthenticated) {
-      return '파일 전송 준비가 완료되었습니다.';
-    }
-    if (authSession.status == PeerAuthStatus.connecting ||
-        authSession.status == PeerAuthStatus.challengeIssued ||
-        authSession.status == PeerAuthStatus.tokenSent ||
-        authSession.status == PeerAuthStatus.verifying) {
-      return '자동 핸드셰이크를 진행하는 중입니다.';
-    }
-    if (authSession.status == PeerAuthStatus.rejected ||
-        authSession.status == PeerAuthStatus.failed) {
-      return '자동 연결이 다시 시도됩니다.';
-    }
-    return '자동 연결을 다시 시도하는 중입니다.';
-  }
-
-  String _routeDescription(PeerAuthSession? authSession, PeerNode peer) {
-    final address = authSession?.peerAddress ?? peer.address;
-    final port = authSession?.peerPort ?? peer.port;
-    return 'Route $address:$port';
-  }
-
-  Color _sessionBadgeBackground(PeerAuthSession? authSession, PeerNode peer) {
-    if (authSession == null) {
-      return _badgeBackground(peer.presence);
-    }
-    switch (authSession.status) {
-      case PeerAuthStatus.idle:
-        return _badgeBackground(peer.presence);
-      case PeerAuthStatus.connecting:
-      case PeerAuthStatus.challengeIssued:
-      case PeerAuthStatus.tokenSent:
-      case PeerAuthStatus.verifying:
-        return const Color(0xFFFFF4D6);
-      case PeerAuthStatus.authenticated:
-        return const Color(0xFFE8F7EE);
-      case PeerAuthStatus.rejected:
-      case PeerAuthStatus.failed:
-        return const Color(0xFFFDEBE8);
     }
   }
 }

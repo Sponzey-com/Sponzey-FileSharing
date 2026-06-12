@@ -15,11 +15,41 @@ class NetworkPathSummary extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final diagnostics = ref.watch(peerPathDiagnosticsProvider(peerId));
-    return Text(
-      debug ? diagnostics.debugSummary : diagnostics.productSummary,
-      maxLines: debug ? 2 : 1,
-      overflow: TextOverflow.ellipsis,
-      style: Theme.of(context).textTheme.bodySmall,
+    if (!debug) {
+      return Text(
+        diagnostics.productSummary,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: Theme.of(context).textTheme.bodySmall,
+      );
+    }
+
+    final rows = diagnostics.candidateDebugRows.take(6).toList(growable: false);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          diagnostics.debugSummary,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        for (final row in rows)
+          Text(
+            row,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        if (diagnostics.candidateDebugRows.length > rows.length)
+          Text(
+            '+${diagnostics.candidateDebugRows.length - rows.length} candidates',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+      ],
     );
   }
 }

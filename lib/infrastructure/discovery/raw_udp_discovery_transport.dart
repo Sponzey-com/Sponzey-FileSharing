@@ -95,7 +95,8 @@ class RawUdpDiscoveryTransport implements DiscoveryTransport {
     final payload = packet.encode();
 
     for (final target in _broadcastTargets) {
-      final targetSocket = _sendSocketsByLocalAddress[target.localAddress] ?? socket;
+      final targetSocket =
+          _sendSocketsByLocalAddress[target.localAddress] ?? socket;
       targetSocket.send(payload, InternetAddress(target.address), port);
     }
   }
@@ -198,7 +199,8 @@ class RawUdpDiscoveryTransport implements DiscoveryTransport {
     }
   }
 
-  Future<List<NetworkInterfaceSnapshot>> _resolvePreferredInterfaceSnapshots() async {
+  Future<List<NetworkInterfaceSnapshot>>
+  _resolvePreferredInterfaceSnapshots() async {
     final snapshots = await const DartIoNetworkInterfaceInventory().scan();
     return selectPreferredInterfaces(snapshots);
   }
@@ -207,7 +209,10 @@ class RawUdpDiscoveryTransport implements DiscoveryTransport {
     required List<NetworkInterfaceSnapshot> interfaces,
     required int port,
   }) {
-    return const DiscoveryTargetBuilder().build(interfaces: interfaces, port: port);
+    return const DiscoveryTargetBuilder().build(
+      interfaces: interfaces,
+      port: port,
+    );
   }
 
   Future<void> _initializeInterfaceSendSockets() async {
@@ -251,35 +256,51 @@ class RawUdpDiscoveryTransport implements DiscoveryTransport {
   static List<NetworkInterfaceSnapshot> selectPreferredInterfaces(
     Iterable<NetworkInterfaceSnapshot> interfaces,
   ) {
-    List<NetworkInterfaceSnapshot> select(
-      bool Function(NetworkInterfaceSnapshot interface) predicate,
-    ) {
-      return interfaces
-          .where((interface) => interface.activeIpv4Addresses.isNotEmpty)
-          .where(predicate)
-          .toList(growable: false)
-        ..sort((a, b) => a.id.compareTo(b.id));
-    }
+    final selected = interfaces
+        .where((interface) => interface.activeIpv4Addresses.isNotEmpty)
+        .where(_isDefaultDiscoveryInterface)
+        .toList(growable: false);
+    selected.sort((a, b) {
+      final priorityCompare = _interfacePriority(
+        a.typeHint,
+      ).compareTo(_interfacePriority(b.typeHint));
+      if (priorityCompare != 0) {
+        return priorityCompare;
+      }
+      return a.id.compareTo(b.id);
+    });
+    return selected;
+  }
 
-    final ethernetOnly = select(
-      (interface) => interface.typeHint == InterfaceTypeHint.ethernet,
-    );
-    if (ethernetOnly.isNotEmpty) {
-      return ethernetOnly;
+  static bool _isDefaultDiscoveryInterface(NetworkInterfaceSnapshot interface) {
+    switch (interface.typeHint) {
+      case InterfaceTypeHint.loopback:
+      case InterfaceTypeHint.vpn:
+      case InterfaceTypeHint.virtual:
+        return false;
+      case InterfaceTypeHint.ethernet:
+      case InterfaceTypeHint.bridge:
+      case InterfaceTypeHint.wifi:
+      case InterfaceTypeHint.unknown:
+        return true;
     }
+  }
 
-    final nonVirtualLan = select(
-      (interface) =>
-          interface.typeHint != InterfaceTypeHint.loopback &&
-          interface.typeHint != InterfaceTypeHint.vpn &&
-          interface.typeHint != InterfaceTypeHint.virtual &&
-          interface.typeHint != InterfaceTypeHint.bridge,
-    );
-    if (nonVirtualLan.isNotEmpty) {
-      return nonVirtualLan;
+  static int _interfacePriority(InterfaceTypeHint typeHint) {
+    switch (typeHint) {
+      case InterfaceTypeHint.ethernet:
+        return 0;
+      case InterfaceTypeHint.bridge:
+        return 1;
+      case InterfaceTypeHint.wifi:
+        return 2;
+      case InterfaceTypeHint.unknown:
+        return 3;
+      case InterfaceTypeHint.loopback:
+      case InterfaceTypeHint.vpn:
+      case InterfaceTypeHint.virtual:
+        return 4;
     }
-
-    return select((_) => true);
   }
 
   static InternetAddress? directedBroadcastFor(InternetAddress address) {
@@ -318,7 +339,10 @@ class RawUdpDiscoveryTransport implements DiscoveryTransport {
     return socket;
   }
 
-  Future<RawDatagramSocket> _bindSocketOnAddress(String address, int port) async {
+  Future<RawDatagramSocket> _bindSocketOnAddress(
+    String address,
+    int port,
+  ) async {
     final socket = await _bindSocketWithPlatformFallback(
       InternetAddress(address),
       port,

@@ -1,177 +1,186 @@
 # Sponzey FileSharing
 
-Sponzey FileSharing은 같은 로컬 네트워크에 연결된 장치들이 외부 서버 없이 서로를 발견하고, 인증된 상대에게 파일을 빠르게 전송할 수 있도록 만드는 Flutter Desktop 기반 파일 공유 앱입니다.
+[English](README.md) | [한국어](README.ko.md)
 
-이 프로젝트는 단순한 파일 복사 도구가 아니라, 내부망에서 반복적으로 발생하는 장치 간 파일 배포, 테스트 산출물 전달, 로그 수집, 연구실/사무실 PC 간 공유를 안정적으로 처리하는 것을 목표로 합니다.
+Sponzey FileSharing is a Flutter Desktop file sharing app designed for devices on the same local network to discover each other without an external server and transfer files quickly to authenticated peers.
 
-## 핵심 목표
+This project is not just a simple file copy utility. It is intended to reliably handle repeated internal-network workflows such as device-to-device file distribution, test artifact delivery, log collection, and file sharing between office or lab machines.
 
-- 동일 로컬 네트워크 안에서 자동으로 노드를 탐색합니다.
-- 아이디와 패스워드 기반 인증을 거친 상대와만 파일 전송 세션을 엽니다.
-- UDP 기반 통신으로 낮은 지연의 전송 경험을 제공합니다.
-- 패킷 손실, 중복, 재전송, 타임아웃을 고려해 UDP 위에서 신뢰성을 보강합니다.
-- 1:1 전송과 1:N 일괄 전송을 모두 지원하는 구조를 갖춥니다.
-- macOS, Windows, Linux 데스크톱 환경에서 동작하는 앱을 지향합니다.
-- 중앙 웹 백엔드나 외부 클라우드에 의존하지 않는 내부망 중심 제품으로 유지합니다.
+The project explicitly targets environments where a single machine can have multiple active network paths at the same time. It should use every available Ethernet interface for peer discovery, connection establishment, and file transfer, including multiple physical NICs, USB Ethernet adapters, internal Ethernet bridge networks, and bridge-based internal networks exposed by virtualization environments.
 
-## 사용 시나리오
+## Core Goals
 
-- 같은 사무실, 연구실, 강의실 네트워크 안에서 여러 PC 간 파일을 빠르게 공유해야 하는 경우
-- 개발 장비와 테스트 장비 사이에 빌드 결과물, 로그, 설정 파일을 반복 전달해야 하는 경우
-- 특정 사용자 또는 특정 장치에만 파일을 보내야 하는 경우
-- 여러 장치에 동일 파일을 동시에 배포해야 하는 경우
-- 외부 클라우드 업로드가 어렵거나 보안상 내부망 안에서만 파일을 이동해야 하는 경우
+- Automatically discover nodes on the same local network.
+- Open file transfer sessions only with peers authenticated through ID/password-based credentials.
+- Provide a low-latency transfer experience over UDP.
+- Add reliability on top of UDP by explicitly handling packet loss, duplication, retransmission, and timeouts.
+- Support both 1:1 transfer and 1:N distribution.
+- Use all available Ethernet interfaces as discovery, connection, and transfer path candidates.
+- Target desktop environments on macOS, Windows, and Linux.
+- Stay focused on internal-network usage without depending on a central web backend or external cloud infrastructure.
 
-## 주요 기능
+## Use Cases
 
-### 노드 탐색
+- Quickly sharing files among multiple PCs in the same office, lab, or classroom network.
+- Repeatedly delivering build artifacts, logs, or configuration files between development and test machines.
+- Sending files only to a specific user or device.
+- Distributing the same file to multiple devices at once.
+- Moving files only inside an internal network where external cloud upload is difficult or not allowed.
+- Exchanging files with devices on different internal segments from a workstation that has two or more Ethernet cards.
+- Exchanging files with devices connected through internal Ethernet bridge networks or virtualized bridge networks in addition to physical NICs.
 
-앱 인스턴스는 같은 네트워크 안에서 실행 중인 다른 노드를 탐색합니다. 탐색 결과에는 사용자 ID, 장치 이름, 온라인 상태, 마지막 응답 시각, 프로토콜 버전 같은 정보를 표시하는 것을 목표로 합니다.
+## Main Features
 
-### 인증 기반 연결
+### Node Discovery
 
-파일 전송은 인증된 상대에게만 허용합니다. 프로젝트 계획의 기준 인증 방식은 ID/PW 기반 로그인과 password-derived JWT 토큰을 이용한 짧은 수명의 상호 인증입니다.
+Each app instance discovers other running nodes on the same network. The intended discovery result includes information such as user ID, device name, online status, last response timestamp, and protocol version.
 
-인증 흐름은 다음 원칙을 따릅니다.
+Discovery is not designed around a single NIC. The project aims to scan all available Ethernet interfaces and manage discovery, control, and data paths separately per interface IPv4 candidate. That means a machine with two Ethernet cards, a motherboard NIC plus a USB NIC, or a test environment with an internal Ethernet bridge should treat each path as an independent connection candidate.
 
-- 비밀번호 평문 저장 금지
-- 인증 전 민감 데이터 전송 금지
-- 짧은 만료 시간, nonce, `jti`를 포함한 토큰 사용
-- 인증된 세션에서만 전송 작업 생성
-- 허용된 사용자와 장치 정책을 기반으로 접근 제어
+### Authentication-Based Connection
 
-### UDP 기반 파일 전송
+File transfer is allowed only to authenticated peers. The planned reference authentication model uses ID/password-based login and short-lived mutual authentication built on password-derived JWT tokens.
 
-전송 기반은 UDP입니다. UDP는 연결 지연이 낮고 로컬 네트워크에서 빠른 전송에 유리하지만, 신뢰성을 직접 보강해야 합니다.
+The authentication flow follows these rules:
 
-따라서 전송 계층은 다음 문제를 명시적으로 다룹니다.
+- Never store plaintext passwords.
+- Never transmit sensitive data before authentication.
+- Use short expiration, nonce, and `jti` in tokens.
+- Create transfer jobs only within authenticated sessions.
+- Apply access control based on allowed users and device policies.
 
-- 패킷 손실
-- 패킷 중복
-- 순서 어긋남
-- 재전송
-- 타임아웃
-- 전송 취소
-- 부분 실패와 재시도
+### UDP-Based File Transfer
 
-### 다중 접속과 전송 큐
+The transfer transport is UDP. UDP is favorable for low connection latency and fast transfer inside local networks, but reliability has to be reinforced explicitly.
 
-하나의 앱 인스턴스는 송신자이자 수신자이며, 동시에 여러 peer와 통신할 수 있는 로컬 엔드포인트 역할을 합니다.
+The transfer layer therefore handles:
 
-전송 작업은 독립적인 `transfer job` 또는 세션 단위로 관리하며, 다중 파일 전송과 1:N 배포에서 상태가 섞이지 않도록 설계합니다.
+- Packet loss
+- Packet duplication
+- Out-of-order delivery
+- Retransmission
+- Timeout
+- Transfer cancellation
+- Partial failure and retry
 
-### 수신 정책과 이력
+### Multi-Peer Connectivity and Transfer Queue
 
-수신자는 정책에 따라 파일을 자동 수신하거나 승인 후 수신할 수 있습니다. 전송 결과는 이력으로 남기며, 실패 원인, 상대 노드, 파일명, 크기, 시간 같은 진단 정보를 확인할 수 있도록 합니다.
+A single app instance acts as both sender and receiver and serves as a local endpoint capable of communicating with multiple peers at the same time.
 
-## 포함 범위
+Transfer work is managed as independent `transfer job` or session units so that state does not leak across multi-file transfer and 1:N distribution flows.
 
-- Flutter Desktop 앱
-- 로컬 네트워크 노드 탐색
-- UDP 기반 제어 및 데이터 전송
-- 로컬 계정 생성과 로그인
-- 인증된 peer 연결
-- 단일 파일 및 다중 파일 전송
-- 1:1 및 1:N 전송 구조
-- 전송 큐, 진행률, 실패, 취소, 재시도 상태 관리
-- 전송 이력과 로그
-- macOS, Windows, Linux 지원을 고려한 구조
+### Receive Policy and History
 
-## 제외 범위
+Receivers can automatically accept files or require approval depending on policy. Transfer results should remain in history so that users can inspect diagnostics such as failure reason, peer node, filename, size, and timestamp.
 
-- 웹 애플리케이션
-- 모바일 앱
-- 중앙 웹 백엔드
-- 외부 클라우드 저장소 연동
-- 인터넷 원격 전송
+## In Scope
+
+- Flutter Desktop app
+- Local network node discovery
+- UDP-based control and data transfer
+- Local account creation and login
+- Authenticated peer connection
+- Single-file and multi-file transfer
+- 1:1 and 1:N transfer structure
+- Transfer queue, progress, failure, cancel, and retry state management
+- Transfer history and logs
+- A structure that accounts for macOS, Windows, and Linux support
+
+## Out of Scope
+
+- Web application
+- Mobile app
+- Central web backend
+- External cloud storage integration
+- Internet remote transfer
 - NAT traversal
-- 조직 관리자 콘솔
-- 실시간 공동 편집
-- 파일 버전 관리
+- Organization admin console
+- Real-time collaborative editing
+- File version management
 
-## 기술 스택
+## Tech Stack
 
 - Flutter Desktop
 - Dart
 - Riverpod
 - Drift / SQLite
-- UDP socket 기반 로컬 네트워크 통신
-- 로컬 보안 저장소
-- Argon2id 기반 비밀번호 해싱
-- JWT 기반 인증 토큰
+- UDP socket based local network communication
+- Local secure storage
+- Argon2id based password hashing
+- JWT based authentication tokens
 
-자세한 의존성은 [pubspec.yaml](pubspec.yaml)을 기준으로 확인합니다.
+Check [pubspec.yaml](pubspec.yaml) for exact dependencies.
 
-## 프로젝트 구조
+## Project Structure
 
 ```text
 lib/
-  app/                 앱 구성, 라우터, 테마, AppConfig
-  application/         유스케이스, 컨트롤러, 상태 조합
-  core/                에러, 로깅 등 공통 기반
-  domain/              엔티티, 도메인 서비스, 순수 규칙
-  infrastructure/      UDP, 인증, DB, 파일 시스템, 플랫폼 구현
-  presentation/        Flutter 화면과 위젯
+  app/                 app composition, router, theme, AppConfig
+  application/         use cases, controllers, state composition
+  core/                shared foundations such as errors and logging
+  domain/              entities, domain services, pure rules
+  infrastructure/      UDP, auth, DB, file system, platform implementations
+  presentation/        Flutter screens and widgets
 
 test/
-  application/         애플리케이션 계층 테스트
-  infrastructure/      인프라 구현 테스트
+  application/         application-layer tests
+  infrastructure/      infrastructure implementation tests
 ```
 
-이 저장소는 Layered Architecture와 Clean Architecture를 기준으로 유지합니다.
+This repository follows Layered Architecture and Clean Architecture.
 
-의존 방향은 다음과 같습니다.
+Dependency direction:
 
-- `presentation`은 `application`을 사용합니다.
-- `application`은 `domain`을 사용합니다.
-- `infrastructure`는 외부 시스템과 플랫폼 구현을 담당합니다.
-- `domain`은 Flutter, Riverpod, Drift, UDP socket, 파일 시스템에 의존하지 않습니다.
+- `presentation` uses `application`.
+- `application` uses `domain`.
+- `infrastructure` handles external systems and platform-specific implementations.
+- `domain` does not depend on Flutter, Riverpod, Drift, UDP sockets, or the file system.
 
-## 상태 관리와 내부 절차
+## State Management and Internal Procedures
 
-인증, 피어 탐색, 연결, 파일 전송, 재시도, 실패 복구처럼 절차와 상태가 있는 기능은 상태 머신을 기준으로 관리합니다.
+Features with explicit procedures and lifecycle, such as authentication, peer discovery, connection, file transfer, retry, and failure recovery, are managed as state machines.
 
-상태 머신 적용 기준은 다음과 같습니다.
+State machine rules:
 
-- 상태는 명시적인 enum, sealed class, 값 객체 등으로 표현합니다.
-- 허용 가능한 전이와 불가능한 전이를 코드와 테스트로 고정합니다.
-- UI 조건문이나 네트워크 콜백 안에 상태 전이 규칙을 흩어놓지 않습니다.
-- 임의 boolean 조합으로 복잡한 절차를 관리하지 않습니다.
-- 상태 전이에 따른 부작용은 계층 경계를 지켜 명시적으로 실행합니다.
+- Represent state explicitly with enums, sealed classes, or value objects.
+- Lock valid and invalid transitions in code and tests.
+- Do not scatter transition rules across UI conditionals or network callbacks.
+- Do not manage complex procedures with arbitrary boolean combinations.
+- Execute side effects from state transitions explicitly while respecting layer boundaries.
 
-계층 간 비동기 이벤트 전달이 필요한 경우 MessageBus를 사용합니다. MessageBus는 이미 발생한 사실을 알리는 이벤트 전달 장치이며, 명령 실행 경로를 숨기는 용도로 사용하지 않습니다.
+When asynchronous cross-component event delivery is needed across layers, use MessageBus. MessageBus is for publishing facts that already happened, not for hiding command execution paths.
 
-## 설정 원칙
+## Configuration Principles
 
-이 프로젝트는 외부 설정 파일에 의존하는 방식을 최소화합니다.
+This project minimizes dependence on external configuration files.
 
-- 새 YAML, JSON, dotenv 파일을 쉽게 추가하지 않습니다.
-- 런타임 중간에 환경 설정을 삽입하거나 변경하는 방식은 사용하지 않습니다.
-- 외부 환경 상수는 프로세스 최초 부트스트랩 시점에만 받아들입니다.
-- 부트스트랩 이후에는 명시적인 인자, 생성자 파라미터, provider override, 유스케이스 입력값으로 값을 전달합니다.
-- 현재 앱 구성의 기준점은 `AppConfig`와 `bootstrap(config: ...)`입니다.
+- Do not casually add YAML, JSON, or dotenv files.
+- Do not inject or mutate environment settings in the middle of a running process.
+- Accept external environment constants only at the initial bootstrap stage.
+- After bootstrap, pass values only through explicit arguments, constructor parameters, provider overrides, or use case inputs.
+- The current app composition baseline is `AppConfig` and `bootstrap(config: ...)`.
 
-## 로그 정책
+## Logging Policy
 
-로그는 세 가지 목적 기준으로 나눕니다.
+Logs are divided into three operational purposes:
 
-- Product: 프로덕트용 최소 로그. 사용자 영향이 있는 시작, 실패, 복구, 보안 이벤트 중심입니다.
-- Debug: 현장 확인용 디버그 로그. 네트워크, 인증, 전송 상태 확인에 사용합니다.
-- Development: 개발 및 테스트 중 상세 확인용 로그. 내부 상태 전이와 테스트 보조 정보에 사용합니다.
+- Product: minimal product logs for user-impacting start, failure, recovery, and security events.
+- Debug: field-debug logs for checking network, authentication, and transfer state.
+- Development: detailed logs used during development and testing for state transitions and test support.
 
-구현은 기존 `AppLogger`, `AppLogLevel`, `AppLogCategory`를 기준으로 합니다. 패스워드, 토큰, 파일 원문, 개인 식별 정보, 전체 경로처럼 민감한 값은 로그에 남기지 않습니다.
+Implementation should follow existing `AppLogger`, `AppLogLevel`, and `AppLogCategory`. Sensitive values such as passwords, tokens, raw file contents, personal identifiers, and full file paths must not be written to logs.
 
-## 실행
+## Running
 
-Flutter SDK가 설치되어 있어야 합니다.
+Flutter SDK must be installed.
 
-의존성 설치:
+Install dependencies:
 
 ```sh
 flutter pub get
 ```
 
-데스크톱 실행:
+Run on desktop:
 
 ```sh
 flutter run -d macos
@@ -179,131 +188,142 @@ flutter run -d windows
 flutter run -d linux
 ```
 
-플랫폼별 실행 가능 여부는 로컬 Flutter 환경과 데스크톱 지원 설정에 따라 달라질 수 있습니다.
+Actual platform availability depends on the local Flutter environment and desktop support configuration.
 
-## Windows 빌드
+## Windows Build
 
-Flutter Windows 데스크톱 릴리스 빌드는 Windows 호스트에서 실행해야 합니다. macOS나 Linux 호스트에서는 `flutter build windows`가 지원되지 않습니다.
+Flutter Windows desktop release builds must be executed on a Windows host. `flutter build windows` is not supported from macOS or Linux hosts.
 
-Windows 개발 장비 또는 Windows VM에서 다음을 실행합니다.
+Run the following on a Windows development machine or Windows VM:
 
 ```bat
 scripts\build_windows.bat
 ```
 
-PowerShell을 직접 사용할 수도 있습니다.
+You can also run PowerShell directly:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1
 ```
 
-테스트를 생략하고 빌드만 확인해야 할 때:
+To skip tests and only confirm the build:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1 -SkipTests
 ```
 
-plugin symlink 또는 캐시 문제가 의심될 때:
+When plugin symlink or cache issues are suspected:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1 -Clean
 ```
 
-빌드 산출물은 다음 경로에 생성됩니다.
+Build output:
 
 ```text
 build\windows\x64\runner\Release
 ```
 
-Windows 빌드 사전 조건:
+Windows build prerequisites:
 
-- Flutter SDK 설치
-- Visual Studio 2022 Build Tools 또는 Visual Studio 2022 설치
-- “Desktop development with C++” workload 설치
-- Windows desktop support 활성화: `flutter config --enable-windows-desktop`
+- Flutter SDK installed
+- Visual Studio 2022 Build Tools or Visual Studio 2022 installed
+- `Desktop development with C++` workload installed
+- Windows desktop support enabled: `flutter config --enable-windows-desktop`
 
-### Windows symlink 오류
+### Windows Symlink Error
 
-다음 오류가 나면 프로젝트 위치와 Flutter/Pub cache 위치의 드라이브 또는 파일시스템이 맞지 않는 상태다.
+If you see the following error, the project location and the Flutter/Pub cache location are on incompatible drives or file systems:
 
 ```text
 Creating symlink ... failed with ERROR_INVALID_FUNCTION
 ```
 
-가장 안정적인 해결책은 프로젝트를 Windows 로컬 NTFS 드라이브로 옮기는 것이다. Parallels/VMware 공유 폴더, 네트워크 드라이브, `X:\` 같은 매핑 드라이브에서는 Flutter plugin symlink 생성이 실패할 수 있다.
+The most reliable fix is to move the project to a local Windows NTFS drive. Flutter plugin symlink creation may fail on Parallels or VMware shared folders, network drives, or mapped drives such as `X:\`.
 
-권장 위치 예시:
+Recommended location:
 
 ```bat
 C:\Work\SponzeyFileSharing
 ```
 
-그 뒤 Windows에서 다시 실행한다.
+Then run again on Windows:
 
 ```bat
 scripts\build_windows.bat
 ```
 
-스크립트는 기본적으로 프로젝트 내부 `.dart_tool\pub-cache`를 `PUB_CACHE`로 사용해 `C:\Users\...\Pub\Cache`와 프로젝트 드라이브가 갈라지는 문제를 줄인다. 그래도 같은 오류가 나면 현재 드라이브가 symlink를 지원하지 않는 것이므로 프로젝트를 `C:\` 같은 로컬 NTFS 드라이브로 옮겨야 한다.
+The script uses the project-local `.dart_tool\pub-cache` as `PUB_CACHE` by default to reduce problems caused by splitting `C:\Users\...\Pub\Cache` and the project drive. If the same error still occurs, the current drive likely does not support symlinks and the project should be moved to a local NTFS drive such as `C:\`.
 
-## 테스트
+## GitHub Actions Release
 
-전체 테스트:
+The repository includes [.github/workflows/desktop-release.yml](.github/workflows/desktop-release.yml) for desktop CI and release packaging.
+
+- Pull requests to `main` build macOS, Windows, and Linux artifacts without publishing a release.
+- Pushing a tag like `v1.0.0` builds all three desktop targets and publishes a GitHub Release.
+- Manual `workflow_dispatch` can publish a release for the provided `release_tag`.
+- Release assets are uploaded as `sponzey-file-sharing-macos-*.zip`, `sponzey-file-sharing-windows-*.zip`, and `sponzey-file-sharing-linux-*.tar.gz`.
+
+## Tests
+
+Run all tests:
 
 ```sh
 flutter test
 ```
 
-특정 테스트:
+Run a specific test:
 
 ```sh
 flutter test test/application/transfer/transfer_controller_test.dart
 ```
 
-기능 변경은 TDD를 기본으로 진행합니다.
+Feature changes should follow TDD.
 
-1. 변경할 동작을 테스트로 표현합니다.
-2. 실패를 확인합니다.
-3. 최소 구현으로 통과시킵니다.
-4. 중복, 이름, 계층 위반을 정리합니다.
-5. 관련 테스트를 다시 실행합니다.
+1. Express the behavior as a test.
+2. Confirm the failure.
+3. Pass it with the smallest implementation.
+4. Clean up duplication, naming, and layer violations.
+5. Re-run the related tests.
 
-## 개발 문서
+## Development Documents
 
-- [AGENTS.md](AGENTS.md): 이 저장소에서 반드시 지켜야 하는 개발 원칙과 에이전트 작업 규칙
-- [plan.md](plan.md): 제품 요구사항, 아키텍처, 프로토콜, 단계별 개발 계획
-- [.tasks/phase001/README.md](.tasks/phase001/README.md): phase001 태스크 인덱스
-- [.tasks/phase002/README.md](.tasks/phase002/README.md): 상태 머신, MessageBus, UDP 포트 분리 기준의 phase002 태스크 인덱스
+- [AGENTS.md](AGENTS.md): mandatory development principles and agent workflow rules for this repository
+- [plan.md](plan.md): product requirements, architecture, protocol, and phased development plan
+- [.tasks/plan.md](.tasks/plan.md): current connection-first plan for multi-Ethernet stabilization
+- [.tasks/phase001/README.md](.tasks/phase001/README.md): phase001 task index
+- [.tasks/phase002/README.md](.tasks/phase002/README.md): phase002 task index for state machines, MessageBus, and UDP port separation
+- [.tasks/phase003/README.md](.tasks/phase003/README.md): phase003 task index for full multi-Ethernet interface support
 
-작업 태스크는 phase별로 `.tasks/phase001`, `.tasks/phase002` 아래에 정리되어 있습니다.
+Tasks are organized under `.tasks/phase001`, `.tasks/phase002`, and `.tasks/phase003`. The current cross-phase connection-first plan is kept at `.tasks/plan.md`.
 
-## 현재 개발 흐름
+## Current Development Flow
 
-phase001은 다음 흐름을 기준으로 진행됩니다.
+phase001 follows this sequence:
 
-1. Flutter Desktop 골격과 공통 기반 구축
-2. 로컬 계정, 설정 저장소, 보안 저장소 구축
-3. UDP 노드 탐색과 피어 목록 UI
-4. password-derived JWT 상호 인증과 허용 사용자 정책
-5. 단일 파일 전송 MVP와 수신 파이프라인
-6. UDP 신뢰성 보강, 재전송, 성능 측정
-7. 다중 파일, 1:N 전송, 전송 큐 관리
-8. 수신 정책, 이력/로그, 설정 화면 고도화
-9. 플랫폼 안정화, 패키징, 베타 검증
+1. Build the Flutter Desktop skeleton and shared foundations.
+2. Build local account, settings storage, and secure storage.
+3. Implement UDP node discovery and the peer list UI.
+4. Implement password-derived JWT mutual authentication and allowed user policy.
+5. Implement the single-file transfer MVP and receive pipeline.
+6. Reinforce UDP reliability, retransmission, and performance measurement.
+7. Implement multi-file transfer, 1:N transfer, and queue management.
+8. Improve receive policy, history/logging, and settings screens.
+9. Stabilize platforms, packaging, and beta verification.
 
-## 개발 기준
+## Development Standards
 
-새 코드를 작성할 때는 다음 기준을 지킵니다.
+When writing new code, follow these standards:
 
-- 도메인 규칙을 UI나 인프라 구현에 섞지 않습니다.
-- 네트워크, 파일 시스템, 데이터베이스, 플랫폼 API는 인프라 계층에 둡니다.
-- 인증되지 않은 peer가 전송 흐름에 진입하지 못하게 합니다.
-- 전송, 인증, 탐색 상태는 상태 머신으로 표현합니다.
-- 여러 컴포넌트가 알아야 하는 사건은 MessageBus 이벤트로 발행합니다.
-- 외부 설정 파일보다 명시적 주입을 우선합니다.
-- 로그는 목적과 수준을 구분하고 민감 정보를 기록하지 않습니다.
-- 구현 후 변경 범위에 맞는 테스트를 실행합니다.
+- Do not mix domain rules into UI or infrastructure implementation.
+- Keep network, file system, database, and platform APIs in the infrastructure layer.
+- Prevent unauthenticated peers from entering transfer flows.
+- Express transfer, authentication, and discovery lifecycle as state machines.
+- Publish events that multiple components need through MessageBus.
+- Prefer explicit injection over external configuration files.
+- Separate log purpose and level, and do not record sensitive data.
+- Run tests appropriate to the changed scope after implementation.
 
-## 요약
+## Summary
 
-Sponzey FileSharing은 로컬 네트워크 안에서 빠르고 안전하게 파일을 주고받기 위한 데스크톱 앱입니다. UDP의 낮은 지연을 활용하되 신뢰성 보강, 인증 경계, 상태 머신 기반 절차 관리, MessageBus 기반 이벤트 전달, 테스트 가능한 계층 구조를 통해 실사용 가능한 내부망 파일 전송 도구로 발전시키는 것을 목표로 합니다.
+Sponzey FileSharing is a desktop app for fast and secure file exchange inside local networks. It uses UDP for low latency while reinforcing reliability, enforcing authentication boundaries, managing procedures through state machines, delivering events through MessageBus, and preserving a testable layered architecture so it can evolve into a practical internal-network file transfer tool.

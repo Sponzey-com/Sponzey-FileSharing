@@ -6,13 +6,19 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sponzey_file_sharing/app/app_config.dart';
 import 'package:sponzey_file_sharing/application/auth/auth_controller.dart';
+import 'package:sponzey_file_sharing/application/network/network_diagnostics_provider.dart';
+import 'package:sponzey_file_sharing/application/network/peer_path_registry.dart';
 import 'package:sponzey_file_sharing/application/auth/peer_auth_controller.dart';
 import 'package:sponzey_file_sharing/core/logger/app_logger.dart';
 import 'package:sponzey_file_sharing/core/logger/console_app_logger.dart';
+import 'package:sponzey_file_sharing/core/network/udp_port_config.dart';
 import 'package:sponzey_file_sharing/domain/entities/peer_auth_session.dart';
 import 'package:sponzey_file_sharing/domain/entities/peer_node.dart';
+import 'package:sponzey_file_sharing/domain/network/network_interface_models.dart';
+import 'package:sponzey_file_sharing/domain/network/peer_connection_path.dart';
+import 'package:sponzey_file_sharing/domain/network/peer_route_candidate.dart';
 import 'package:sponzey_file_sharing/infrastructure/auth/auth_packet.dart';
-import 'package:sponzey_file_sharing/infrastructure/auth/auth_transport.dart';
+import 'package:sponzey_file_sharing/infrastructure/control/control_transport.dart';
 import 'package:sponzey_file_sharing/infrastructure/database/app_database.dart';
 import 'package:sponzey_file_sharing/infrastructure/platform/app_secure_storage.dart';
 import 'package:sponzey_file_sharing/infrastructure/platform/app_storage_path_provider.dart';
@@ -69,6 +75,7 @@ void main() {
         harness.transport.sentPackets.single.packet.type,
         AuthPacketType.connectRequest,
       );
+      expect(harness.transport.sentPackets.single.address.address, '127.0.0.1');
       expect(harness.transport.sentPackets.single.port, 40002);
       expect(
         harness.container
@@ -142,6 +149,443 @@ void main() {
       expect(harness.transport.sentPackets.single.port, 40222);
     },
   );
+
+  test(
+    'startHandshake without selected path still uses PeerNode address and port',
+    () async {
+      final peer = _peerNode(
+        clock.value,
+        port: 40002,
+      ).copyWith(address: '10.20.30.40');
+      final candidate = PeerRouteCandidate.create(
+        peerId: peer.id,
+        remoteAddress: '192.168.1.200',
+        remotePort: 49999,
+        localInterfaceId: const NetworkInterfaceId(name: 'en0', index: 4),
+        localAddress: '192.168.1.10',
+        discoveredBy: RouteCandidateDiscoverySource.broadcast,
+        seenAt: clock.value,
+        localInterfaceTypeHint: InterfaceTypeHint.ethernet,
+      );
+      final activePath = PeerConnectionPath.fromCandidate(
+        candidate: candidate,
+        selectedAt: clock.value,
+        selectionReason: PeerPathSelectionReason.sameSubnet,
+      );
+      final pathRegistry = PeerPathRegistry()
+        ..select(activePath.copyWith(status: PeerPathStatus.active));
+      final harness = await _createNode(
+        clock: clock,
+        loginUserId: 'team',
+        loginPassword: 'shared-secret',
+        localDeviceId: 'device-a',
+        authPort: 40001,
+        candidateStore: [candidate],
+        pathRegistry: pathRegistry,
+      );
+      addTearDown(harness.dispose);
+
+      harness.controller.syncDiscoveredPeer(peer);
+      await _flush();
+
+      await harness.controller.startHandshake(peer);
+      await _flush();
+
+      expect(
+        harness.transport.sentPackets.single.packet.type,
+        AuthPacketType.connectRequest,
+      );
+      expect(
+        harness.transport.sentPackets.single.address.address,
+        peer.address,
+      );
+      expect(harness.transport.sentPackets.single.port, peer.port);
+      expect(
+        harness.transport.sentPackets.single.address.address,
+        isNot(candidate.remoteAddress),
+      );
+      expect(
+        harness.transport.sentPackets.single.port,
+        isNot(candidate.remotePort),
+      );
+    },
+  );
+
+  test(
+    'startHandshake sends connect request through selected path endpoint',
+    () async {
+      final peer = _peerNode(
+        clock.value,
+        port: 40002,
+      ).copyWith(address: '10.20.30.40');
+      final candidate = PeerRouteCandidate.create(
+        peerId: peer.id,
+        remoteAddress: '192.168.1.200',
+        remotePort: 49999,
+        localInterfaceId: const NetworkInterfaceId(name: 'en0', index: 4),
+        localAddress: '192.168.1.10',
+        discoveredBy: RouteCandidateDiscoverySource.broadcast,
+        seenAt: clock.value,
+        localInterfaceTypeHint: InterfaceTypeHint.ethernet,
+      );
+      final selectedPath = PeerConnectionPath.fromCandidate(
+        candidate: candidate,
+        selectedAt: clock.value,
+        selectionReason: PeerPathSelectionReason.sameSubnet,
+      );
+      final harness = await _createNode(
+        clock: clock,
+        loginUserId: 'team',
+        loginPassword: 'shared-secret',
+        localDeviceId: 'device-a',
+        authPort: 40001,
+      );
+      addTearDown(harness.dispose);
+
+      await harness.controller.startHandshake(peer, selectedPath: selectedPath);
+      await _flush();
+
+      final sent = harness.transport.sentPackets.single;
+      expect(sent.packet.type, AuthPacketType.connectRequest);
+      expect(sent.address.address, candidate.remoteAddress);
+      expect(sent.port, candidate.remotePort);
+      expect(sent.localEndpoint, selectedPath.controlEndpoint);
+    },
+  );
+
+  test(
+    'selected path stays authenticating during challenge response and becomes active after accept',
+    () async {
+      final peer = _peerNode(
+        clock.value,
+        port: 40002,
+      ).copyWith(address: '10.20.30.40');
+      final candidate = PeerRouteCandidate.create(
+        peerId: peer.id,
+        remoteAddress: '192.168.1.200',
+        remotePort: 49999,
+        localInterfaceId: const NetworkInterfaceId(name: 'en0', index: 4),
+        localAddress: '192.168.1.10',
+        discoveredBy: RouteCandidateDiscoverySource.broadcast,
+        seenAt: clock.value,
+        localInterfaceTypeHint: InterfaceTypeHint.ethernet,
+      );
+      final selectedPath = PeerConnectionPath.fromCandidate(
+        candidate: candidate,
+        selectedAt: clock.value,
+        selectionReason: PeerPathSelectionReason.sameSubnet,
+      );
+      final harness = await _createNode(
+        clock: clock,
+        loginUserId: 'team',
+        loginPassword: 'shared-secret',
+        localDeviceId: 'device-a',
+        authPort: 40001,
+      );
+      addTearDown(harness.dispose);
+
+      await harness.controller.startHandshake(peer, selectedPath: selectedPath);
+      await _flush();
+
+      expect(
+        harness.container
+            .read(peerPathRegistryProvider)
+            .selectedForPeer(peer.id)!
+            .status,
+        PeerPathStatus.authenticating,
+      );
+
+      final connectRequest = harness.transport.sentPackets.single.packet;
+      harness.transport.emit(
+        AuthPacket(
+          type: AuthPacketType.authChallenge,
+          protocolVersion: '1.0',
+          sessionId: connectRequest.sessionId,
+          fromUserId: 'team',
+          fromDeviceId: 'device-b',
+          fromDisplayName: 'team',
+          nonce: 'nonce-from-peer',
+          sentAtEpochMs: clock.value.millisecondsSinceEpoch,
+        ),
+        address: InternetAddress(candidate.remoteAddress),
+        port: candidate.remotePort,
+      );
+      await _flush();
+
+      final token = harness.transport.sentPackets.last;
+      expect(token.packet.type, AuthPacketType.authToken);
+      expect(token.localEndpoint, selectedPath.controlEndpoint);
+      expect(
+        harness.container
+            .read(peerPathRegistryProvider)
+            .selectedForPeer(peer.id)!
+            .status,
+        PeerPathStatus.authenticating,
+      );
+
+      harness.transport.emit(
+        AuthPacket(
+          type: AuthPacketType.authAccept,
+          protocolVersion: '1.0',
+          sessionId: connectRequest.sessionId,
+          fromUserId: 'team',
+          fromDeviceId: 'device-b',
+          fromDisplayName: 'team',
+          sentAtEpochMs: clock.value.millisecondsSinceEpoch,
+        ),
+        address: InternetAddress(candidate.remoteAddress),
+        port: candidate.remotePort,
+      );
+      await _flush();
+
+      expect(
+        harness.container
+            .read(peerPathRegistryProvider)
+            .selectedForPeer(peer.id)!
+            .status,
+        PeerPathStatus.active,
+      );
+    },
+  );
+
+  test(
+    'incoming connect request replies through the observed local endpoint',
+    () async {
+      final localEndpoint = UdpInterfaceEndpoint(
+        role: UdpPortRole.control,
+        interfaceId: const NetworkInterfaceId(name: 'en0', index: 4),
+        localAddress: '192.168.1.10',
+        port: 40001,
+        bindMode: UdpInterfaceBindMode.specificAddress,
+      );
+      final harness = await _createNode(
+        clock: clock,
+        loginUserId: 'team',
+        loginPassword: 'shared-secret',
+        localDeviceId: 'device-a',
+        authPort: 40001,
+      );
+      addTearDown(harness.dispose);
+
+      harness.transport.emit(
+        AuthPacket(
+          type: AuthPacketType.connectRequest,
+          protocolVersion: '1.0',
+          sessionId: 'session-incoming-path',
+          fromUserId: 'team',
+          fromDeviceId: 'device-b',
+          fromDisplayName: 'team',
+          sentAtEpochMs: clock.value.millisecondsSinceEpoch,
+        ),
+        address: InternetAddress('192.168.1.200'),
+        port: 40222,
+        localEndpoint: localEndpoint,
+      );
+      await _flush();
+
+      final challenge = harness.transport.sentPackets.single;
+      expect(challenge.packet.type, AuthPacketType.authChallenge);
+      expect(challenge.localEndpoint, localEndpoint);
+    },
+  );
+
+  test('auth reject marks the selected path failed', () async {
+    final peer = _peerNode(clock.value, port: 40002);
+    final candidate = PeerRouteCandidate.create(
+      peerId: peer.id,
+      remoteAddress: peer.address,
+      remotePort: peer.port,
+      localInterfaceId: const NetworkInterfaceId(name: 'en0', index: 4),
+      localAddress: '127.0.0.1',
+      discoveredBy: RouteCandidateDiscoverySource.broadcast,
+      seenAt: clock.value,
+      localInterfaceTypeHint: InterfaceTypeHint.ethernet,
+    );
+    final selectedPath = PeerConnectionPath.fromCandidate(
+      candidate: candidate,
+      selectedAt: clock.value,
+      selectionReason: PeerPathSelectionReason.sameSubnet,
+    );
+    final harness = await _createNode(
+      clock: clock,
+      loginUserId: 'team',
+      loginPassword: 'shared-secret',
+      localDeviceId: 'device-a',
+      authPort: 40001,
+    );
+    addTearDown(harness.dispose);
+
+    await harness.controller.startHandshake(peer, selectedPath: selectedPath);
+    await _flush();
+    final request = harness.transport.sentPackets.single.packet;
+    harness.transport.emit(
+      AuthPacket(
+        type: AuthPacketType.authReject,
+        protocolVersion: '1.0',
+        sessionId: request.sessionId,
+        fromUserId: peer.userId,
+        fromDeviceId: peer.deviceId,
+        fromDisplayName: peer.displayName,
+        rejectCode: 'jwtInvalid',
+        rejectMessage: 'jwtInvalid',
+        sentAtEpochMs: clock.value.millisecondsSinceEpoch,
+      ),
+      address: InternetAddress(peer.address),
+      port: peer.port,
+    );
+    await _flush();
+
+    final path = harness.container
+        .read(peerPathRegistryProvider)
+        .selectedForPeer(peer.id)!;
+    expect(path.status, PeerPathStatus.failed);
+    expect(path.failureReasonCode, 'jwtInvalid');
+  });
+
+  test('direct startHandshake skips already authenticated peer', () async {
+    final harness = await _createNode(
+      clock: clock,
+      loginUserId: 'team',
+      loginPassword: 'shared-secret',
+      localDeviceId: 'device-a',
+      authPort: 40001,
+    );
+    addTearDown(harness.dispose);
+    final peer = _peerNode(clock.value, port: 40002);
+
+    await harness.controller.startHandshake(peer);
+    await _flush();
+    final request = harness.transport.sentPackets.single.packet;
+    harness.transport.emit(
+      AuthPacket(
+        type: AuthPacketType.authAccept,
+        protocolVersion: '1.0',
+        sessionId: request.sessionId,
+        fromUserId: peer.userId,
+        fromDeviceId: peer.deviceId,
+        fromDisplayName: peer.displayName,
+        sentAtEpochMs: clock.value.millisecondsSinceEpoch,
+      ),
+      address: InternetAddress(peer.address),
+      port: peer.port,
+    );
+    await _flush();
+
+    await harness.controller.startHandshake(peer);
+    await _flush();
+
+    expect(
+      harness.container.read(peerAuthSessionByPeerIdProvider(peer.id))?.status,
+      PeerAuthStatus.authenticated,
+    );
+    expect(harness.transport.sentPackets, hasLength(1));
+  });
+
+  test(
+    'offline presence clears authenticated session and active path',
+    () async {
+      final harness = await _createNode(
+        clock: clock,
+        loginUserId: 'team',
+        loginPassword: 'shared-secret',
+        localDeviceId: 'device-a',
+        authPort: 40001,
+      );
+      addTearDown(harness.dispose);
+      final peer = _peerNode(clock.value, port: 40002);
+      final candidate = PeerRouteCandidate.create(
+        peerId: peer.id,
+        remoteAddress: peer.address,
+        remotePort: peer.port,
+        localInterfaceId: const NetworkInterfaceId(name: 'en0', index: 4),
+        localAddress: '127.0.0.1',
+        discoveredBy: RouteCandidateDiscoverySource.broadcast,
+        seenAt: clock.value,
+        localInterfaceTypeHint: InterfaceTypeHint.ethernet,
+      );
+      final path = PeerConnectionPath.fromCandidate(
+        candidate: candidate,
+        selectedAt: clock.value,
+        selectionReason: PeerPathSelectionReason.sameSubnet,
+      ).copyWith(status: PeerPathStatus.active);
+      harness.container.read(peerPathRegistryMutationsProvider).select(path);
+      harness.controller.syncDiscoveredPeer(peer);
+      await harness.controller.startHandshake(peer);
+      await _flush();
+      final request = harness.transport.sentPackets.single.packet;
+      harness.transport.emit(
+        AuthPacket(
+          type: AuthPacketType.authAccept,
+          protocolVersion: '1.0',
+          sessionId: request.sessionId,
+          fromUserId: peer.userId,
+          fromDeviceId: peer.deviceId,
+          fromDisplayName: peer.displayName,
+          sentAtEpochMs: clock.value.millisecondsSinceEpoch,
+        ),
+        address: InternetAddress(peer.address),
+        port: peer.port,
+      );
+      await _flush();
+
+      harness.controller.syncPeerPresence([
+        peer.copyWith(presence: PeerPresence.offline),
+      ]);
+      await _flush();
+
+      expect(
+        harness.container.read(peerAuthSessionByPeerIdProvider(peer.id)),
+        isNull,
+      );
+      expect(
+        harness.container
+            .read(peerPathRegistryProvider)
+            .selectedForPeer(peer.id),
+        isNull,
+      );
+    },
+  );
+
+  test('startHandshake marks session failed when control bind fails', () async {
+    final peer = _peerNode(clock.value, port: 40002);
+    final candidate = PeerRouteCandidate.create(
+      peerId: peer.id,
+      remoteAddress: peer.address,
+      remotePort: peer.port,
+      localInterfaceId: const NetworkInterfaceId(name: 'en0', index: 4),
+      localAddress: '10.20.30.5',
+      discoveredBy: RouteCandidateDiscoverySource.broadcast,
+      seenAt: clock.value,
+      localInterfaceTypeHint: InterfaceTypeHint.ethernet,
+    );
+    final selectedPath = PeerConnectionPath.fromCandidate(
+      candidate: candidate,
+      selectedAt: clock.value,
+      selectionReason: PeerPathSelectionReason.sameSubnet,
+    );
+    final harness = await _createNode(
+      clock: clock,
+      loginUserId: 'team',
+      loginPassword: 'shared-secret',
+      localDeviceId: 'device-a',
+      authPort: 40001,
+      sendException: ControlTransportBindException(
+        reasonCode: 'controlBindFailed',
+        localEndpoint: selectedPath.controlEndpoint,
+      ),
+    );
+    addTearDown(harness.dispose);
+
+    await harness.controller.startHandshake(peer, selectedPath: selectedPath);
+    await _flush();
+
+    final session = harness.container.read(
+      peerAuthSessionByPeerIdProvider(peer.id),
+    );
+    expect(session?.status, PeerAuthStatus.failed);
+    expect(session?.message, 'controlBindFailed');
+    expect(harness.transport.sentPackets, isEmpty);
+  });
 }
 
 PeerNode _peerNode(DateTime now, {required int port}) {
@@ -166,9 +610,15 @@ Future<_NodeHarness> _createNode({
   required String loginPassword,
   required String localDeviceId,
   required int authPort,
+  List<PeerRouteCandidate> candidateStore = const [],
+  PeerPathRegistry? pathRegistry,
+  ControlTransportBindException? sendException,
 }) async {
   final database = AppDatabase.forTesting(NativeDatabase.memory());
-  final transport = _InspectableAuthTransport(authPort);
+  final transport = _InspectableControlTransport(
+    authPort,
+    sendException: sendException,
+  );
   final container = ProviderContainer(
     overrides: [
       appConfigProvider.overrideWithValue(
@@ -195,11 +645,15 @@ Future<_NodeHarness> _createNode({
       appLoggerProvider.overrideWithValue(
         const ConsoleAppLogger(minimumLevel: AppLogLevel.error),
       ),
-      authTransportProvider.overrideWithValue(transport),
+      controlTransportProvider.overrideWithValue(transport),
       localDeviceIdentityServiceProvider.overrideWithValue(
         _FakeLocalDeviceIdentityService(localDeviceId),
       ),
       authNowProvider.overrideWithValue(() => clock.value),
+      peerRouteCandidateStoreProvider.overrideWith((ref) => candidateStore),
+      peerPathRegistryProvider.overrideWithValue(
+        pathRegistry ?? PeerPathRegistry(),
+      ),
     ],
   );
   container.read(authControllerProvider);
@@ -233,7 +687,7 @@ class _NodeHarness {
 
   final ProviderContainer container;
   final PeerAuthController controller;
-  final _InspectableAuthTransport transport;
+  final _InspectableControlTransport transport;
   final AppDatabase database;
 
   Future<void> dispose() async {
@@ -299,23 +753,26 @@ class _SentPacket {
     required this.packet,
     required this.address,
     required this.port,
+    this.localEndpoint,
   });
 
   final AuthPacket packet;
   final InternetAddress address;
   final int port;
+  final UdpInterfaceEndpoint? localEndpoint;
 }
 
-class _InspectableAuthTransport implements AuthTransport {
-  _InspectableAuthTransport(this.port);
+class _InspectableControlTransport implements ControlTransport {
+  _InspectableControlTransport(this.port, {this.sendException});
 
   final int port;
-  final StreamController<AuthDatagram> _controller =
-      StreamController<AuthDatagram>.broadcast();
+  final ControlTransportBindException? sendException;
+  final StreamController<ControlDatagram> _controller =
+      StreamController<ControlDatagram>.broadcast();
   final List<_SentPacket> sentPackets = [];
 
   @override
-  Stream<AuthDatagram> get packets => _controller.stream;
+  Stream<ControlDatagram> get packets => _controller.stream;
 
   @override
   Future<void> close() async {
@@ -329,8 +786,20 @@ class _InspectableAuthTransport implements AuthTransport {
     AuthPacket packet, {
     required InternetAddress address,
     required int port,
+    UdpInterfaceEndpoint? localEndpoint,
   }) async {
-    sentPackets.add(_SentPacket(packet: packet, address: address, port: port));
+    final sendException = this.sendException;
+    if (sendException != null) {
+      throw sendException;
+    }
+    sentPackets.add(
+      _SentPacket(
+        packet: packet,
+        address: address,
+        port: port,
+        localEndpoint: localEndpoint,
+      ),
+    );
   }
 
   @override
@@ -340,7 +809,15 @@ class _InspectableAuthTransport implements AuthTransport {
     AuthPacket packet, {
     required InternetAddress address,
     required int port,
+    UdpInterfaceEndpoint? localEndpoint,
   }) {
-    _controller.add(AuthDatagram(packet: packet, address: address, port: port));
+    _controller.add(
+      ControlDatagram(
+        packet: packet,
+        address: address,
+        port: port,
+        localEndpoint: localEndpoint,
+      ),
+    );
   }
 }

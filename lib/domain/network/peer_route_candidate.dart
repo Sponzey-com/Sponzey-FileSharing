@@ -33,6 +33,7 @@ class PeerRouteCandidate {
     this.score = 0,
     required this.status,
     this.localInterfaceTypeHint = InterfaceTypeHint.unknown,
+    this.bindMode = UdpInterfaceBindMode.specificAddress,
     this.compatible = true,
     this.receiveAvailable = true,
   });
@@ -50,6 +51,7 @@ class PeerRouteCandidate {
     int failureCount = 0,
     int score = 0,
     InterfaceTypeHint localInterfaceTypeHint = InterfaceTypeHint.unknown,
+    UdpInterfaceBindMode bindMode = UdpInterfaceBindMode.specificAddress,
     bool compatible = true,
     bool receiveAvailable = true,
   }) {
@@ -59,6 +61,8 @@ class PeerRouteCandidate {
         remoteAddress: remoteAddress,
         remotePort: remotePort,
         localInterfaceId: localInterfaceId,
+        localAddress: localAddress,
+        bindMode: bindMode,
       ),
       peerId: peerId,
       remoteAddress: remoteAddress,
@@ -73,6 +77,7 @@ class PeerRouteCandidate {
       score: score,
       status: compatible ? status : RouteCandidateStatus.incompatible,
       localInterfaceTypeHint: localInterfaceTypeHint,
+      bindMode: bindMode,
       compatible: compatible,
       receiveAvailable: receiveAvailable,
     );
@@ -92,6 +97,7 @@ class PeerRouteCandidate {
   final int score;
   final RouteCandidateStatus status;
   final InterfaceTypeHint localInterfaceTypeHint;
+  final UdpInterfaceBindMode bindMode;
   final bool compatible;
   final bool receiveAvailable;
 
@@ -111,6 +117,7 @@ class PeerRouteCandidate {
     int? score,
     RouteCandidateStatus? status,
     InterfaceTypeHint? localInterfaceTypeHint,
+    UdpInterfaceBindMode? bindMode,
     bool? compatible,
     bool? receiveAvailable,
   }) {
@@ -134,6 +141,7 @@ class PeerRouteCandidate {
       status: nextStatus,
       localInterfaceTypeHint:
           localInterfaceTypeHint ?? this.localInterfaceTypeHint,
+      bindMode: bindMode ?? this.bindMode,
       compatible: nextCompatible,
       receiveAvailable: receiveAvailable ?? this.receiveAvailable,
     );
@@ -144,8 +152,11 @@ class PeerRouteCandidate {
     required String remoteAddress,
     required int remotePort,
     required NetworkInterfaceId localInterfaceId,
+    required String localAddress,
+    required UdpInterfaceBindMode bindMode,
   }) {
-    return '$peerId|${localInterfaceId.stableId}|$remoteAddress:$remotePort';
+    return '$peerId|${localInterfaceId.stableId}|$localAddress|'
+        '$remoteAddress:$remotePort|${bindMode.name}';
   }
 }
 
@@ -178,6 +189,8 @@ class PeerRouteCandidateCollection {
       failureCount: candidate.failureCount,
       score: candidate.score,
       status: candidate.status,
+      localInterfaceTypeHint: candidate.localInterfaceTypeHint,
+      bindMode: candidate.bindMode,
       compatible: candidate.compatible,
       receiveAvailable: candidate.receiveAvailable,
     );

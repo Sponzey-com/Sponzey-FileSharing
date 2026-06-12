@@ -41,7 +41,7 @@ void main() {
     );
   });
 
-  test('prefers usable ethernet interfaces over wifi and virtual adapters', () {
+  test('keeps every default connectable LAN interface for discovery', () {
     final selected = RawUdpDiscoveryTransport.selectPreferredInterfaces([
       _snapshot(
         name: 'Wi-Fi',
@@ -56,15 +56,30 @@ void main() {
         address: InterfaceAddress.ipv4(address: '10.0.0.10'),
       ),
       _snapshot(
+        name: 'bridge100',
+        index: 7,
+        typeHint: InterfaceTypeHint.bridge,
+        address: InterfaceAddress.ipv4(address: '10.0.1.10'),
+      ),
+      _snapshot(
         name: 'vEthernet',
         index: 6,
         typeHint: InterfaceTypeHint.virtual,
         address: InterfaceAddress.ipv4(address: '172.20.0.1'),
       ),
+      _snapshot(
+        name: 'utun4',
+        index: 8,
+        typeHint: InterfaceTypeHint.vpn,
+        address: InterfaceAddress.ipv4(address: '10.8.0.2'),
+      ),
     ]);
 
-    expect(selected, hasLength(1));
-    expect(selected.single.name, 'Ethernet');
+    expect(selected.map((interface) => interface.name), [
+      'Ethernet',
+      'bridge100',
+      'Wi-Fi',
+    ]);
   });
 }
 

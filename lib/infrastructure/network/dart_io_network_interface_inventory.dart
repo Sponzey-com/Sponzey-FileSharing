@@ -1,7 +1,12 @@
 import 'dart:io';
 
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sponzey_file_sharing/domain/network/network_interface_inventory.dart';
 import 'package:sponzey_file_sharing/domain/network/network_interface_models.dart';
+
+final networkInterfaceInventoryProvider = Provider<NetworkInterfaceInventory>(
+  (ref) => const DartIoNetworkInterfaceInventory(),
+);
 
 class DartIoNetworkInterfaceInventory implements NetworkInterfaceInventory {
   const DartIoNetworkInterfaceInventory({this.clock = DateTime.now});
@@ -54,8 +59,26 @@ class DartIoNetworkInterfaceInventory implements NetworkInterfaceInventory {
   }
 
   static InterfaceTypeHint _typeHintFor(NetworkInterface interface) {
+    return classifyInterfaceName(
+      interface.name,
+      isLoopback: _isLoopback(interface),
+    );
+  }
+
+  static bool _isLoopback(NetworkInterface interface) {
     final name = interface.name.toLowerCase();
-    if (_isLoopback(interface)) {
+    if (name == 'lo' || name.startsWith('lo') || name.contains('loopback')) {
+      return true;
+    }
+    return interface.addresses.any((address) => address.isLoopback);
+  }
+
+  static InterfaceTypeHint classifyInterfaceName(
+    String interfaceName, {
+    bool isLoopback = false,
+  }) {
+    final name = interfaceName.toLowerCase();
+    if (isLoopback) {
       return InterfaceTypeHint.loopback;
     }
     if (name.contains('utun') || name.contains('tun') || name.contains('tap')) {
@@ -81,13 +104,5 @@ class DartIoNetworkInterfaceInventory implements NetworkInterfaceInventory {
       return InterfaceTypeHint.ethernet;
     }
     return InterfaceTypeHint.unknown;
-  }
-
-  static bool _isLoopback(NetworkInterface interface) {
-    final name = interface.name.toLowerCase();
-    if (name == 'lo' || name.startsWith('lo') || name.contains('loopback')) {
-      return true;
-    }
-    return interface.addresses.any((address) => address.isLoopback);
   }
 }

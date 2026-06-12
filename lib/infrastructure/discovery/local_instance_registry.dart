@@ -8,7 +8,11 @@ import 'package:sponzey_file_sharing/infrastructure/platform/app_platform_direct
 class LocalInstancePresence {
   const LocalInstancePresence({
     required this.userId,
-    required this.pairingProof,
+    String? discoveryGroupTag,
+    @Deprecated(
+      'Use discoveryGroupTag. This is kept for legacy registry files.',
+    )
+    String? pairingProof,
     required this.instanceId,
     required this.displayName,
     required this.deviceId,
@@ -18,10 +22,19 @@ class LocalInstancePresence {
     required this.port,
     required this.receiveAvailable,
     required this.seenAtEpochMs,
-  });
+  }) : assert(
+         (discoveryGroupTag != null && discoveryGroupTag != '') ||
+             (pairingProof != null && pairingProof != ''),
+         'Local instance presence requires a discovery group tag.',
+       ),
+       discoveryGroupTag = discoveryGroupTag ?? pairingProof ?? '';
 
   final String userId;
-  final String pairingProof;
+  final String discoveryGroupTag;
+
+  @Deprecated('Use discoveryGroupTag. This is a legacy migration alias.')
+  String get pairingProof => discoveryGroupTag;
+
   final String instanceId;
   final String displayName;
   final String deviceId;
@@ -35,7 +48,7 @@ class LocalInstancePresence {
   Map<String, Object?> toJson() {
     return <String, Object?>{
       'userId': userId,
-      'pairingProof': pairingProof,
+      'discoveryGroupTag': discoveryGroupTag,
       'instanceId': instanceId,
       'displayName': displayName,
       'deviceId': deviceId,
@@ -51,7 +64,9 @@ class LocalInstancePresence {
   factory LocalInstancePresence.fromJson(Map<String, Object?> json) {
     return LocalInstancePresence(
       userId: json['userId'] as String,
-      pairingProof: json['pairingProof'] as String,
+      discoveryGroupTag:
+          json['discoveryGroupTag'] as String? ??
+          json['pairingProof'] as String,
       instanceId: json['instanceId'] as String,
       displayName: json['displayName'] as String,
       deviceId: json['deviceId'] as String,

@@ -23,7 +23,9 @@ class DiscoveryPacket {
     required this.protocolVersion,
     this.messageId = '',
     required this.userId,
-    required this.pairingProof,
+    String? discoveryGroupTag,
+    @Deprecated('Use discoveryGroupTag. This is kept for legacy decode tests.')
+    String? pairingProof,
     required this.instanceId,
     required this.displayName,
     required this.deviceId,
@@ -39,13 +41,22 @@ class DiscoveryPacket {
     this.sourceAddress,
     required this.receiveAvailable,
     required this.sentAtEpochMs,
-  });
+  }) : assert(
+         (discoveryGroupTag != null && discoveryGroupTag != '') ||
+             (pairingProof != null && pairingProof != ''),
+         'Discovery packet requires a discovery group tag.',
+       ),
+       discoveryGroupTag = discoveryGroupTag ?? pairingProof ?? '';
 
   final DiscoveryPacketType type;
   final String protocolVersion;
   final String messageId;
   final String userId;
-  final String pairingProof;
+  final String discoveryGroupTag;
+
+  @Deprecated('Use discoveryGroupTag. This is a legacy migration alias.')
+  String get pairingProof => discoveryGroupTag;
+
   final String instanceId;
   final String displayName;
   final String deviceId;
@@ -69,7 +80,7 @@ class DiscoveryPacket {
         'protocolVersion': protocolVersion,
         'messageId': messageId,
         'userId': userId,
-        'pairingProof': pairingProof,
+        'discoveryGroupTag': discoveryGroupTag,
         'instanceId': instanceId,
         'displayName': displayName,
         'deviceId': deviceId,
@@ -100,7 +111,9 @@ class DiscoveryPacket {
       protocolVersion: _readString(payload, 'protocolVersion'),
       messageId: _readOptionalString(payload, 'messageId') ?? '',
       userId: _readString(payload, 'userId'),
-      pairingProof: _readString(payload, 'pairingProof'),
+      discoveryGroupTag:
+          _readOptionalString(payload, 'discoveryGroupTag') ??
+          _readString(payload, 'pairingProof'),
       instanceId: _readString(payload, 'instanceId'),
       displayName: _readString(payload, 'displayName'),
       deviceId: _readString(payload, 'deviceId'),

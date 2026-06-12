@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sponzey_file_sharing/application/discovery/peer_route_candidate_projection.dart';
 import 'package:sponzey_file_sharing/domain/entities/peer_node.dart';
+import 'package:sponzey_file_sharing/domain/network/connectable_interface_policy.dart';
 import 'package:sponzey_file_sharing/domain/network/network_interface_models.dart';
 import 'package:sponzey_file_sharing/domain/network/peer_route_candidate.dart';
 import 'package:sponzey_file_sharing/infrastructure/discovery/discovery_packet.dart';
@@ -50,6 +51,50 @@ void main() {
     expect(projection.peers, hasLength(1));
   });
 
+  test('ingests every inferred local interface candidate for one peer', () {
+    final projection = PeerRouteCandidateProjection();
+
+    final candidates = projection.ingestDiscoveryPacketCandidates(
+      packet: _packet(deviceId: 'device-001'),
+      remoteAddress: '192.168.10.20',
+      remotePort: 38400,
+      receivedAt: DateTime.utc(2026),
+      currentProtocolVersion: '1.0',
+      localCandidates: [
+        const ConnectableInterfaceCandidate(
+          interfaceId: NetworkInterfaceId(name: 'en0', index: 1),
+          localAddress: '192.168.10.5',
+          typeHint: InterfaceTypeHint.ethernet,
+          priority: ConnectableInterfacePriority.primary,
+          bindMode: UdpInterfaceBindMode.specificAddress,
+          score: 1300,
+        ),
+        const ConnectableInterfaceCandidate(
+          interfaceId: NetworkInterfaceId(name: 'bridge100', index: 2),
+          localAddress: '192.168.10.6',
+          typeHint: InterfaceTypeHint.bridge,
+          priority: ConnectableInterfacePriority.secondary,
+          bindMode: UdpInterfaceBindMode.specificAddress,
+          score: 1220,
+        ),
+      ],
+    );
+
+    expect(candidates, hasLength(2));
+    expect(projection.candidates, hasLength(2));
+    expect(
+      projection.candidates.map((candidate) => candidate.localAddress).toSet(),
+      {'192.168.10.5', '192.168.10.6'},
+    );
+    expect(
+      projection.candidates.map(
+        (candidate) => candidate.localInterfaceTypeHint,
+      ),
+      containsAll([InterfaceTypeHint.ethernet, InterfaceTypeHint.bridge]),
+    );
+    expect(projection.peers, hasLength(1));
+  });
+
   test('marks protocol mismatch peer as incompatible', () {
     final projection = PeerRouteCandidateProjection();
 
@@ -74,7 +119,7 @@ void main() {
     final candidate = projection.ingestLocalRegistry(
       presence: const LocalInstancePresence(
         userId: 'user',
-        pairingProof: 'proof',
+        discoveryGroupTag: 'group-tag',
         instanceId: 'instance',
         displayName: 'Local',
         deviceId: 'device-local',
@@ -91,6 +136,7 @@ void main() {
     expect(candidate.discoveredBy, RouteCandidateDiscoverySource.localRegistry);
     expect(candidate.localInterfaceId.stableId, 'loopback');
     expect(candidate.remoteAddress, '127.0.0.1');
+    expect(candidate.bindMode, UdpInterfaceBindMode.specificAddress);
   });
 }
 
@@ -102,7 +148,7 @@ DiscoveryPacket _packet({
     type: DiscoveryPacketType.discover,
     protocolVersion: protocolVersion,
     userId: 'user',
-    pairingProof: 'proof',
+    discoveryGroupTag: 'group-tag',
     instanceId: 'instance',
     displayName: 'Peer',
     deviceId: deviceId,

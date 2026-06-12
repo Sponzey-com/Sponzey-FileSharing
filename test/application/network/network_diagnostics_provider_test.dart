@@ -32,12 +32,44 @@ void main() {
       selectionReason: PeerPathSelectionReason.sameSubnet,
     );
 
-    container.read(peerPathRegistryProvider).select(path);
+    container.read(peerPathRegistryMutationsProvider).select(path);
 
     expect(
       container.read(activePeerPathProvider('peer-a'))!.pathId,
       path.pathId,
     );
+  });
+
+  test('diagnostics exposes active path and failure fields for debug use', () {
+    final container = ProviderContainer(
+      overrides: [
+        peerRouteCandidateStoreProvider.overrideWith(
+          (ref) => [
+            _candidate('peer-a', 'en0', rttMs: 12),
+            _candidate('peer-a', 'en1', status: RouteCandidateStatus.failed),
+          ],
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    final activeCandidate = _candidate('peer-a', 'en0', rttMs: 12);
+    final activePath = PeerConnectionPath.fromCandidate(
+      candidate: activeCandidate,
+      selectedAt: DateTime.utc(2026),
+      selectionReason: PeerPathSelectionReason.sameSubnet,
+    ).copyWith(status: PeerPathStatus.active);
+    container.read(peerPathRegistryMutationsProvider).select(activePath);
+
+    final diagnostics = container.read(peerPathDiagnosticsProvider('peer-a'));
+
+    expect(diagnostics.candidateCount, 2);
+    expect(diagnostics.activeInterface, contains('en0'));
+    expect(diagnostics.activeEndpoint, '10.0.1.10->10.0.1.20:38401');
+    expect(diagnostics.pathSelectionReason, 'sameSubnet');
+    expect(diagnostics.lastFailureReason, 'candidate:failed');
+    expect(diagnostics.debugSummary, contains('lastFailure=candidate:failed'));
+    expect(diagnostics.debugSummary, isNot(contains('password')));
+    expect(diagnostics.debugSummary, isNot(contains('token')));
   });
 
   test('diagnostics separates product and debug summaries', () {
@@ -55,6 +87,11 @@ void main() {
     expect(diagnostics.productSummary, '연결 경로 확인 중');
     expect(diagnostics.debugSummary, contains('candidates=1'));
     expect(diagnostics.candidateDebugRows.single, contains('rtt=12'));
+    expect(diagnostics.candidateDebugRows.single, contains('type=ethernet'));
+    expect(
+      diagnostics.candidateDebugRows.single,
+      contains('bind=specificAddress'),
+    );
     expect(diagnostics.candidateDebugRows.single, isNot(contains('token')));
     expect(diagnostics.candidateDebugRows.single, isNot(contains('password')));
     expect(
@@ -88,6 +125,7 @@ PeerRouteCandidate _candidate(
   String peerId,
   String interfaceName, {
   int? rttMs,
+  RouteCandidateStatus status = RouteCandidateStatus.fresh,
 }) {
   return PeerRouteCandidate.create(
     peerId: peerId,
@@ -101,6 +139,9 @@ PeerRouteCandidate _candidate(
     discoveredBy: RouteCandidateDiscoverySource.broadcast,
     seenAt: DateTime.utc(2026),
     rttMs: rttMs,
+    status: status,
     score: 1188,
+    localInterfaceTypeHint: InterfaceTypeHint.ethernet,
+    bindMode: UdpInterfaceBindMode.specificAddress,
   );
 }

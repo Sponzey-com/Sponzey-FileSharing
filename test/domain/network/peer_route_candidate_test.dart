@@ -27,6 +27,54 @@ void main() {
     expect(collection.candidatesForPeer('user@device'), hasLength(2));
   });
 
+  test(
+    'keeps same interface candidates with different local addresses separately',
+    () {
+      final collection = PeerRouteCandidateCollection();
+      final now = DateTime.utc(2026);
+      const interfaceId = NetworkInterfaceId(name: 'en0', index: 1);
+
+      collection.upsert(
+        _candidate(
+          interfaceId: interfaceId,
+          localAddress: '10.0.1.10',
+          remoteAddress: '10.0.1.20',
+          seenAt: now,
+        ),
+      );
+      collection.upsert(
+        _candidate(
+          interfaceId: interfaceId,
+          localAddress: '10.0.1.11',
+          remoteAddress: '10.0.1.20',
+          seenAt: now,
+        ),
+      );
+
+      expect(collection.candidatesForPeer('user@device'), hasLength(2));
+    },
+  );
+
+  test('represents unknown fallback candidates with any bind mode', () {
+    final candidate = PeerRouteCandidate.create(
+      peerId: 'user@device',
+      remoteAddress: '10.0.1.20',
+      remotePort: 38401,
+      localInterfaceId: const NetworkInterfaceId(
+        name: 'unknown',
+        index: -1,
+        stableId: 'unknown',
+      ),
+      localAddress: '0.0.0.0',
+      discoveredBy: RouteCandidateDiscoverySource.broadcast,
+      seenAt: DateTime.utc(2026),
+      bindMode: UdpInterfaceBindMode.any,
+    );
+
+    expect(candidate.bindMode, UdpInterfaceBindMode.any);
+    expect(candidate.localAddress, '0.0.0.0');
+  });
+
   test('updates duplicate candidate lastSeenAt', () {
     final collection = PeerRouteCandidateCollection();
     final first = DateTime.utc(2026);
@@ -97,6 +145,7 @@ PeerRouteCandidate _candidate({
   required DateTime seenAt,
   int? rttMs,
   bool compatible = true,
+  UdpInterfaceBindMode bindMode = UdpInterfaceBindMode.specificAddress,
 }) {
   return PeerRouteCandidate.create(
     peerId: 'user@device',
@@ -108,5 +157,6 @@ PeerRouteCandidate _candidate({
     seenAt: seenAt,
     rttMs: rttMs,
     compatible: compatible,
+    bindMode: bindMode,
   );
 }

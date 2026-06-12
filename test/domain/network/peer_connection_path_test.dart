@@ -75,6 +75,42 @@ void main() {
       expect(selection!.path.candidate.localInterfaceId.name, 'healthy');
     });
 
+    test('prioritizes bridge over host-only virtual candidate', () {
+      final selection = const PeerPathSelectionPolicy().select(
+        candidates: [
+          _candidate(
+            id: 'vmnet8',
+            rttMs: 5,
+            typeHint: InterfaceTypeHint.virtual,
+          ),
+          _candidate(
+            id: 'bridge100',
+            rttMs: 5,
+            typeHint: InterfaceTypeHint.bridge,
+          ),
+        ],
+        selectedAt: DateTime.utc(2026),
+      );
+
+      expect(selection!.path.candidate.localInterfaceId.name, 'bridge100');
+    });
+
+    test('prioritizes fresh candidate over degraded candidate', () {
+      final selection = const PeerPathSelectionPolicy().select(
+        candidates: [
+          _candidate(
+            id: 'degraded',
+            rttMs: 5,
+            status: RouteCandidateStatus.degraded,
+          ),
+          _candidate(id: 'fresh', rttMs: 20),
+        ],
+        selectedAt: DateTime.utc(2026),
+      );
+
+      expect(selection!.path.candidate.localInterfaceId.name, 'fresh');
+    });
+
     test('uses deterministic tie breaker', () {
       final selection = const PeerPathSelectionPolicy().select(
         candidates: [
@@ -107,6 +143,27 @@ void main() {
       result = machine.transition(result.state, PeerPathEvent.authStarted);
       result = machine.transition(result.state, PeerPathEvent.authSucceeded);
       expect(result.state.status, PeerPathStatus.active);
+    });
+
+    test('can authenticate directly without a separate probe packet', () {
+      const machine = PeerConnectionPathStateMachine();
+      final path = PeerConnectionPath.fromCandidate(
+        candidate: _candidate(id: 'a'),
+        selectedAt: DateTime.utc(2026),
+        selectionReason: PeerPathSelectionReason.deterministicTieBreaker,
+      );
+
+      final authenticating = machine.transition(
+        path,
+        PeerPathEvent.authStarted,
+      );
+      final active = machine.transition(
+        authenticating.state,
+        PeerPathEvent.authSucceeded,
+      );
+
+      expect(authenticating.state.status, PeerPathStatus.authenticating);
+      expect(active.state.status, PeerPathStatus.active);
     });
 
     test('separates probe failure from authentication failure', () {
@@ -151,6 +208,7 @@ PeerRouteCandidate _candidate({
   String localAddress = '10.0.1.10',
   String? remoteAddress,
   InterfaceTypeHint typeHint = InterfaceTypeHint.ethernet,
+  RouteCandidateStatus status = RouteCandidateStatus.fresh,
 }) {
   return PeerRouteCandidate.create(
     peerId: 'user@device',
@@ -165,5 +223,6 @@ PeerRouteCandidate _candidate({
     rttMs: rttMs,
     failureCount: failureCount,
     localInterfaceTypeHint: typeHint,
+    status: status,
   );
 }

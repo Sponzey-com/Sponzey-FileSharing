@@ -33,7 +33,7 @@ void main() {
 
       const presence = LocalInstancePresence(
         userId: 'team',
-        pairingProof: 'proof-001',
+        discoveryGroupTag: 'group-tag-001',
         instanceId: 'instance-01',
         displayName: 'Team Node',
         deviceId: 'device-01',
@@ -56,6 +56,26 @@ void main() {
         ),
       );
       expect(await sharedFile.exists(), isTrue);
+      expect(await sharedFile.readAsString(), contains('discoveryGroupTag'));
+      expect(await sharedFile.readAsString(), isNot(contains('pairingProof')));
     },
   );
+
+  test('decodes legacy pairingProof registry entries as group tags', () {
+    final presence = LocalInstancePresence.fromJson(const <String, Object?>{
+      'userId': 'team',
+      'pairingProof': 'legacy-proof',
+      'instanceId': 'instance-01',
+      'displayName': 'Team Node',
+      'deviceId': 'device-01',
+      'deviceName': 'Mac Host',
+      'osType': 'macos',
+      'protocolVersion': '1.0',
+      'port': 38401,
+      'receiveAvailable': true,
+      'seenAtEpochMs': 123456789,
+    });
+
+    expect(presence.discoveryGroupTag, 'legacy-proof');
+  });
 }

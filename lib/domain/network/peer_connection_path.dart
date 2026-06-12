@@ -45,6 +45,7 @@ class PeerConnectionPath {
     required this.selectedAt,
     required this.selectionReason,
     this.rttMs,
+    this.failureReasonCode,
   });
 
   factory PeerConnectionPath.fromCandidate({
@@ -62,7 +63,7 @@ class PeerConnectionPath {
         interfaceId: candidate.localInterfaceId,
         localAddress: candidate.localAddress,
         port: candidate.remotePort,
-        bindMode: UdpInterfaceBindMode.specificAddress,
+        bindMode: candidate.bindMode,
       ),
       dataEndpoint: dataPort == null
           ? null
@@ -71,7 +72,7 @@ class PeerConnectionPath {
               interfaceId: candidate.localInterfaceId,
               localAddress: candidate.localAddress,
               port: dataPort,
-              bindMode: UdpInterfaceBindMode.specificAddress,
+              bindMode: candidate.bindMode,
             ),
       status: PeerPathStatus.discovered,
       selectedAt: selectedAt,
@@ -89,8 +90,14 @@ class PeerConnectionPath {
   final DateTime selectedAt;
   final PeerPathSelectionReason selectionReason;
   final int? rttMs;
+  final String? failureReasonCode;
 
-  PeerConnectionPath copyWith({PeerPathStatus? status, int? rttMs}) {
+  PeerConnectionPath copyWith({
+    PeerPathStatus? status,
+    int? rttMs,
+    String? failureReasonCode,
+    bool clearFailureReasonCode = false,
+  }) {
     return PeerConnectionPath(
       pathId: pathId,
       peerId: peerId,
@@ -101,6 +108,9 @@ class PeerConnectionPath {
       selectedAt: selectedAt,
       selectionReason: selectionReason,
       rttMs: rttMs ?? this.rttMs,
+      failureReasonCode: clearFailureReasonCode
+          ? null
+          : failureReasonCode ?? this.failureReasonCode,
     );
   }
 }
@@ -180,8 +190,9 @@ class PeerPathSelectionPolicy {
     switch (candidate.localInterfaceTypeHint) {
       case InterfaceTypeHint.virtual:
       case InterfaceTypeHint.vpn:
+        score -= 260;
       case InterfaceTypeHint.bridge:
-        score -= 120;
+        score += 20;
       case InterfaceTypeHint.ethernet:
         score += 40;
       case InterfaceTypeHint.wifi:
@@ -253,9 +264,19 @@ class PeerConnectionPathStateMachine
         return TransitionResult.transitioned(
           state.copyWith(status: PeerPathStatus.authenticating),
         );
+      case (PeerPathStatus.discovered, PeerPathEvent.authStarted):
+        return TransitionResult.transitioned(
+          state.copyWith(
+            status: PeerPathStatus.authenticating,
+            clearFailureReasonCode: true,
+          ),
+        );
       case (PeerPathStatus.authenticating, PeerPathEvent.authSucceeded):
         return TransitionResult.transitioned(
-          state.copyWith(status: PeerPathStatus.active),
+          state.copyWith(
+            status: PeerPathStatus.active,
+            clearFailureReasonCode: true,
+          ),
         );
       case (PeerPathStatus.authenticating, PeerPathEvent.authFailed):
         return TransitionResult.failure(

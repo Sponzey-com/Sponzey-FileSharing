@@ -18,6 +18,7 @@ import 'package:sponzey_file_sharing/domain/entities/peer_node.dart';
 import 'package:sponzey_file_sharing/domain/entities/transfer_job.dart';
 import 'package:sponzey_file_sharing/infrastructure/auth/auth_packet.dart';
 import 'package:sponzey_file_sharing/infrastructure/auth/auth_transport.dart';
+import 'package:sponzey_file_sharing/infrastructure/control/control_transport.dart';
 import 'package:sponzey_file_sharing/infrastructure/database/app_database.dart';
 import 'package:sponzey_file_sharing/infrastructure/platform/app_secure_storage.dart';
 import 'package:sponzey_file_sharing/infrastructure/platform/app_storage_path_provider.dart';
@@ -758,6 +759,9 @@ Future<_TransferHarness> _createNode({
         logger ?? const ConsoleAppLogger(minimumLevel: AppLogLevel.error),
       ),
       authTransportProvider.overrideWithValue(transport),
+      controlTransportProvider.overrideWithValue(
+        AuthControlTransportAdapter(authTransport: transport),
+      ),
       localDeviceIdentityServiceProvider.overrideWithValue(
         _FakeLocalDeviceIdentityService(localDeviceId),
       ),
