@@ -93,11 +93,19 @@ class RawUdpDiscoveryTransport implements DiscoveryTransport {
   }) async {
     final socket = _requireSendSocket();
     final payload = packet.encode();
+    final wildcardDestinationsSent = <String>{};
 
     for (final target in _broadcastTargets) {
+      final address = InternetAddress(target.address);
       final targetSocket =
           _sendSocketsByLocalAddress[target.localAddress] ?? socket;
-      targetSocket.send(payload, InternetAddress(target.address), port);
+      _sendDatagram(targetSocket, payload, address, port);
+
+      final wildcardKey = '${target.address}:$port';
+      if (!identical(targetSocket, socket) &&
+          wildcardDestinationsSent.add(wildcardKey)) {
+        _sendDatagram(socket, payload, address, port);
+      }
     }
   }
 
@@ -325,6 +333,21 @@ class RawUdpDiscoveryTransport implements DiscoveryTransport {
       throw StateError('Discovery transport has not been started.');
     }
     return socket;
+  }
+
+  void _sendDatagram(
+    RawDatagramSocket socket,
+    List<int> payload,
+    InternetAddress address,
+    int port,
+  ) {
+    final sent = socket.send(payload, address, port);
+    if (sent == 0) {
+      _logger.debug(
+        AppLogCategory.discovery,
+        'Discovery datagram send returned 0 bytes for ${address.address}:$port',
+      );
+    }
   }
 
   Future<RawDatagramSocket> _bindSocket(int port) async {

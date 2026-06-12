@@ -98,7 +98,7 @@ void main() {
   });
 
   test(
-    'excludes vpn tunnel host-only virtual link-local loopback and ipv6-only',
+    'excludes vpn tunnel container virtual link-local loopback and ipv6-only',
     () {
       final candidates = const ConnectableInterfacePolicy().candidatesForRemote(
         remoteAddress: '10.10.1.20',
@@ -113,7 +113,7 @@ void main() {
             ),
           ),
           _snapshot(
-            name: 'vmnet8',
+            name: 'docker0',
             index: 2,
             typeHint: InterfaceTypeHint.virtual,
             address: InterfaceAddress.ipv4(
@@ -146,6 +146,47 @@ void main() {
       expect(candidates, hasLength(1));
       expect(candidates.single.bindMode, UdpInterfaceBindMode.any);
       expect(candidates.single.localAddress, '0.0.0.0');
+    },
+  );
+
+  test(
+    'keeps virtual machine bridge candidates for Parallels and VM hosts',
+    () {
+      final candidates = const ConnectableInterfacePolicy().candidatesForRemote(
+        remoteAddress: '10.211.55.20',
+        interfaces: [
+          _snapshot(
+            name: 'bridge100',
+            index: 1,
+            typeHint: InterfaceTypeHint.bridge,
+            address: InterfaceAddress.ipv4(
+              address: '10.211.55.2',
+              prefixLength: 24,
+            ),
+          ),
+          _snapshot(
+            name: 'vmnet8',
+            index: 2,
+            typeHint: InterfaceTypeHint.bridge,
+            address: InterfaceAddress.ipv4(
+              address: '10.211.55.3',
+              prefixLength: 24,
+            ),
+          ),
+        ],
+      );
+
+      expect(candidates.map((candidate) => candidate.interfaceId.name), [
+        'bridge100',
+        'vmnet8',
+      ]);
+      expect(
+        candidates.every(
+          (candidate) =>
+              candidate.priority == ConnectableInterfacePriority.secondary,
+        ),
+        isTrue,
+      );
     },
   );
 

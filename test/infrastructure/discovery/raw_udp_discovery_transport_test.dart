@@ -62,10 +62,16 @@ void main() {
         address: InterfaceAddress.ipv4(address: '10.0.1.10'),
       ),
       _snapshot(
-        name: 'vEthernet',
+        name: 'vmnet8',
         index: 6,
-        typeHint: InterfaceTypeHint.virtual,
+        typeHint: InterfaceTypeHint.bridge,
         address: InterfaceAddress.ipv4(address: '172.20.0.1'),
+      ),
+      _snapshot(
+        name: 'docker0',
+        index: 9,
+        typeHint: InterfaceTypeHint.virtual,
+        address: InterfaceAddress.ipv4(address: '172.21.0.1'),
       ),
       _snapshot(
         name: 'utun4',
@@ -78,6 +84,7 @@ void main() {
     expect(selected.map((interface) => interface.name), [
       'Ethernet',
       'bridge100',
+      'vmnet8',
       'Wi-Fi',
     ]);
   });

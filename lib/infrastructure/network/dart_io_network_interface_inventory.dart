@@ -84,15 +84,14 @@ class DartIoNetworkInterfaceInventory implements NetworkInterfaceInventory {
     if (name.contains('utun') || name.contains('tun') || name.contains('tap')) {
       return InterfaceTypeHint.vpn;
     }
+    if (_isContainerVirtualInterfaceName(name)) {
+      return InterfaceTypeHint.virtual;
+    }
     if (name.contains('bridge') || name.startsWith('br')) {
       return InterfaceTypeHint.bridge;
     }
-    if (name.contains('docker') ||
-        name.contains('vbox') ||
-        name.contains('vmnet') ||
-        name.contains('veth') ||
-        name.contains('hyper-v')) {
-      return InterfaceTypeHint.virtual;
+    if (_isVirtualMachineBridgeInterfaceName(name)) {
+      return InterfaceTypeHint.bridge;
     }
     if (name.contains('wlan') ||
         name.contains('wifi') ||
@@ -104,5 +103,27 @@ class DartIoNetworkInterfaceInventory implements NetworkInterfaceInventory {
       return InterfaceTypeHint.ethernet;
     }
     return InterfaceTypeHint.unknown;
+  }
+
+  static bool _isContainerVirtualInterfaceName(String name) {
+    return name.contains('docker') ||
+        (name.startsWith('veth') && !name.startsWith('vethernet')) ||
+        name.startsWith('br-') ||
+        name.startsWith('cni') ||
+        name.contains('podman') ||
+        name.contains('flannel') ||
+        name.startsWith('cali');
+  }
+
+  static bool _isVirtualMachineBridgeInterfaceName(String name) {
+    return name.contains('parallels') ||
+        name.startsWith('vnic') ||
+        name.startsWith('vmenet') ||
+        name.contains('virtualbox') ||
+        name.contains('vmnet') ||
+        name.contains('vboxnet') ||
+        name.contains('hyper-v') ||
+        name.startsWith('vethernet') ||
+        name.startsWith('virbr');
   }
 }
