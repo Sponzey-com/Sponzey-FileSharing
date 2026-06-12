@@ -865,6 +865,9 @@ Linux에서는 Secret Service 의존성이 있을 수 있으므로 배포 문서
 
 ## 13.3 Linux
 
+- 최소 지원 기준은 Ubuntu 22.04 LTS로 고정한다.
+- Linux 릴리스 산출물은 Ubuntu 22.04에서 빌드해 더 최신 glibc/GTK/libsecret 런타임에 의존하지 않도록 한다.
+- 다른 배포판은 GTK 3, libsecret, glibc, Flutter desktop 런타임이 Ubuntu 22.04와 동등하거나 그 이상일 때 지원 가능 후보로 본다.
 - 배포 포맷(AppImage, deb, rpm) 전략 필요
 - Secret Service 또는 keyring 의존성 검토
 - 배포판별 파일 경로/권한 차이 확인 필요

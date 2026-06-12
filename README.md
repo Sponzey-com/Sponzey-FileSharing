@@ -16,7 +16,7 @@ The project explicitly targets environments where a single machine can have mult
 - Add reliability on top of UDP by explicitly handling packet loss, duplication, retransmission, and timeouts.
 - Support both 1:1 transfer and 1:N distribution.
 - Use all available Ethernet interfaces as discovery, connection, and transfer path candidates.
-- Target desktop environments on macOS, Windows, and Linux.
+- Target desktop environments on macOS, Windows, and Linux, with Linux support based on Ubuntu 22.04 LTS or newer.
 - Stay focused on internal-network usage without depending on a central web backend or external cloud infrastructure.
 
 ## Use Cases
@@ -110,6 +110,14 @@ Receivers can automatically accept files or require approval depending on policy
 - JWT based authentication tokens
 
 Check [pubspec.yaml](pubspec.yaml) for exact dependencies.
+
+## Platform Support Baseline
+
+- macOS: desktop Flutter builds on currently supported macOS releases.
+- Windows: Windows desktop builds on Windows 10/11 with the Visual Studio 2022 C++ toolchain.
+- Linux: Ubuntu 22.04 LTS is the minimum supported baseline. Linux builds and release artifacts should be produced on Ubuntu 22.04 to avoid accidentally depending on newer glibc or desktop runtime versions.
+
+Other Linux distributions may work if they provide equivalent GTK 3, libsecret, glibc, and Flutter desktop runtime dependencies, but Ubuntu 22.04 LTS is the compatibility floor for development, CI, release validation, and user support.
 
 ## Project Structure
 

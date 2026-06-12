@@ -120,7 +120,7 @@ jobs:
           if-no-files-found: error
 
   build-linux:
-    name: Build Linux
+    name: Build Linux Ubuntu 22.04 minimum
     runs-on: ubuntu-22.04
 
     steps:

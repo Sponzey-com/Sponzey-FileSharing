@@ -146,6 +146,7 @@ class RawUdpAuthTransport implements AuthTransport {
       final message = error.message.toLowerCase();
       final code = error.osError?.errorCode;
       return code == 48 ||
+          code == 98 ||
           code == 10048 ||
           message.contains('address already in use');
     }
@@ -153,6 +154,7 @@ class RawUdpAuthTransport implements AuthTransport {
       final message = error.message.toLowerCase();
       final code = error.errorCode;
       return code == 48 ||
+          code == 98 ||
           code == 10048 ||
           message.contains('address already in use');
     }
