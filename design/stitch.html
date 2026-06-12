@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html class="light" lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>Sponzey - Secure Local File Courier</title>
+
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700;800;900&family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet"/>
+    <!-- Material Symbols -->
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+
+    <script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface-container-highest": "#e2e2e2",
+                        "inverse-on-surface": "#f1f1f1",
+                        "on-primary": "#ffffff",
+                        "on-tertiary-container": "#007374",
+                        "on-surface-variant": "#4a4732",
+                        "secondary-fixed": "#e2e2e2",
+                        "secondary": "#5e5e5e",
+                        "on-secondary": "#ffffff",
+                        "tertiary-container": "#54feff",
+                        "surface": "#f9f9f9",
+                        "outline": "#7c7860",
+                        "on-secondary-container": "#646464",
+                        "surface-container-low": "#f3f0ef",
+                        "primary-fixed": "#f9e522",
+                        "primary-container": "#feea29",
+                        "primary": "#665d00",
+                        "on-secondary-fixed-variant": "#474747",
+                        "on-tertiary": "#ffffff",
+                        "on-surface": "#1a1c1c",
+                        "surface-dim": "#dadada",
+                        "on-error-container": "#93000a",
+                        "surface-bright": "#f9f9f9",
+                        "on-primary-fixed-variant": "#4f4800",
+                        "surface-container-high": "#e8e8e8",
+                        "secondary-container": "#e2e2e2",
+                        "on-primary-container": "#736900",
+                        "surface-container": "#eeeeee",
+                        "background": "#f9f9f9",
+                        "inverse-surface": "#0e0e0e",
+                        "on-tertiary-fixed": "#002020",
+                        "outline-variant": "#cdc7ab",
+                        "surface-tint": "#695f00",
+                        "surface-container-lowest": "#ffffff",
+                        "on-tertiary-fixed-variant": "#004f50",
+                        "error": "#ba1a1a",
+                        "secondary-fixed-dim": "#c6c6c6",
+                        "error-container": "#ffdad6",
+                        "tertiary-fixed-dim": "#00dcde",
+                        "surface-variant": "#e2e2e2",
+                        "on-background": "#1a1c1c",
+                        "on-error": "#ffffff",
+                        "on-primary-fixed": "#1f1c00",
+                        "inverse-primary": "#dbc900",
+                        "tertiary-fixed": "#49f9fa",
+                        "tertiary": "#006a6a",
+                        "primary-fixed-dim": "#dbc900",
+                        "on-secondary-fixed": "#1b1b1b"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "1rem",
+                        "lg": "2rem",
+                        "xl": "3rem",
+                        "full": "9999px"
+                    },
+                    "fontFamily": {
+                        "headline": ["Space Grotesk"],
+                        "body": ["Noto Sans KR"],
+                        "label": ["Space Grotesk"]
+                    }
+                },
+            },
+        }
+    </script>
+
+    <style>
+        body { font-family: 'Noto Sans KR', sans-serif; background-color: #f9f6f5; }
+        .font-headline { font-family: 'Space Grotesk', sans-serif; }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            display: inline-block;
+            line-height: 1;
+            vertical-align: middle;
+        }
+        .ink-border { border: 2px solid #0e0e0e; }
+        .hard-shadow { box-shadow: 4px 4px 0px 0px #0e0e0e; }
+        .hover-hard-shadow:hover {
+            transform: translate(-2px, -2px);
+            box-shadow: 6px 6px 0px 0px #0e0e0e;
+        }
+        .btn-active:active { transform: translate(2px, 2px); box-shadow: 0px 0px 0px 0px #0e0e0e; }
+        
+        /* Custom scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #0e0e0e; border-radius: 10px; }
+    </style>
+
+    <!-- React and Libraries -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/history@5/umd/history.development.js"></script>
+    <script src="https://unpkg.com/react-router@6.3.0/umd/react-router.development.js"></script>
+    <script src="https://unpkg.com/react-router-dom@6.3.0/umd/react-router-dom.development.js"></script>
+    <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-surface text-on-surface">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+        const { createRoot } = ReactDOM;
+        const { MemoryRouter, Routes, Route, Link, useNavigate, useLocation } = ReactRouterDOM;
+
+        // --- Shared Components ---
+
+        const SideNavBar = () => {
+            const location = useLocation();
+            const navigate = useNavigate();
+            const isActive = (path) => location.pathname === path;
+
+            const navItems = [
+                { path: "/dashboard", icon: "dashboard", label: "Dashboard" },
+                { path: "/peers", icon: "group", label: "Peers" },
+                { path: "/transfers", icon: "swap_horiz", label: "Transfers" },
+                { path: "/history", icon: "history", label: "History" },
+            ];
+
+            return (
+                <aside className="hidden md:flex flex-col h-screen w-64 border-r-2 border-[#0e0e0e] dark:border-stone-700 bg-[#eae7e7] dark:bg-stone-800 py-8 px-6 flex-shrink-0 z-30">
+                    <div className="mb-12 cursor-pointer" onClick={() => navigate('/dashboard')}>
+                        <h1 className="text-2xl font-black tracking-tighter text-[#0e0e0e] dark:text-white uppercase font-headline">Postmaster</h1>
+                        <p className="font-headline tracking-tight text-xs uppercase font-bold text-[#665d00] dark:text-[#FEEA29]">Local Network</p>
+                    </div>
+                    <nav className="flex-1 space-y-4">
+                        {navItems.map(item => (
+                            <Link 
+                                key={item.path}
+                                to={item.path} 
+                                className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 font-headline tracking-tight text-sm uppercase font-bold ${
+                                    isActive(item.path) 
+                                    ? "bg-[#ffeb2a] dark:bg-[#665d00] text-[#0e0e0e] dark:text-white border-2 border-[#0e0e0e] dark:border-white shadow-[4px_4px_0px_0px_#0e0e0e]" 
+                                    : "text-[#0e0e0e] dark:text-stone-400 opacity-70 hover:translate-x-1 hover:-translate-y-1"
+                                }`}
+                            >
+                                <span className="material-symbols-outlined" style={isActive(item.path) ? {fontVariationSettings: "'FILL' 1"} : {}}>{item.icon}</span>
+                                {item.label}
+                            </Link>
+                        ))}
+                        <Link to="/" className="flex items-center gap-3 px-4 py-3 text-[#0e0e0e] dark:text-stone-400 opacity-70 font-headline tracking-tight text-sm uppercase font-bold hover:translate-x-1 hover:-translate-y-1 transition-transform duration-200">
+                            <span className="material-symbols-outlined">settings</span>
+                            Settings
+                        </Link>
+                    </nav>
+                    <div className="mt-auto pt-8 border-t-2 border-[#0e0e0e]/10">
+                        <button onClick={() => navigate('/send')} className="w-full py-4 bg-[#ffeb2a] ink-border rounded-xl font-headline font-bold uppercase tracking-widest text-sm hard-shadow hover-hard-shadow btn-active transition-all">
+                            Send File
+                        </button>
+                    </div>
+                </aside>
+            );
+        };
+
+        const TopNavBar = () => {
+            return (
+                <header className="w-full h-16 border-b-2 border-[#0e0e0e] dark:border-stone-700 bg-[#f9f6f5] dark:bg-stone-900 flex items-center justify-between px-8 z-20 backdrop-blur-xl sticky top-0">
+                    <div className="flex items-center flex-1 max-w-xl">
+                        <div className="relative w-full">
+                            <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-secondary">search</span>
+                            <input className="w-full pl-12 pr-4 py-2 bg-white/50 ink-border rounded-full font-body text-sm focus:ring-0 focus:border-primary transition-colors" placeholder="Search peers, files, batches..." type="text"/>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-6">
+                        <div className="hidden sm:flex items-center gap-2">
+                            <span className="material-symbols-outlined text-primary">sensors</span>
+                            <span className="font-headline text-xs font-bold uppercase tracking-wider">Broadcasting: Warm Utility</span>
+                        </div>
+                        <div className="flex items-center gap-4">
+                            <button className="p-2 hover:bg-[#ffeb2a]/10 rounded-full transition-all">
+                                <span className="material-symbols-outlined">notifications</span>
+                            </button>
+                            <button className="flex items-center gap-2 p-1 pr-3 hover:bg-[#ffeb2a]/10 rounded-full transition-all ink-border bg-white">
+                                <img alt="User profile" className="w-8 h-8 rounded-full border-2 border-inverse-surface" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDPj9bfTxJjbn9iT4lg4IBM779p4lceJJCb02_kRe91vrmNQCpOZ4MDc7svTuRh6rnFVJkIHdultZyjIND_8VQ8WU8A3wBXleYRM2xJTqmbMIFlU6scWVx7n7g2B7jMYXSpJbOr-K6rSyRwRblPBqHhLIUs88broh_tMCjd7t6pLC9_cCEkiSnVTjoNYYO25oTilt3ljsPn8VOXxhIylE6owuVFinCuRf251igQn1h_04HrkcUjM67oAFaxTLkZ_5eZ2NAwWg-PTZ8O"/>
+                                <span className="font-headline text-xs font-black">USER_771</span>
+                            </button>
+                        </div>
+                    </div>
+                </header>
+            );
+        };
+
+        const BottomTransferDock = () => {
+            return (
+                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-4xl rounded-full border-2 border-[#0e0e0e] dark:border-white bg-white/80 dark:bg-stone-900/80 backdrop-blur-xl shadow-[0_12px_32px_rgba(14,14,14,0.06)] px-8 py-3 z-40 flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                        <div className="bg-[#ffeb2a] p-2 rounded-full border-2 border-[#0e0e0e]">
+                            <span className="material-symbols-outlined">speed</span>
+                        </div>
+                        <div className="hidden sm:block">
+                            <span className="font-headline font-bold text-[10px] uppercase block text-[#665d00]">Global Transfer Dock</span>
+                            <span className="font-headline text-sm font-black uppercase">42.5 MB/s Aggregate</span>
+                        </div>
+                    </div>
+                    <div className="flex-grow max-w-[200px] mx-8 hidden lg:block">
+                        <div className="flex justify-between mb-1">
+                            <span className="font-headline text-[9px] uppercase font-black">Queues</span>
+                            <span className="font-headline text-[9px] uppercase font-black">74%</span>
+                        </div>
+                        <div className="h-2 w-full bg-stone-200 border border-[#0e0e0e] rounded-full overflow-hidden">
+                            <div className="h-full bg-[#ffeb2a]" style={{width: '74%'}}></div>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                        <button className="flex items-center gap-4 px-6 py-2 bg-[#ffeb2a] dark:bg-[#665d00] rounded-full border-2 border-inverse-surface font-headline text-xs uppercase font-black hover:scale-[1.02] transition-all">
+                            Monitor All
+                        </button>
+                        <button className="p-2 hover:bg-stone-100 rounded-full">
+                            <span className="material-symbols-outlined">expand_less</span>
+                        </button>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Screen Components ---
+
+        const LoginPage = () => {
+            const navigate = useNavigate();
+            return (
+                <div className="flex min-h-screen">
+                    <section className="w-[40%] hidden md:flex flex-col justify-between p-12 relative overflow-hidden bg-[#FFFEF2]">
+                        <div className="relative z-10">
+                            <div className="flex items-center gap-3 mb-24">
+                                <div className="w-12 h-12 bg-primary-container border-2 border-inverse-surface rounded-xl flex items-center justify-center shadow-[4px_4px_0px_0px_#0e0e0e]">
+                                    <span className="material-symbols-outlined text-inverse-surface" style={{fontVariationSettings: "'FILL' 1"}}>package_2</span>
+                                </div>
+                                <h1 className="text-3xl font-black font-headline tracking-tighter text-inverse-surface uppercase">Sponzey</h1>
+                            </div>
+                            <div className="space-y-12">
+                                {[
+                                    { icon: "bolt", title: "Fast local transfer", desc: "Blazing speeds within your LAN, bypassing the public internet." },
+                                    { icon: "verified_user", title: "Auth-based connection", desc: "Secure, identity-verified connections that ensure your data stays private." },
+                                    { icon: "hub", title: "Multi-target distribution", desc: "Broadcast files to multiple peers simultaneously without sacrificing network health." }
+                                ].map((item, idx) => (
+                                    <div key={idx} className="flex gap-6 group">
+                                        <div className="flex-shrink-0 w-14 h-14 bg-surface-container-lowest border-2 border-inverse-surface rounded-full flex items-center justify-center transition-transform group-hover:scale-110">
+                                            <span className="material-symbols-outlined text-primary text-3xl">{item.icon}</span>
+                                        </div>
+                                        <div>
+                                            <h3 className="font-headline font-bold text-xl uppercase tracking-tight text-inverse-surface mb-2">{item.title}</h3>
+                                            <p className="text-secondary leading-relaxed max-w-xs">{item.desc}</p>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="relative z-10 flex items-center gap-4">
+                            <span className="text-xs font-headline font-bold uppercase tracking-widest text-outline">v2.4.0 Local Node</span>
+                            <div className="h-[2px] flex-grow bg-inverse-surface opacity-10"></div>
+                        </div>
+                        <div className="absolute -bottom-24 -left-24 w-96 h-96 border-2 border-inverse-surface opacity-5 rounded-full"></div>
+                        <div className="absolute -top-12 -right-12 w-64 h-64 border-2 border-inverse-surface opacity-5 rounded-full"></div>
+                    </section>
+                    <section className="flex-grow flex items-center justify-center p-6 md:p-12 bg-surface">
+                        <div className="w-full max-w-[580px] bg-white border-2 border-inverse-surface rounded-[28px] overflow-hidden shadow-xl">
+                            <div className="flex border-b-2 border-inverse-surface">
+                                <button className="flex-1 py-6 font-headline font-bold uppercase tracking-widest text-sm bg-primary-container text-inverse-surface border-r-2 border-inverse-surface">Create Account</button>
+                                <button className="flex-1 py-6 font-headline font-bold uppercase tracking-widest text-sm text-outline hover:text-inverse-surface">Login</button>
+                            </div>
+                            <div className="p-10 md:p-14">
+                                <header className="mb-10">
+                                    <h2 className="text-4xl font-headline font-black tracking-tighter text-inverse-surface mb-2">Join the Network.</h2>
+                                    <p className="text-secondary text-lg">Configure your local courier identity to begin sharing.</p>
+                                </header>
+                                <form className="space-y-6" onSubmit={(e) => { e.preventDefault(); navigate('/dashboard'); }}>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        <div className="space-y-2">
+                                            <label className="block font-headline font-bold text-xs uppercase tracking-widest text-inverse-surface">Courier ID</label>
+                                            <input className="w-full px-5 py-4 bg-stone-50 border-2 border-inverse-surface rounded-xl focus:bg-yellow-50 outline-none font-headline font-medium" placeholder="postmaster_01"/>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="block font-headline font-bold text-xs uppercase tracking-widest text-inverse-surface">Password</label>
+                                            <input className="w-full px-5 py-4 bg-stone-50 border-2 border-inverse-surface rounded-xl focus:bg-yellow-50 outline-none font-headline font-medium" type="password" placeholder="••••••••"/>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="block font-headline font-bold text-xs uppercase tracking-widest text-inverse-surface">Display Name</label>
+                                        <input className="w-full px-5 py-4 bg-stone-50 border-2 border-inverse-surface rounded-xl focus:bg-yellow-50 outline-none font-headline font-medium" placeholder="Human Postmaster"/>
+                                    </div>
+                                    <div className="pt-8">
+                                        <button type="submit" className="group relative w-full bg-[#ffeb2a] border-2 border-inverse-surface py-5 rounded-xl font-headline font-black uppercase tracking-widest text-inverse-surface transition-all hard-shadow hover-hard-shadow active:translate-x-[2px] active:translate-y-[2px] active:shadow-none">
+                                            <span className="flex items-center justify-center gap-3">
+                                                Get Started
+                                                <span className="material-symbols-outlined font-bold">arrow_forward</span>
+                                            </span>
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            );
+        };
+
+        const DashboardPage = () => {
+            return (
+                <div className="flex h-screen overflow-hidden">
+                    <SideNavBar />
+                    <main className="flex-grow flex flex-col h-full relative overflow-y-auto">
+                        <TopNavBar />
+                        <div className="p-8 max-w-7xl mx-auto w-full flex flex-col gap-8 pb-32">
+                            <section className="relative bg-gradient-to-br from-primary-container to-tertiary-container border-2 border-inverse-surface rounded-xl p-8 overflow-hidden">
+                                <div className="absolute -right-20 -top-20 opacity-5">
+                                    <span className="material-symbols-outlined text-[300px]">move_up</span>
+                                </div>
+                                <div className="relative z-10 flex flex-col lg:flex-row lg:items-end justify-between gap-8">
+                                    <div className="space-y-6">
+                                        <h2 className="font-headline text-5xl font-black tracking-tight text-inverse-surface uppercase">Station Overview</h2>
+                                        <div className="flex flex-wrap gap-8">
+                                            <div className="flex flex-col"><span className="font-headline text-xs uppercase tracking-widest text-on-surface-variant font-bold">Devices online</span><span className="font-headline text-4xl font-bold">12</span></div>
+                                            <div className="flex flex-col"><span className="font-headline text-xs uppercase tracking-widest text-on-surface-variant font-bold">Active transfers</span><span className="font-headline text-4xl font-bold">04</span></div>
+                                            <div className="flex flex-col"><span className="font-headline text-xs uppercase tracking-widest text-on-surface-variant font-bold">Files today</span><span className="font-headline text-4xl font-bold">892 MB</span></div>
+                                        </div>
+                                    </div>
+                                    <button className="bg-inverse-surface text-surface py-4 px-8 rounded-xl font-headline uppercase font-black tracking-widest hover:bg-stone-800 transition-colors flex items-center gap-3">
+                                        <span className="material-symbols-outlined">add_circle</span>
+                                        Send File
+                                    </button>
+                                </div>
+                            </section>
+
+                            <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                                {[
+                                    { icon: "devices", label: "Online Peers", val: "12", color: "bg-primary-container" },
+                                    { icon: "sync_alt", label: "Active Transfers", val: "4", color: "bg-blue-100" },
+                                    { icon: "verified_user", label: "Security Status", val: "Clean", color: "bg-green-100" },
+                                    { icon: "report_problem", label: "Failed Jobs", val: "2", color: "bg-red-100", textColor: "text-red-600" }
+                                ].map((kpi, idx) => (
+                                    <div key={idx} className="bg-white border-2 border-inverse-surface rounded-lg p-6 hover-hard-shadow transition-all group">
+                                        <div className="flex justify-between items-start mb-4">
+                                            <div className={`p-2 ${kpi.color} rounded-md border-2 border-inverse-surface`}>
+                                                <span className="material-symbols-outlined">{kpi.icon}</span>
+                                            </div>
+                                            <span className="font-headline text-[10px] uppercase font-black px-2 py-1 bg-stone-100 rounded-full border border-inverse-surface">Stable</span>
+                                        </div>
+                                        <p className="font-headline text-xs uppercase font-bold text-on-surface-variant">{kpi.label}</p>
+                                        <h3 className={`font-headline text-3xl font-black tracking-tight ${kpi.textColor || ''}`}>{kpi.val}</h3>
+                                    </div>
+                                ))}
+                            </section>
+
+                            <section className="flex flex-col gap-6">
+                                <div className="flex items-center justify-between">
+                                    <h3 className="font-headline text-2xl font-black uppercase tracking-tight">Recent Activity</h3>
+                                    <button className="font-headline text-sm uppercase font-bold text-primary underline underline-offset-4">View All Logs</button>
+                                </div>
+                                <div className="space-y-4">
+                                    <div className="flex flex-col md:flex-row items-center justify-between p-6 bg-stone-50 border-2 border-inverse-surface rounded-lg gap-4">
+                                        <div className="flex items-center gap-6 w-full md:w-auto">
+                                            <div className="bg-white border-2 border-inverse-surface p-3 rounded-lg flex-shrink-0">
+                                                <span className="material-symbols-outlined text-3xl">description</span>
+                                            </div>
+                                            <div>
+                                                <h4 className="font-headline font-bold text-lg leading-none">Annual_Report_2023.pdf</h4>
+                                                <p className="font-body text-sm text-on-surface-variant">To: <span className="font-headline uppercase font-black text-xs text-on-surface">MAC-BOOK-PRO-01</span></p>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-8 w-full md:w-auto justify-between md:justify-end">
+                                            <div className="flex items-center gap-2 px-4 py-1.5 bg-primary-container border-2 border-inverse-surface rounded-full">
+                                                <span className="w-2 h-2 rounded-full bg-on-primary-fixed animate-pulse"></span>
+                                                <span className="font-headline text-[10px] uppercase font-black">45% Sent</span>
+                                            </div>
+                                            <button className="bg-white border-2 border-inverse-surface px-4 py-2 rounded-md font-headline text-xs uppercase font-bold">Pause</button>
+                                        </div>
+                                    </div>
+                                    <div className="flex flex-col md:flex-row items-center justify-between p-6 bg-stone-50 border-2 border-inverse-surface rounded-lg gap-4">
+                                        <div className="flex items-center gap-6 w-full md:w-auto">
+                                            <div className="bg-white border-2 border-inverse-surface p-3 rounded-lg flex-shrink-0">
+                                                <span className="material-symbols-outlined text-3xl">image</span>
+                                            </div>
+                                            <div>
+                                                <h4 className="font-headline font-bold text-lg leading-none">Banner_Assets_v2.zip</h4>
+                                                <p className="font-body text-sm text-on-surface-variant">To: <span className="font-headline uppercase font-black text-xs text-on-surface">NAS-LOCAL</span></p>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-8 w-full md:w-auto justify-between md:justify-end">
+                                            <div className="flex items-center gap-2 px-4 py-1.5 bg-stone-100 border-2 border-[#0e0e0e] rounded-full">
+                                                <span className="material-symbols-outlined text-xs text-green-600">check_circle</span>
+                                                <span className="font-headline text-[10px] uppercase font-black">Success</span>
+                                            </div>
+                                            <button className="bg-inverse-surface text-surface px-4 py-2 rounded-md font-headline text-xs uppercase font-bold">Open</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </section>
+                        </div>
+                        <BottomTransferDock />
+                    </main>
+                </div>
+            );
+        };
+
+        const PeersPage = () => {
+            return (
+                <div className="flex h-screen overflow-hidden">
+                    <SideNavBar />
+                    <main className="flex-1 flex flex-col min-w-0 bg-surface relative">
+                        <TopNavBar />
+                        <section className="flex-1 overflow-y-auto p-10 bg-stone-50">
+                            <div className="max-w-7xl mx-auto">
+                                <div className="flex items-end justify-between mb-10">
+                                    <div>
+                                        <h2 className="text-5xl font-black font-headline tracking-tighter mb-2">Discovered Peers</h2>
+                                        <p className="text-secondary font-body max-w-md">Scanning local frequency. Only showing trusted and visible devices in your current subnet.</p>
+                                    </div>
+                                    <div className="flex gap-4">
+                                        <button className="px-6 py-2 ink-border rounded-full bg-white font-headline font-bold text-xs uppercase tracking-widest flex items-center gap-2">
+                                            <span className="material-symbols-outlined text-sm">filter_list</span> Filter
+                                        </button>
+                                        <button className="px-6 py-2 ink-border rounded-full bg-[#ffeb2a] font-headline font-bold text-xs uppercase tracking-widest flex items-center gap-2">
+                                            <span className="material-symbols-outlined text-sm">refresh</span> Rescan
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 pb-32">
+                                    <div className="bg-white ink-border rounded-lg p-6 flex flex-col gap-6 relative group transition-all hover:hard-shadow hover:-translate-y-1">
+                                        <div className="flex justify-between items-start">
+                                            <div className="w-16 h-16 bg-primary-container ink-border rounded-2xl flex items-center justify-center">
+                                                <span className="material-symbols-outlined text-3xl">laptop_mac</span>
+                                            </div>
+                                            <div className="flex flex-col items-end gap-2">
+                                                <div className="flex items-center gap-2 bg-stone-100 px-3 py-1 ink-border rounded-full text-[10px] font-headline font-bold uppercase tracking-widest">
+                                                    <div className="w-2 h-2 rounded-full bg-green-500"></div> Online
+                                                </div>
+                                                <span className="px-3 py-1 bg-stone-50 ink-border rounded-full font-headline text-[10px] font-bold uppercase tracking-widest">macOS Sonoma</span>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <h3 className="text-2xl font-black font-headline tracking-tight">Postmaster_Studio</h3>
+                                            <p className="text-xs font-headline font-bold text-primary uppercase tracking-widest mt-1">ID: PSTR-8821-X9</p>
+                                            <p className="text-secondary text-sm mt-3 font-body">Device: MacBook Pro 14"</p>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-4 mt-auto">
+                                            <button className="py-3 ink-border rounded-xl font-headline font-bold text-xs uppercase tracking-widest bg-white">Connect</button>
+                                            <button className="py-3 bg-primary-container ink-border rounded-xl font-headline font-bold text-xs uppercase tracking-widest">Send File</button>
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-primary-container ink-border rounded-lg p-6 flex flex-col gap-6 relative hard-shadow -translate-y-1">
+                                        <div className="flex justify-between items-start">
+                                            <div className="w-16 h-16 bg-white ink-border rounded-2xl flex items-center justify-center">
+                                                <span className="material-symbols-outlined text-3xl">smartphone</span>
+                                            </div>
+                                            <div className="flex flex-col items-end gap-2">
+                                                <div className="flex items-center gap-2 bg-white px-3 py-1 ink-border rounded-full text-[10px] font-headline font-bold uppercase tracking-widest">
+                                                    <div className="w-2 h-2 rounded-full bg-green-500"></div> Online
+                                                </div>
+                                                <span className="px-3 py-1 bg-white ink-border rounded-full font-headline text-[10px] font-bold uppercase tracking-widest">Android 14</span>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <div className="flex items-center gap-2">
+                                                <h3 className="text-2xl font-black font-headline tracking-tight">Pixel_Traveler</h3>
+                                                <span className="material-symbols-outlined text-primary text-xl" style={{fontVariationSettings: "'FILL' 1"}}>verified</span>
+                                            </div>
+                                            <p className="text-xs font-headline font-bold text-on-primary-container uppercase tracking-widest mt-1">ID: PSTR-1102-M1</p>
+                                            <p className="text-on-primary-container text-sm mt-3 font-body">Device: Google Pixel 8 Pro</p>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-4 mt-auto">
+                                            <button className="py-3 ink-border rounded-xl font-headline font-bold text-xs uppercase tracking-widest bg-white">Connected</button>
+                                            <button className="py-3 bg-inverse-surface text-white rounded-xl font-headline font-bold text-xs uppercase tracking-widest">Send File</button>
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-stone-100 ink-border rounded-lg p-6 flex flex-col gap-6 opacity-60">
+                                        <div className="flex justify-between items-start">
+                                            <div className="w-16 h-16 bg-white ink-border rounded-2xl flex items-center justify-center">
+                                                <span className="material-symbols-outlined text-3xl text-secondary">desktop_windows</span>
+                                            </div>
+                                            <div className="flex items-center gap-2 bg-stone-200 px-3 py-1 ink-border rounded-full text-[10px] font-headline font-bold uppercase tracking-widest">
+                                                <div className="w-2 h-2 rounded-full bg-stone-400"></div> Offline
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <h3 className="text-2xl font-black font-headline tracking-tight">Office_Tower_04</h3>
+                                            <p className="text-xs font-headline font-bold text-primary uppercase tracking-widest mt-1">ID: PSTR-9942-Z0</p>
+                                        </div>
+                                        <div className="mt-auto">
+                                            <button className="w-full py-3 ink-border rounded-xl font-headline font-bold text-xs uppercase tracking-widest bg-stone-200 cursor-not-allowed" disabled>Unavailable</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+                        <BottomTransferDock />
+                    </main>
+                    {/* Side Drawer Simulation */}
+                    <aside className="hidden xl:flex w-96 border-l-2 border-[#0e0e0e] bg-white h-full flex-shrink-0 flex-col overflow-y-auto">
+                        <div className="p-8 border-b-2 border-stone-100">
+                            <h4 className="font-headline font-black text-lg uppercase tracking-widest mb-8">Peer Details</h4>
+                            <div className="flex flex-col items-center text-center">
+                                <div className="w-24 h-24 bg-primary-container ink-border rounded-3xl flex items-center justify-center mb-6 relative">
+                                    <span className="material-symbols-outlined text-5xl">smartphone</span>
+                                    <div className="absolute -bottom-2 -right-2 w-8 h-8 bg-green-500 border-4 border-white rounded-full"></div>
+                                </div>
+                                <h3 className="text-3xl font-black font-headline tracking-tight mb-1">Pixel_Traveler</h3>
+                                <p className="font-headline font-bold text-primary text-xs uppercase tracking-widest">PSTR-1102-M1</p>
+                                <div className="mt-8 flex gap-4 w-full">
+                                    <div className="flex-1 bg-stone-50 p-4 rounded-2xl ink-border text-center">
+                                        <p className="text-[10px] font-headline font-black uppercase text-secondary mb-1">Trust</p>
+                                        <p className="font-headline font-bold text-lg text-primary">High</p>
+                                    </div>
+                                    <div className="flex-1 bg-stone-50 p-4 rounded-2xl ink-border text-center">
+                                        <p className="text-[10px] font-headline font-black uppercase text-secondary mb-1">Signal</p>
+                                        <p className="font-headline font-bold text-lg">-42 dBm</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="p-8 space-y-6">
+                            <h5 className="font-headline font-black text-xs uppercase tracking-widest">Recent Activity</h5>
+                            <div className="space-y-4">
+                                <div className="border-b border-stone-100 pb-3 flex items-center gap-3">
+                                    <span className="material-symbols-outlined text-stone-400">description</span>
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-sm font-bold truncate">Project_Bento.fig</p>
+                                        <p className="text-[10px] text-stone-500">2 mins ago • 14.2 MB</p>
+                                    </div>
+                                    <span className="material-symbols-outlined text-green-600 text-sm">check_circle</span>
+                                </div>
+                                <div className="border-b border-stone-100 pb-3 flex items-center gap-3">
+                                    <span className="material-symbols-outlined text-stone-400">image</span>
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-sm font-bold truncate">Asset_Pack_v2.zip</p>
+                                        <p className="text-[10px] text-stone-500">1 hour ago • 456 MB</p>
+                                    </div>
+                                    <span className="material-symbols-outlined text-green-600 text-sm">check_circle</span>
+                                </div>
+                            </div>
+                            <button className="w-full py-4 border-2 border-red-200 text-red-600 font-headline font-black uppercase tracking-widest text-xs rounded-xl hover:bg-red-50 transition-colors mt-8">
+                                Revoke Device Trust
+                            </button>
+                        </div>
+                    </aside>
+                </div>
+            );
+        };
+
+        const TransfersPage = () => {
+            return (
+                <div className="flex h-screen overflow-hidden">
+                    <SideNavBar />
+                    <main className="flex-1 flex flex-col min-w-0 bg-surface overflow-y-auto">
+                        <TopNavBar />
+                        <div className="p-12 space-y-12 max-w-6xl mx-auto w-full pb-40">
+                            <div className="flex flex-col sm:flex-row justify-between sm:items-end gap-6">
+                                <div>
+                                    <h2 className="text-5xl font-headline font-black tracking-tighter text-inverse-surface mb-2">Transfers</h2>
+                                    <p className="text-secondary font-body max-w-md">Real-time oversight of local packet delivery across active nodes.</p>
+                                </div>
+                                <div className="flex gap-4">
+                                    <div className="bg-stone-100 ink-border p-4 rounded-lg flex items-center gap-4">
+                                        <span className="material-symbols-outlined text-primary text-3xl">upload</span>
+                                        <div><p className="font-headline text-[10px] font-bold text-stone-500 uppercase">Up</p><p className="font-headline text-xl font-bold">42.8 MB/s</p></div>
+                                    </div>
+                                    <div className="bg-stone-100 ink-border p-4 rounded-lg flex items-center gap-4">
+                                        <span className="material-symbols-outlined text-primary text-3xl">download</span>
+                                        <div><p className="font-headline text-[10px] font-bold text-stone-500 uppercase">Down</p><p className="font-headline text-xl font-bold">12.1 MB/s</p></div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <section className="space-y-6">
+                                <div className="flex items-center gap-3">
+                                    <span className="material-symbols-outlined font-bold">pending_actions</span>
+                                    <h3 className="font-headline text-lg font-black uppercase tracking-tight">Active Batches</h3>
+                                </div>
+
+                                <div className="ink-border rounded-lg bg-stone-50 overflow-hidden shadow-[4px_4px_0px_0px_#0e0e0e]">
+                                    <div className="p-6 bg-primary-container flex flex-col md:flex-row md:items-center justify-between border-b-2 border-inverse-surface gap-6">
+                                        <div className="flex items-center gap-6">
+                                            <div className="w-16 h-16 bg-white ink-border rounded-md flex items-center justify-center">
+                                                <span className="material-symbols-outlined text-3xl">folder_zip</span>
+                                            </div>
+                                            <div>
+                                                <h4 className="font-headline text-xl font-black tracking-tight leading-none">BATCH_XRAY_772</h4>
+                                                <div className="flex gap-4 mt-2">
+                                                    <span className="font-headline text-[10px] font-bold uppercase tracking-wider">12 Files</span>
+                                                    <span className="font-headline text-[10px] font-bold uppercase tracking-wider">4.2 GB Total</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="flex-1 max-w-sm">
+                                            <div className="flex justify-between mb-2">
+                                                <span className="font-headline text-[10px] font-black uppercase">Progress</span>
+                                                <span className="font-headline text-xs font-bold">68%</span>
+                                            </div>
+                                            <div className="w-full h-4 bg-white/50 ink-border rounded-full overflow-hidden">
+                                                <div className="bg-[#665d00] h-full w-[68%] rounded-r-full"></div>
+                                            </div>
+                                        </div>
+                                        <button className="material-symbols-outlined">expand_less</button>
+                                    </div>
+                                    <div className="p-4 bg-white space-y-1">
+                                        {[
+                                            { name: "Marcus V.", file: "project_final.mp4", speed: "18.4 MB/s", eta: "2m 14s", status: "Sending", img: "https://lh3.googleusercontent.com/aida-public/AB6AXuCTU-8IDn_o3EeSE_xnlZ5tUTvq85Ig7bBbbtS2S5AgBL3V_iVbor-kYoXccsWCiDQ_8nRrguG0Kq34eQ2OWTRn48rGViTjZoWQ8ABUBbLbcaPC5oJzPrh8DAp-zOGL03iumI_6piz1Tdeyxai7ljCRnybukVtAnv3CThrLZKqNEFBPdjiWwbwTNQHqLZcXc8_ULxLlzodM1FlJxFWkh7aRII0ZpJrIqJEg6z4rKxVI7CYFkpnxOeZbY1HEAItDbGXqIZZAqLwEk_zb" },
+                                            { name: "Elena Ross", file: "texture_v4.bin", speed: "12.1 MB/s", eta: "45s", status: "Sending", img: "https://lh3.googleusercontent.com/aida-public/AB6AXuB1U9A8qxc6hgYNCwo6CvwNJyZwIzqtwGrYxAAli-IGeeuZjgGnKbbCZsjoRJd4Kwmo-1ZT3kq_ouNcRK35DcB8rAwrad-yBYDWr2rhMeP8J2PvnUXEZFfuAwCqEHZBEcfEqcG-lSceDpBvupO5aKYKRLq7hZOQxo3b8hPs2rKdpvk7c-jo1U6eUJ3QRnKFoRygOWXHeZcvVOuRwCi-B4mgabYy7PqSheCWoxZoWEFkahhS5dkF9CZ2SSQpq61ITh05NYsLgm3zUDoo" },
+                                            { name: "David Chen", file: "logs_archive.tar", speed: "Stalled", eta: "--", status: "Retrying", img: "https://lh3.googleusercontent.com/aida-public/AB6AXuBm8wHZqqcsoGszZKAFnzWpTjA6ruvtdjd_48buecuGVjx-bYi5ZJQuiB0PVrZbcDdFNbskpHamPvES7kMYYysqYzSsuN-ch27s5Cx2_AUgWOUt0S-twYnf9KiLKgF4nfIv1NyU9XtTuFX6NauDWmOSYD9nyGK9ihhsf_WgRcKlqpYwQNrTgKmclq5vBrlQ8ucmvu3otG3_-Kk1AYWhiDUAkQLOExxIRgrf4Wpgd9VVEH0aEqQIjqZGoDUdP7pAQJVNokk7fT_XroF0" }
+                                        ].map((row, i) => (
+                                            <div key={i} className="grid grid-cols-12 items-center py-4 px-6 hover:bg-stone-50 transition-colors rounded-md border-b last:border-0 border-stone-100">
+                                                <div className="col-span-4 flex items-center gap-3">
+                                                    <img className="w-8 h-8 rounded-full border border-stone-300" src={row.img} />
+                                                    <div>
+                                                        <p className="font-bold text-sm leading-none">{row.name}</p>
+                                                        <p className="text-xs text-stone-500 truncate mt-1">{row.file}</p>
+                                                    </div>
+                                                </div>
+                                                <div className="col-span-3 text-center font-headline font-bold text-sm">{row.speed}</div>
+                                                <div className="col-span-2 text-center text-xs text-stone-400">{row.eta}</div>
+                                                <div className="col-span-3 flex justify-end">
+                                                    <span className={`px-3 py-1 ink-border rounded-full text-[10px] font-headline font-black uppercase ${row.status === 'Retrying' ? 'bg-red-100 text-red-700' : 'bg-primary-container text-black'}`}>
+                                                        {row.status}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </section>
+                        </div>
+                        <BottomTransferDock />
+                    </main>
+                </div>
+            );
+        };
+
+        const SendPage = () => {
+            const navigate = useNavigate();
+            return (
+                <div className="flex h-screen overflow-hidden">
+                    <SideNavBar />
+                    <main className="flex-1 flex flex-col min-w-0 bg-surface">
+                        <TopNavBar />
+                        <div className="flex-1 p-8 flex flex-col items-center justify-center bg-stone-50 pb-40">
+                            <div className="w-full max-w-2xl aspect-video border-4 border-dashed border-[#0e0e0e]/20 rounded-3xl flex flex-col items-center justify-center p-12 bg-white hard-shadow group hover:border-primary transition-colors cursor-pointer relative overflow-hidden">
+                                <div className="absolute inset-0 opacity-5 pointer-events-none">
+                                    <img className="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBfjKq5b7DJ3BNLtLW2pPtnd0IXMCBFZOpS3i9TcNJ0MXF9BlJ8s440hF6rgdt6RrgtX"/>
+                                </div>
+                                <div className="relative z-10 flex flex-col items-center text-center">
+                                    <div className="w-24 h-24 bg-primary-container ink-border rounded-3xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                                        <span className="material-symbols-outlined text-5xl">upload_file</span>
+                                    </div>
+                                    <h2 className="text-4xl font-headline font-black tracking-tight mb-2">Ready for Dispatch</h2>
+                                    <p className="text-stone-500 uppercase tracking-widest text-xs font-bold mb-8">Drop files here or browse local storage</p>
+                                    <button className="bg-[#ffeb2a] ink-border px-10 py-4 rounded-2xl font-black font-headline uppercase tracking-widest text-sm hard-shadow hover-hard-shadow active:translate-y-1 transition-all flex items-center gap-3">
+                                        Select Files <span className="material-symbols-outlined">add_circle</span>
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <div className="mt-12 grid grid-cols-1 sm:grid-cols-2 gap-6 w-full max-w-2xl">
+                                <div className="bg-white ink-border p-6 rounded-2xl">
+                                    <p className="font-headline text-[10px] font-black uppercase text-stone-400 mb-2">Discovery Mode</p>
+                                    <div className="flex items-center gap-3">
+                                        <span className="material-symbols-outlined text-primary">sensors</span>
+                                        <span className="font-bold">Visible to 12 Peers</span>
+                                    </div>
+                                </div>
+                                <div className="bg-white ink-border p-6 rounded-2xl">
+                                    <p className="font-headline text-[10px] font-black uppercase text-stone-400 mb-2">Network Health</p>
+                                    <div className="flex items-center gap-3">
+                                        <span className="material-symbols-outlined text-green-600">signal_cellular_alt</span>
+                                        <span className="font-bold">Gigabit Ready</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <BottomTransferDock />
+                    </main>
+                </div>
+            );
+        };
+
+        const HistoryPage = () => {
+            return (
+                <div className="flex h-screen overflow-hidden">
+                    <SideNavBar />
+                    <main className="flex-1 flex flex-col min-w-0 bg-surface">
+                        <TopNavBar />
+                        <div className="p-12 max-w-5xl mx-auto w-full overflow-y-auto pb-40">
+                             <h2 className="text-5xl font-headline font-black tracking-tighter text-inverse-surface mb-10">Fulfillment Log</h2>
+                             <div className="space-y-4">
+                                {[
+                                    { name: "BRAND_GUIDELINES_V1.pdf", size: "124 MB", peer: "DESIGN_STUDIO", time: "2 hours ago", status: "Delivered" },
+                                    { name: "Q4_FINANCIALS_EXT.xlsx", size: "8.2 MB", peer: "ACCOUNTING_01", time: "5 hours ago", status: "Delivered" },
+                                    { name: "RAW_FOOTAGE_DAY_03.mov", size: "4.2 GB", peer: "NAS_STORAGE", time: "Yesterday", status: "Delivered" },
+                                    { name: "WEBSITE_MIGRATION_DB.sql", size: "842 MB", peer: "PROD_SERVER", time: "Oct 24, 2023", status: "Delivered" },
+                                    { name: "TEAM_PORTRAITS_2023.zip", size: "1.1 GB", peer: "PIXEL_TRAVELER", time: "Oct 22, 2023", status: "Delivered" }
+                                ].map((item, i) => (
+                                    <div key={i} className="flex items-center justify-between p-6 bg-white ink-border rounded-xl hover:bg-stone-50 transition-colors">
+                                        <div className="flex items-center gap-6">
+                                            <div className="w-12 h-12 bg-stone-100 rounded-lg flex items-center justify-center">
+                                                <span className="material-symbols-outlined text-stone-400">inventory_2</span>
+                                            </div>
+                                            <div>
+                                                <p className="font-bold text-lg leading-none">{item.name}</p>
+                                                <p className="text-xs text-stone-500 mt-1 uppercase font-headline tracking-tighter">
+                                                    {item.size} • To: {item.peer}
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="text-xs font-bold uppercase tracking-widest text-[#665d00]">{item.status}</p>
+                                            <p className="text-[10px] text-stone-400 mt-1">{item.time}</p>
+                                        </div>
+                                    </div>
+                                ))}
+                             </div>
+                        </div>
+                        <BottomTransferDock />
+                    </main>
+                </div>
+            );
+        };
+
+        // --- App Entry Point ---
+
+        const App = () => {
+            return (
+                <MemoryRouter>
+                    <Routes>
+                        <Route path="/" element={<LoginPage />} />
+                        <Route path="/dashboard" element={<DashboardPage />} />
+                        <Route path="/peers" element={<PeersPage />} />
+                        <Route path="/transfers" element={<TransfersPage />} />
+                        <Route path="/send" element={<SendPage />} />
+                        <Route path="/history" element={<HistoryPage />} />
+                    </Routes>
+                </MemoryRouter>
+            );
+        };
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
