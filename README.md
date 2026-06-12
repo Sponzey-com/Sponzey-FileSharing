@@ -255,15 +255,6 @@ scripts\build_windows.bat
 
 The script uses the project-local `.dart_tool\pub-cache` as `PUB_CACHE` by default to reduce problems caused by splitting `C:\Users\...\Pub\Cache` and the project drive. If the same error still occurs, the current drive likely does not support symlinks and the project should be moved to a local NTFS drive such as `C:\`.
 
-## GitHub Actions Release
-
-The repository includes [.github/workflows/desktop-release.yml](.github/workflows/desktop-release.yml) for desktop CI and release packaging.
-
-- Pull requests to `main` build macOS, Windows, and Linux artifacts without publishing a release.
-- Pushing a tag like `v1.0.0` builds all three desktop targets and publishes a GitHub Release.
-- Manual `workflow_dispatch` can publish a release for the provided `release_tag`.
-- Release assets are uploaded as `sponzey-file-sharing-macos-*.zip`, `sponzey-file-sharing-windows-*.zip`, and `sponzey-file-sharing-linux-*.tar.gz`.
-
 ## Tests
 
 Run all tests:

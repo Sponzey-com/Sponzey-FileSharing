@@ -255,15 +255,6 @@ scripts\build_windows.bat
 
 스크립트는 기본적으로 프로젝트 내부 `.dart_tool\pub-cache`를 `PUB_CACHE`로 사용해 `C:\Users\...\Pub\Cache`와 프로젝트 드라이브가 갈라지는 문제를 줄인다. 그래도 같은 오류가 나면 현재 드라이브가 symlink를 지원하지 않는 것이므로 프로젝트를 `C:\` 같은 로컬 NTFS 드라이브로 옮겨야 한다.
 
-## GitHub Actions 릴리즈
-
-데스크톱 CI와 릴리즈 패키징은 [.github/workflows/desktop-release.yml](.github/workflows/desktop-release.yml)에서 처리합니다.
-
-- `main` 대상 Pull Request에서는 macOS, Windows, Linux 빌드 산출물을 만들지만 릴리즈는 발행하지 않습니다.
-- `v1.0.0` 같은 태그를 push하면 세 데스크톱 타겟을 모두 빌드하고 GitHub Release를 발행합니다.
-- 수동 `workflow_dispatch` 실행 시 입력한 `release_tag` 기준으로 릴리즈를 발행할 수 있습니다.
-- 릴리즈 산출물은 `sponzey-file-sharing-macos-*.zip`, `sponzey-file-sharing-windows-*.zip`, `sponzey-file-sharing-linux-*.tar.gz`로 업로드됩니다.
-
 ## 테스트
 
 전체 테스트:
