@@ -41,6 +41,27 @@ void main() {
     );
   });
 
+  test('recognizes Windows invalid argument socket errors as recoverable', () {
+    expect(
+      RawUdpDiscoveryTransport.isInvalidSocketArgumentError(
+        const OSError('잘못된 인수를 입력했습니다.', 10022),
+      ),
+      isTrue,
+    );
+    expect(
+      RawUdpDiscoveryTransport.isInvalidSocketArgumentError(
+        const OSError('Invalid argument', 22),
+      ),
+      isTrue,
+    );
+    expect(
+      RawUdpDiscoveryTransport.isInvalidSocketArgumentError(
+        const OSError('Access denied', 5),
+      ),
+      isFalse,
+    );
+  });
+
   test('keeps every default connectable LAN interface for discovery', () {
     final selected = RawUdpDiscoveryTransport.selectPreferredInterfaces([
       _snapshot(

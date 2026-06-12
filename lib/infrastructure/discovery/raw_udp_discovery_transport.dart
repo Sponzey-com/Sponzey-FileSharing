@@ -174,36 +174,69 @@ class RawUdpDiscoveryTransport implements DiscoveryTransport {
     RawDatagramSocket socket,
     Set<String> preferredInterfaceIds,
   ) async {
+    _tryJoinMulticast(socket, description: 'default multicast group');
+
+    final List<NetworkInterface> interfaces;
     try {
-      socket.joinMulticast(_multicastGroup);
-    } on SocketException catch (error, stackTrace) {
+      interfaces = await NetworkInterface.list(
+        includeLoopback: true,
+        type: InternetAddressType.IPv4,
+      );
+    } catch (error, stackTrace) {
       _logger.warning(
         AppLogCategory.discovery,
-        'Failed to join default multicast group',
+        'Failed to list interfaces for discovery multicast join',
         error: error,
         stackTrace: stackTrace,
       );
+      return;
     }
 
-    final interfaces = await NetworkInterface.list(
-      includeLoopback: true,
-      type: InternetAddressType.IPv4,
-    );
     for (final interface in interfaces) {
       final stableId = '${interface.name}#${interface.index}';
       if (!preferredInterfaceIds.contains(stableId)) {
         continue;
       }
-      try {
+      _tryJoinMulticast(
+        socket,
+        interface: interface,
+        description: 'multicast group on ${interface.name}',
+        debugOnly: true,
+      );
+    }
+  }
+
+  void _tryJoinMulticast(
+    RawDatagramSocket socket, {
+    NetworkInterface? interface,
+    required String description,
+    bool debugOnly = false,
+  }) {
+    try {
+      if (interface == null) {
+        socket.joinMulticast(_multicastGroup);
+      } else {
         socket.joinMulticast(_multicastGroup, interface);
-      } on SocketException catch (error, stackTrace) {
+      }
+    } catch (error, stackTrace) {
+      final message =
+          'Skipped discovery $description. '
+          'Broadcast discovery remains active.';
+      if (debugOnly || isInvalidSocketArgumentError(error)) {
         _logger.debug(
           AppLogCategory.discovery,
-          'Skipped multicast join on ${interface.name}',
+          message,
           error: error,
           stackTrace: stackTrace,
         );
+        return;
       }
+      _logger.warning(
+        AppLogCategory.discovery,
+        message,
+        error: error,
+        stackTrace: stackTrace,
+      );
     }
   }
 
@@ -356,8 +389,7 @@ class RawUdpDiscoveryTransport implements DiscoveryTransport {
       port,
     );
     socket.broadcastEnabled = true;
-    socket.multicastLoopback = true;
-    socket.multicastHops = 1;
+    _configureMulticastOptions(socket);
     socket.writeEventsEnabled = false;
     return socket;
   }
@@ -371,56 +403,76 @@ class RawUdpDiscoveryTransport implements DiscoveryTransport {
       port,
     );
     socket.broadcastEnabled = true;
-    socket.multicastLoopback = true;
-    socket.multicastHops = 1;
+    _configureMulticastOptions(socket);
     socket.writeEventsEnabled = false;
     return socket;
+  }
+
+  void _configureMulticastOptions(RawDatagramSocket socket) {
+    try {
+      socket.multicastLoopback = true;
+      socket.multicastHops = 1;
+    } catch (error, stackTrace) {
+      _logger.debug(
+        AppLogCategory.discovery,
+        'Skipped discovery multicast socket options. '
+        'Broadcast discovery remains active.',
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
   }
 
   Future<RawDatagramSocket> _bindSocketWithPlatformFallback(
     InternetAddress bindAddress,
     int port,
   ) async {
-    try {
-      return await RawDatagramSocket.bind(
-        bindAddress,
-        port,
-        reuseAddress: true,
-        reusePort: !Platform.isWindows,
-      );
-    } on SocketException catch (error, stackTrace) {
-      if (Platform.isWindows || !_isInvalidSocketArgument(error)) {
-        rethrow;
+    final attempts = _bindOptionsForCurrentPlatform();
+    Object? lastError;
+    StackTrace? lastStackTrace;
+    for (var index = 0; index < attempts.length; index++) {
+      final options = attempts[index];
+      try {
+        return await RawDatagramSocket.bind(
+          bindAddress,
+          port,
+          reuseAddress: options.reuseAddress,
+          reusePort: options.reusePort,
+        );
+      } catch (error, stackTrace) {
+        if (!isInvalidSocketArgumentError(error)) {
+          rethrow;
+        }
+        lastError = error;
+        lastStackTrace = stackTrace;
+        if (index == attempts.length - 1) {
+          break;
+        }
+        final next = attempts[index + 1];
+        _logger.warning(
+          AppLogCategory.discovery,
+          'Retrying discovery socket bind with '
+          'reuseAddress=${next.reuseAddress}, reusePort=${next.reusePort}',
+          error: error,
+          stackTrace: stackTrace,
+        );
       }
-      _logger.warning(
-        AppLogCategory.discovery,
-        'Retrying discovery socket bind without reusePort',
-        error: error,
-        stackTrace: stackTrace,
-      );
-      return RawDatagramSocket.bind(
-        bindAddress,
-        port,
-        reuseAddress: true,
-        reusePort: false,
-      );
-    } on OSError catch (error, stackTrace) {
-      if (Platform.isWindows || !_isInvalidSocketArgument(error)) {
-        rethrow;
-      }
-      _logger.warning(
-        AppLogCategory.discovery,
-        'Retrying discovery socket bind without reusePort',
-        error: error,
-        stackTrace: stackTrace,
-      );
-      return RawDatagramSocket.bind(
-        bindAddress,
-        port,
-        reuseAddress: true,
-        reusePort: false,
-      );
     }
+    Error.throwWithStackTrace(lastError!, lastStackTrace!);
+  }
+
+  static List<_DiscoverySocketBindOptions> _bindOptionsForCurrentPlatform() {
+    if (Platform.isWindows) {
+      return const [
+        _DiscoverySocketBindOptions(reuseAddress: false, reusePort: false),
+        _DiscoverySocketBindOptions(reuseAddress: true, reusePort: false),
+      ];
+    }
+    return const [
+      _DiscoverySocketBindOptions(reuseAddress: true, reusePort: true),
+      _DiscoverySocketBindOptions(reuseAddress: true, reusePort: false),
+      _DiscoverySocketBindOptions(reuseAddress: false, reusePort: false),
+    ];
   }
 
   bool _isAddressInUse(Object error) {
@@ -443,7 +495,7 @@ class RawUdpDiscoveryTransport implements DiscoveryTransport {
     return error.toString().toLowerCase().contains('address already in use');
   }
 
-  bool _isInvalidSocketArgument(Object error) {
+  static bool isInvalidSocketArgumentError(Object error) {
     if (error is SocketException) {
       final message = error.message.toLowerCase();
       final code = error.osError?.errorCode;
@@ -460,4 +512,14 @@ class RawUdpDiscoveryTransport implements DiscoveryTransport {
     }
     return error.toString().toLowerCase().contains('invalid argument');
   }
+}
+
+class _DiscoverySocketBindOptions {
+  const _DiscoverySocketBindOptions({
+    required this.reuseAddress,
+    required this.reusePort,
+  });
+
+  final bool reuseAddress;
+  final bool reusePort;
 }
