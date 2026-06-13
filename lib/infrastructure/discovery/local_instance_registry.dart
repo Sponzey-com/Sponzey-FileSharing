@@ -88,7 +88,7 @@ abstract interface class LocalInstanceRegistry {
     required Duration maxAge,
   });
 
-  Future<void> remove(String deviceId);
+  Future<void> remove(String instanceId);
 }
 
 class FileLocalInstanceRegistry implements LocalInstanceRegistry {
@@ -119,8 +119,12 @@ class FileLocalInstanceRegistry implements LocalInstanceRegistry {
     for (final directory in directories) {
       try {
         await directory.create(recursive: true);
-        final file = File(_filePath(directory, presence.deviceId));
+        final file = File(_filePath(directory, presence.instanceId));
         await file.writeAsString(payload, flush: true);
+        final legacyFile = File(_filePath(directory, presence.deviceId));
+        if (legacyFile.path != file.path && await legacyFile.exists()) {
+          await legacyFile.delete();
+        }
       } on FileSystemException {
         continue;
       }
@@ -160,10 +164,10 @@ class FileLocalInstanceRegistry implements LocalInstanceRegistry {
             continue;
           }
 
-          final existing = merged[presence.deviceId];
+          final existing = merged[presence.instanceId];
           if (existing == null ||
               existing.seenAtEpochMs < presence.seenAtEpochMs) {
-            merged[presence.deviceId] = presence;
+            merged[presence.instanceId] = presence;
           }
         } on FileSystemException {
           continue;
@@ -179,10 +183,10 @@ class FileLocalInstanceRegistry implements LocalInstanceRegistry {
   }
 
   @override
-  Future<void> remove(String deviceId) async {
+  Future<void> remove(String instanceId) async {
     final directories = await _resolveBaseDirectories();
     for (final directory in directories) {
-      final file = File(_filePath(directory, deviceId));
+      final file = File(_filePath(directory, instanceId));
       if (await file.exists()) {
         await file.delete();
       }
@@ -219,8 +223,8 @@ class FileLocalInstanceRegistry implements LocalInstanceRegistry {
     return directories.values.toList(growable: false);
   }
 
-  String _filePath(Directory directory, String deviceId) {
-    return p.join(directory.path, 'peer-$deviceId.json');
+  String _filePath(Directory directory, String instanceId) {
+    return p.join(directory.path, 'peer-$instanceId.json');
   }
 
   List<Directory> _resolveSharedRegistryDirectories() {

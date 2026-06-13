@@ -332,8 +332,7 @@ class DiscoveryController extends Notifier<DiscoveryState> {
       return;
     }
 
-    if (packet.instanceId == localIdentity.instanceId ||
-        packet.deviceId == localIdentity.deviceId) {
+    if (packet.instanceId == localIdentity.instanceId) {
       state = state.copyWith(
         receivedPacketCount: state.receivedPacketCount + 1,
         lastPacketAt: _now(),
@@ -440,7 +439,7 @@ class DiscoveryController extends Notifier<DiscoveryState> {
       deviceName: user.deviceName,
       osType: localIdentity.osType,
       port: _localAuthPort ?? ref.read(localAuthPortProvider),
-      controlPort: config.controlPort,
+      controlPort: _localAuthPort ?? ref.read(localAuthPortProvider),
       dataPort: config.dataPort,
       dataPortRange: config.dataPortRange.ports,
       capabilities: const ['discovery', 'control', 'data'],
@@ -515,8 +514,7 @@ class DiscoveryController extends Notifier<DiscoveryState> {
 
     var merged = peers;
     for (final entry in entries) {
-      if (entry.instanceId == localIdentity.instanceId ||
-          entry.deviceId == localIdentity.deviceId) {
+      if (entry.instanceId == localIdentity.instanceId) {
         continue;
       }
       if (!_matchesCurrentPairingGroupEntry(entry)) {
@@ -799,7 +797,7 @@ class DiscoveryController extends Notifier<DiscoveryState> {
     _packetSubscription = null;
     final localIdentity = _localIdentity;
     if (localIdentity != null) {
-      await _localInstanceRegistry?.remove(localIdentity.deviceId);
+      await _localInstanceRegistry?.remove(localIdentity.instanceId);
     }
     _localIdentity = null;
     _localAuthPort = null;

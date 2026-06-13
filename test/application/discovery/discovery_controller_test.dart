@@ -350,6 +350,29 @@ void main() {
     },
   );
 
+  test('broadcasts the actual listening control port', () async {
+    final controlTransport = _SilentControlTransport(localPort: 40210);
+    final container = _createContainer(
+      database: database,
+      transport: transport,
+      clock: clock,
+      controlTransport: controlTransport,
+    );
+    addTearDown(container.dispose);
+
+    container.read(authControllerProvider);
+    await _flush();
+    await container
+        .read(authControllerProvider.notifier)
+        .signIn(userId: 'team', password: 'secret');
+
+    container.read(discoveryControllerProvider);
+    await _flush();
+
+    expect(transport.broadcasts.single.packet.port, 40210);
+    expect(transport.broadcasts.single.packet.controlPort, 40210);
+  });
+
   test('ignores discovery packets from the same runtime instance', () async {
     final container = _createContainer(
       database: database,
@@ -386,6 +409,54 @@ void main() {
     await _flush();
 
     expect(container.read(discoveryControllerProvider).peers, isEmpty);
+  });
+
+  test('accepts a different runtime instance on the same device id', () async {
+    final controlTransport = _SilentControlTransport();
+    final container = _createContainer(
+      database: database,
+      transport: transport,
+      clock: clock,
+      controlTransport: controlTransport,
+    );
+    addTearDown(container.dispose);
+
+    container.read(authControllerProvider);
+    await _flush();
+    await container
+        .read(authControllerProvider.notifier)
+        .signIn(userId: 'team', password: 'secret');
+
+    container.read(discoveryControllerProvider);
+    await _flush();
+
+    transport.emit(
+      DiscoveryPacket(
+        type: DiscoveryPacketType.discoverAck,
+        protocolVersion: '1.0',
+        userId: 'team',
+        discoveryGroupTag: _discoveryGroupTag('team', 'secret'),
+        instanceId: 'other-local-instance',
+        displayName: 'Second Window',
+        deviceId: 'local-device',
+        deviceName: 'Same Mac',
+        osType: 'macos',
+        port: 40210,
+        controlPort: 40210,
+        receiveAvailable: true,
+        sentAtEpochMs: clock.value.millisecondsSinceEpoch,
+      ),
+    );
+    await _flush();
+
+    final state = container.read(discoveryControllerProvider);
+    expect(state.peers, hasLength(1));
+    expect(state.peers.single.deviceId, 'local-device');
+    expect(state.peers.single.port, 40210);
+    expect(
+      controlTransport.sentPackets.single.type,
+      AuthPacketType.connectRequest,
+    );
   });
 
   test(
@@ -1042,13 +1113,13 @@ class _FakeLocalInstanceRegistry implements LocalInstanceRegistry {
 
   @override
   Future<void> publish(LocalInstancePresence presence) async {
-    _entries.removeWhere((entry) => entry.deviceId == presence.deviceId);
+    _entries.removeWhere((entry) => entry.instanceId == presence.instanceId);
     _entries.add(presence);
   }
 
   @override
-  Future<void> remove(String deviceId) async {
-    _entries.removeWhere((entry) => entry.deviceId == deviceId);
+  Future<void> remove(String instanceId) async {
+    _entries.removeWhere((entry) => entry.instanceId == instanceId);
   }
 }
 
@@ -1098,6 +1169,9 @@ class _AutoAcceptControlTransport implements ControlTransport {
 }
 
 class _SilentControlTransport implements ControlTransport {
+  _SilentControlTransport({this.localPort});
+
+  final int? localPort;
   final StreamController<ControlDatagram> _controller =
       StreamController<ControlDatagram>.broadcast();
   final List<AuthPacket> sentPackets = [];
@@ -1123,5 +1197,6 @@ class _SilentControlTransport implements ControlTransport {
   }
 
   @override
-  Future<int> start({required int preferredPort}) async => preferredPort;
+  Future<int> start({required int preferredPort}) async =>
+      localPort ?? preferredPort;
 }
