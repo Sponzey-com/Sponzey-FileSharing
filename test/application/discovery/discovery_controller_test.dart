@@ -177,6 +177,95 @@ void main() {
     );
   });
 
+  test('sends discovery ack to the protocol discovery port', () async {
+    final container = _createContainer(
+      database: database,
+      transport: transport,
+      clock: clock,
+    );
+    addTearDown(container.dispose);
+
+    container.read(authControllerProvider);
+    await _flush();
+    await container
+        .read(authControllerProvider.notifier)
+        .signIn(userId: 'admin', password: 'secret');
+
+    container.read(discoveryControllerProvider);
+    await _flush();
+
+    transport.emit(
+      DiscoveryPacket(
+        type: DiscoveryPacketType.discover,
+        protocolVersion: '1.0',
+        userId: 'admin',
+        discoveryGroupTag: _discoveryGroupTag('admin', 'secret'),
+        instanceId: 'instance-ops',
+        displayName: 'Ops Room',
+        deviceId: 'device-ops',
+        deviceName: 'Windows Tower',
+        osType: 'windows',
+        port: 41010,
+        controlPort: 41010,
+        receiveAvailable: true,
+        sentAtEpochMs: clock.value.millisecondsSinceEpoch,
+      ),
+      port: 52123,
+    );
+    await _flush();
+
+    expect(transport.unicasts, hasLength(1));
+    expect(
+      transport.unicasts.single.packet.type,
+      DiscoveryPacketType.discoverAck,
+    );
+    expect(transport.unicasts.single.port, 38400);
+  });
+
+  test('uses local receive time for discovery peer freshness', () async {
+    final container = _createContainer(
+      database: database,
+      transport: transport,
+      clock: clock,
+    );
+    addTearDown(container.dispose);
+
+    container.read(authControllerProvider);
+    await _flush();
+    await container
+        .read(authControllerProvider.notifier)
+        .signIn(userId: 'admin', password: 'secret');
+
+    container.read(discoveryControllerProvider);
+    await _flush();
+
+    transport.emit(
+      DiscoveryPacket(
+        type: DiscoveryPacketType.discoverAck,
+        protocolVersion: '1.0',
+        userId: 'admin',
+        discoveryGroupTag: _discoveryGroupTag('admin', 'secret'),
+        instanceId: 'instance-skewed',
+        displayName: 'Skewed Clock Node',
+        deviceId: 'device-skewed',
+        deviceName: 'Windows VM',
+        osType: 'windows',
+        port: 41010,
+        controlPort: 41010,
+        receiveAvailable: true,
+        sentAtEpochMs: clock.value
+            .subtract(const Duration(hours: 1))
+            .millisecondsSinceEpoch,
+      ),
+      port: 52123,
+    );
+    await _flush();
+
+    final peer = container.read(discoveryControllerProvider).peers.single;
+    expect(peer.presence, PeerPresence.online);
+    expect(peer.lastSeenAt, clock.value);
+  });
+
   test('merges local machine peers from registry entries', () async {
     final registry = _FakeLocalInstanceRegistry(
       entries: <LocalInstancePresence>[

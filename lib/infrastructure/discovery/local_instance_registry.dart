@@ -156,18 +156,18 @@ class FileLocalInstanceRegistry implements LocalInstanceRegistry {
           }
 
           final presence = LocalInstancePresence.fromJson(raw);
-          final seenAt = DateTime.fromMillisecondsSinceEpoch(
-            presence.seenAtEpochMs,
-          );
+          final stat = await entity.stat();
+          final seenAt = _effectiveSeenAt(presence, stat.modified);
           if (now.difference(seenAt) > maxAge) {
             await entity.delete();
             continue;
           }
 
-          final existing = merged[presence.instanceId];
+          final effectivePresence = _withSeenAt(presence, seenAt);
+          final existing = merged[effectivePresence.instanceId];
           if (existing == null ||
-              existing.seenAtEpochMs < presence.seenAtEpochMs) {
-            merged[presence.instanceId] = presence;
+              existing.seenAtEpochMs < effectivePresence.seenAtEpochMs) {
+            merged[effectivePresence.instanceId] = effectivePresence;
           }
         } on FileSystemException {
           continue;
@@ -225,6 +225,37 @@ class FileLocalInstanceRegistry implements LocalInstanceRegistry {
 
   String _filePath(Directory directory, String instanceId) {
     return p.join(directory.path, 'peer-$instanceId.json');
+  }
+
+  DateTime _effectiveSeenAt(
+    LocalInstancePresence presence,
+    DateTime fileModifiedAt,
+  ) {
+    final payloadSeenAt = DateTime.fromMillisecondsSinceEpoch(
+      presence.seenAtEpochMs,
+    );
+    return payloadSeenAt.isAfter(fileModifiedAt)
+        ? payloadSeenAt
+        : fileModifiedAt;
+  }
+
+  LocalInstancePresence _withSeenAt(
+    LocalInstancePresence presence,
+    DateTime seenAt,
+  ) {
+    return LocalInstancePresence(
+      userId: presence.userId,
+      discoveryGroupTag: presence.discoveryGroupTag,
+      instanceId: presence.instanceId,
+      displayName: presence.displayName,
+      deviceId: presence.deviceId,
+      deviceName: presence.deviceName,
+      osType: presence.osType,
+      protocolVersion: presence.protocolVersion,
+      port: presence.port,
+      receiveAvailable: presence.receiveAvailable,
+      seenAtEpochMs: seenAt.millisecondsSinceEpoch,
+    );
   }
 
   List<Directory> _resolveSharedRegistryDirectories() {

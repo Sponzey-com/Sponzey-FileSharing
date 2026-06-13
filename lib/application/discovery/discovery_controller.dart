@@ -351,10 +351,15 @@ class DiscoveryController extends Notifier<DiscoveryState> {
       return;
     }
 
-    final peer = _peerFromPacket(packet, datagram.address);
+    final receivedAt = _now();
+    final peer = _peerFromPacket(
+      packet,
+      datagram.address,
+      receivedAt: receivedAt,
+    );
     final routeCandidates = await _ingestDiscoveryRouteCandidates(
       datagram: datagram,
-      receivedAt: _now(),
+      receivedAt: receivedAt,
     );
     if (!ref.mounted) {
       return;
@@ -364,7 +369,7 @@ class DiscoveryController extends Notifier<DiscoveryState> {
       peers: nextPeers,
       clearError: true,
       receivedPacketCount: state.receivedPacketCount + 1,
-      lastPacketAt: _now(),
+      lastPacketAt: receivedAt,
       lastDecision: 'accepted peer: ${peer.id} ${peer.address}:${peer.port}',
     );
     if (routeCandidates.isNotEmpty) {
@@ -410,7 +415,7 @@ class DiscoveryController extends Notifier<DiscoveryState> {
             .sendUnicast(
               ackPacket,
               address: datagram.address,
-              port: datagram.port,
+              port: ref.read(appConfigProvider).discoveryPort,
             );
       }
     }
@@ -457,8 +462,11 @@ class DiscoveryController extends Notifier<DiscoveryState> {
     return sortPeers(updated, sortMode: PeerSortMode.recent);
   }
 
-  PeerNode _peerFromPacket(DiscoveryPacket packet, InternetAddress address) {
-    final seenAt = DateTime.fromMillisecondsSinceEpoch(packet.sentAtEpochMs);
+  PeerNode _peerFromPacket(
+    DiscoveryPacket packet,
+    InternetAddress address, {
+    required DateTime receivedAt,
+  }) {
     return PeerNode(
       deviceId: packet.deviceId,
       userId: packet.userId,
@@ -466,14 +474,14 @@ class DiscoveryController extends Notifier<DiscoveryState> {
       deviceName: packet.deviceName,
       osType: packet.osType,
       protocolVersion: packet.protocolVersion,
-      lastSeenAt: seenAt,
+      lastSeenAt: receivedAt,
       address: address.address,
       port: packet.controlPort ?? packet.port,
       receiveAvailable: packet.receiveAvailable,
       presence: resolvePeerPresence(
         protocolVersion: packet.protocolVersion,
         config: ref.read(appConfigProvider),
-        lastSeenAt: seenAt,
+        lastSeenAt: receivedAt,
         now: _now(),
       ),
     );

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -157,4 +158,60 @@ void main() {
     );
     expect(remaining.map((entry) => entry.instanceId), ['instance-02']);
   });
+
+  test(
+    'uses registry file modified time when payload clock is stale',
+    () async {
+      final sandbox = await Directory.systemTemp.createTemp(
+        'sponzey-local-registry-test-',
+      );
+      addTearDown(() async {
+        if (await sandbox.exists()) {
+          await sandbox.delete(recursive: true);
+        }
+      });
+
+      final registry = FileLocalInstanceRegistry(
+        baseDirectories: [sandbox],
+        isMacOS: false,
+        isWindows: false,
+        applicationSupportDirectoryLoader: () async => sandbox,
+      );
+      final now = DateTime(2026, 4, 9, 12, 0, 0);
+      final modifiedAt = now.subtract(const Duration(seconds: 5));
+      final oldPayloadSeenAt = now.subtract(const Duration(hours: 1));
+      final file = File(p.join(sandbox.path, 'peer-instance-skewed.json'));
+      await file.writeAsString(
+        jsonEncode(
+          const LocalInstancePresence(
+              userId: 'team',
+              discoveryGroupTag: 'group-tag-001',
+              instanceId: 'instance-skewed',
+              displayName: 'Windows VM',
+              deviceId: 'same-device',
+              deviceName: 'Windows Host',
+              osType: 'windows',
+              protocolVersion: '1.0',
+              port: 40202,
+              receiveAvailable: true,
+              seenAtEpochMs: 1,
+            ).toJson()
+            ..['seenAtEpochMs'] = oldPayloadSeenAt.millisecondsSinceEpoch,
+        ),
+      );
+      await file.setLastModified(modifiedAt);
+
+      final entries = await registry.listActive(
+        now: now,
+        maxAge: const Duration(seconds: 30),
+      );
+
+      expect(entries, hasLength(1));
+      expect(entries.single.instanceId, 'instance-skewed');
+      expect(
+        entries.single.seenAtEpochMs,
+        greaterThan(oldPayloadSeenAt.millisecondsSinceEpoch),
+      );
+    },
+  );
 }

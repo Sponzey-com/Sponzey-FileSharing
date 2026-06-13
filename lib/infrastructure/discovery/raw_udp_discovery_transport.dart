@@ -93,17 +93,24 @@ class RawUdpDiscoveryTransport implements DiscoveryTransport {
   }) async {
     final socket = _requireSendSocket();
     final payload = packet.encode();
+    final receiveSocket = _receiveSocket;
+    final receiveSocketDestinationsSent = <String>{};
     final wildcardDestinationsSent = <String>{};
 
     for (final target in _broadcastTargets) {
       final address = InternetAddress(target.address);
+      final destinationKey = '${target.address}:$port';
+      if (receiveSocket != null &&
+          receiveSocketDestinationsSent.add(destinationKey)) {
+        _sendDatagram(receiveSocket, payload, address, port);
+      }
+
       final targetSocket =
           _sendSocketsByLocalAddress[target.localAddress] ?? socket;
       _sendDatagram(targetSocket, payload, address, port);
 
-      final wildcardKey = '${target.address}:$port';
       if (!identical(targetSocket, socket) &&
-          wildcardDestinationsSent.add(wildcardKey)) {
+          wildcardDestinationsSent.add(destinationKey)) {
         _sendDatagram(socket, payload, address, port);
       }
     }
