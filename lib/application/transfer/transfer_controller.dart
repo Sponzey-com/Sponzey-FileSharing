@@ -167,6 +167,7 @@ class TransferController extends Notifier<TransferState> {
           sessionId: session.sessionId,
           fromUserId: _currentUserId(),
           fromDeviceId: _currentDeviceId(),
+          fromInstanceId: _currentInstanceId(),
           fromDisplayName: _currentDisplayName(),
           transferId: transferId,
           transferFileName: preparedFile.fileName,
@@ -343,6 +344,7 @@ class TransferController extends Notifier<TransferState> {
           sessionId: context.session.sessionId,
           fromUserId: _currentUserId(),
           fromDeviceId: _currentDeviceId(),
+          fromInstanceId: _currentInstanceId(),
           fromDisplayName: _currentDisplayName(),
           transferId: transferId,
           transferChunkCount: context.preparedFile.chunkCount,
@@ -512,6 +514,7 @@ class TransferController extends Notifier<TransferState> {
         sessionId: context.session.sessionId,
         fromUserId: _currentUserId(),
         fromDeviceId: _currentDeviceId(),
+        fromInstanceId: _currentInstanceId(),
         fromDisplayName: _currentDisplayName(),
         transferId: transferId,
         transferChunkIndex: chunkIndex,
@@ -578,7 +581,7 @@ class TransferController extends Notifier<TransferState> {
       return;
     }
 
-    final peerId = '${packet.fromUserId}@${packet.fromDeviceId}';
+    final peerId = _peerIdFromPacket(packet);
     final session = ref.read(peerAuthSessionByPeerIdProvider(peerId));
     if (session == null || !session.isAuthenticated) {
       await _sendTransferInitAck(
@@ -1112,6 +1115,7 @@ class TransferController extends Notifier<TransferState> {
         sessionId: sessionId,
         fromUserId: _currentUserId(),
         fromDeviceId: _currentDeviceId(),
+        fromInstanceId: _currentInstanceId(),
         fromDisplayName: _currentDisplayName(),
         transferId: transferId,
         transferAccepted: accepted,
@@ -1138,6 +1142,7 @@ class TransferController extends Notifier<TransferState> {
         sessionId: sessionId,
         fromUserId: _currentUserId(),
         fromDeviceId: _currentDeviceId(),
+        fromInstanceId: _currentInstanceId(),
         fromDisplayName: _currentDisplayName(),
         transferId: transferId,
         transferChunkIndex: chunkIndex,
@@ -1166,6 +1171,7 @@ class TransferController extends Notifier<TransferState> {
         sessionId: sessionId,
         fromUserId: _currentUserId(),
         fromDeviceId: _currentDeviceId(),
+        fromInstanceId: _currentInstanceId(),
         fromDisplayName: _currentDisplayName(),
         transferId: transferId,
         transferChunkIndex: compactIndexes.first,
@@ -1192,6 +1198,7 @@ class TransferController extends Notifier<TransferState> {
         sessionId: sessionId,
         fromUserId: _currentUserId(),
         fromDeviceId: _currentDeviceId(),
+        fromInstanceId: _currentInstanceId(),
         fromDisplayName: _currentDisplayName(),
         transferId: transferId,
         transferWindowStart: windowStart,
@@ -1219,6 +1226,7 @@ class TransferController extends Notifier<TransferState> {
         sessionId: sessionId,
         fromUserId: _currentUserId(),
         fromDeviceId: _currentDeviceId(),
+        fromInstanceId: _currentInstanceId(),
         fromDisplayName: _currentDisplayName(),
         transferId: transferId,
         transferAccepted: accepted,
@@ -1562,6 +1570,22 @@ class TransferController extends Notifier<TransferState> {
       );
     }
     return deviceId;
+  }
+
+  String _currentInstanceId() {
+    final instanceId = _localIdentity?.instanceId;
+    if (instanceId == null || instanceId.trim().isEmpty) {
+      throw const AppException(
+        code: 'transfer_local_instance_missing',
+        message: '로컬 실행 인스턴스 식별 정보를 찾지 못했습니다.',
+      );
+    }
+    return instanceId;
+  }
+
+  String _peerIdFromPacket(AuthPacket packet) {
+    final instanceId = packet.fromInstanceId;
+    return '${packet.fromUserId}@${instanceId == null || instanceId.isEmpty ? packet.fromDeviceId : instanceId}';
   }
 
   String _randomHex(int bytes) {

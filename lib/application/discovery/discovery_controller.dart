@@ -43,6 +43,14 @@ class DiscoveryState {
     this.localRegistryEntryCount = 0,
     this.lastPacketAt,
     this.lastDecision,
+    this.discoveryTransportMode,
+    this.discoveryPreferredPort,
+    this.discoveryReceivePort,
+    this.discoverySendPort,
+    this.discoveryReceivePortFallback = false,
+    this.discoveryBroadcastTargetCount = 0,
+    this.discoveryBroadcastTargetPreview = const [],
+    this.discoveryTransportError,
   }) : currentDiscoveryGroupTagPreview =
            currentDiscoveryGroupTagPreview ?? currentPairingProofPreview;
 
@@ -57,7 +65,15 @@ class DiscoveryState {
       receivedPacketCount = 0,
       localRegistryEntryCount = 0,
       lastPacketAt = null,
-      lastDecision = null;
+      lastDecision = null,
+      discoveryTransportMode = null,
+      discoveryPreferredPort = null,
+      discoveryReceivePort = null,
+      discoverySendPort = null,
+      discoveryReceivePortFallback = false,
+      discoveryBroadcastTargetCount = 0,
+      discoveryBroadcastTargetPreview = const [],
+      discoveryTransportError = null;
 
   final List<PeerNode> peers;
   final String? errorMessage;
@@ -74,6 +90,14 @@ class DiscoveryState {
   final int localRegistryEntryCount;
   final DateTime? lastPacketAt;
   final String? lastDecision;
+  final String? discoveryTransportMode;
+  final int? discoveryPreferredPort;
+  final int? discoveryReceivePort;
+  final int? discoverySendPort;
+  final bool discoveryReceivePortFallback;
+  final int discoveryBroadcastTargetCount;
+  final List<String> discoveryBroadcastTargetPreview;
+  final String? discoveryTransportError;
 
   DiscoveryState copyWith({
     List<PeerNode>? peers,
@@ -89,8 +113,17 @@ class DiscoveryState {
     int? localRegistryEntryCount,
     DateTime? lastPacketAt,
     String? lastDecision,
+    String? discoveryTransportMode,
+    int? discoveryPreferredPort,
+    int? discoveryReceivePort,
+    int? discoverySendPort,
+    bool? discoveryReceivePortFallback,
+    int? discoveryBroadcastTargetCount,
+    List<String>? discoveryBroadcastTargetPreview,
+    String? discoveryTransportError,
     bool clearError = false,
     bool clearLastDecision = false,
+    bool clearDiscoveryTransportError = false,
   }) {
     return DiscoveryState(
       peers: peers ?? this.peers,
@@ -110,6 +143,22 @@ class DiscoveryState {
       lastDecision: clearLastDecision
           ? null
           : lastDecision ?? this.lastDecision,
+      discoveryTransportMode:
+          discoveryTransportMode ?? this.discoveryTransportMode,
+      discoveryPreferredPort:
+          discoveryPreferredPort ?? this.discoveryPreferredPort,
+      discoveryReceivePort: discoveryReceivePort ?? this.discoveryReceivePort,
+      discoverySendPort: discoverySendPort ?? this.discoverySendPort,
+      discoveryReceivePortFallback:
+          discoveryReceivePortFallback ?? this.discoveryReceivePortFallback,
+      discoveryBroadcastTargetCount:
+          discoveryBroadcastTargetCount ?? this.discoveryBroadcastTargetCount,
+      discoveryBroadcastTargetPreview:
+          discoveryBroadcastTargetPreview ??
+          this.discoveryBroadcastTargetPreview,
+      discoveryTransportError: clearDiscoveryTransportError
+          ? null
+          : discoveryTransportError ?? this.discoveryTransportError,
     );
   }
 }
@@ -173,6 +222,7 @@ class DiscoveryController extends Notifier<DiscoveryState> {
     }
 
     final config = ref.read(appConfigProvider);
+    final transport = ref.read(discoveryTransportProvider);
     await ref
         .read(discoveryTransportProvider)
         .sendBroadcast(packet, port: config.discoveryPort);
@@ -202,6 +252,7 @@ class DiscoveryController extends Notifier<DiscoveryState> {
       isLoading: false,
       clearError: true,
     );
+    _applyTransportDiagnostics(transport);
     await refreshPresence();
   }
 
@@ -252,22 +303,17 @@ class DiscoveryController extends Notifier<DiscoveryState> {
       initStage = 'transport-provider';
       final transport = ref.read(discoveryTransportProvider);
       final config = ref.read(appConfigProvider);
-      initStage = 'cached-peers';
-      final cachedPeers = await ref
-          .read(peerRepositoryProvider)
-          .loadCachedPeers();
       if (!ref.mounted) {
         return;
       }
-      final scopedPeers = _filterCachedPeersForCurrentUser(cachedPeers);
 
       state = DiscoveryState(
-        peers: _applyPresence(scopedPeers),
+        peers: const <PeerNode>[],
         isLoading: false,
         isRunning: true,
         currentPairingUserId: currentPairingUserId,
         currentDiscoveryGroupTagPreview: currentDiscoveryGroupTagPreview,
-        lastDecision: 'init: cached peers loaded ${scopedPeers.length}',
+        lastDecision: 'init: live discovery only',
       );
 
       initStage = 'transport-start';
@@ -275,6 +321,7 @@ class DiscoveryController extends Notifier<DiscoveryState> {
       if (!ref.mounted) {
         return;
       }
+      _applyTransportDiagnostics(transport);
       initStage = 'packet-subscription';
       _packetSubscription = transport.packets.listen((datagram) {
         unawaited(_handlePacket(datagram));
@@ -415,7 +462,9 @@ class DiscoveryController extends Notifier<DiscoveryState> {
             .sendUnicast(
               ackPacket,
               address: datagram.address,
-              port: ref.read(appConfigProvider).discoveryPort,
+              port:
+                  packet.discoveryPort ??
+                  ref.read(appConfigProvider).discoveryPort,
             );
       }
     }
@@ -444,6 +493,7 @@ class DiscoveryController extends Notifier<DiscoveryState> {
       deviceName: user.deviceName,
       osType: localIdentity.osType,
       port: _localAuthPort ?? ref.read(localAuthPortProvider),
+      discoveryPort: _currentDiscoveryReceivePort(),
       controlPort: _localAuthPort ?? ref.read(localAuthPortProvider),
       dataPort: config.dataPort,
       dataPortRange: config.dataPortRange.ports,
@@ -453,10 +503,43 @@ class DiscoveryController extends Notifier<DiscoveryState> {
     );
   }
 
+  int _currentDiscoveryReceivePort() {
+    final transport = ref.read(discoveryTransportProvider);
+    if (transport is DiscoveryTransportDiagnostics) {
+      return (transport as DiscoveryTransportDiagnostics)
+              .snapshot()
+              .receivePort ??
+          ref.read(appConfigProvider).discoveryPort;
+    }
+    return ref.read(appConfigProvider).discoveryPort;
+  }
+
+  void _applyTransportDiagnostics(DiscoveryTransport transport) {
+    if (transport is! DiscoveryTransportDiagnostics || !ref.mounted) {
+      return;
+    }
+    final snapshot = (transport as DiscoveryTransportDiagnostics).snapshot();
+    state = state.copyWith(
+      discoveryTransportMode: snapshot.mode,
+      discoveryPreferredPort: snapshot.preferredPort == 0
+          ? null
+          : snapshot.preferredPort,
+      discoveryReceivePort: snapshot.receivePort,
+      discoverySendPort: snapshot.sendPort,
+      discoveryReceivePortFallback: snapshot.receivePortFallback,
+      discoveryBroadcastTargetCount: snapshot.broadcastTargetCount,
+      discoveryBroadcastTargetPreview: snapshot.broadcastTargets
+          .take(8)
+          .toList(),
+      discoveryTransportError: snapshot.lastError,
+      clearDiscoveryTransportError: snapshot.lastError == null,
+    );
+  }
+
   List<PeerNode> _mergePeer(List<PeerNode> peers, PeerNode incomingPeer) {
     final updated = <PeerNode>[
       for (final peer in peers)
-        if (peer.deviceId != incomingPeer.deviceId) peer,
+        if (peer.id != incomingPeer.id) peer,
       incomingPeer,
     ];
     return sortPeers(updated, sortMode: PeerSortMode.recent);
@@ -469,6 +552,7 @@ class DiscoveryController extends Notifier<DiscoveryState> {
   }) {
     return PeerNode(
       deviceId: packet.deviceId,
+      instanceId: packet.instanceId,
       userId: packet.userId,
       displayName: packet.displayName,
       deviceName: packet.deviceName,
@@ -532,6 +616,7 @@ class DiscoveryController extends Notifier<DiscoveryState> {
       final seenAt = DateTime.fromMillisecondsSinceEpoch(entry.seenAtEpochMs);
       final peer = PeerNode(
         deviceId: entry.deviceId,
+        instanceId: entry.instanceId,
         userId: entry.userId,
         displayName: entry.displayName,
         deviceName: entry.deviceName,
@@ -748,16 +833,6 @@ class DiscoveryController extends Notifier<DiscoveryState> {
     }
     return entry.userId == user.userId &&
         entry.discoveryGroupTag == discoveryGroupTag;
-  }
-
-  List<PeerNode> _filterCachedPeersForCurrentUser(List<PeerNode> peers) {
-    final user = _currentUser();
-    if (user == null) {
-      return const <PeerNode>[];
-    }
-    return peers
-        .where((peer) => peer.userId == user.userId)
-        .toList(growable: false);
   }
 
   DateTime _now() => ref.read(nowProvider)();

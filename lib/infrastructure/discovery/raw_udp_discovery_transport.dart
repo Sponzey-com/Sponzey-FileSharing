@@ -9,7 +9,8 @@ import 'package:sponzey_file_sharing/infrastructure/discovery/discovery_packet.d
 import 'package:sponzey_file_sharing/infrastructure/discovery/discovery_transport.dart';
 import 'package:sponzey_file_sharing/infrastructure/network/dart_io_network_interface_inventory.dart';
 
-class RawUdpDiscoveryTransport implements DiscoveryTransport {
+class RawUdpDiscoveryTransport
+    implements DiscoveryTransport, DiscoveryTransportDiagnostics {
   RawUdpDiscoveryTransport({required AppLogger logger}) : _logger = logger;
 
   static final InternetAddress _broadcastAddress = InternetAddress(
@@ -28,15 +29,41 @@ class RawUdpDiscoveryTransport implements DiscoveryTransport {
   StreamSubscription<RawSocketEvent>? _receiveSubscription;
   final Map<String, RawDatagramSocket> _sendSocketsByLocalAddress = {};
   List<DiscoveryTarget> _broadcastTargets = const [];
+  int? _preferredPort;
+  bool _receivePortFallback = false;
+  String? _lastError;
 
   @override
   Stream<DiscoveryDatagram> get packets => _packetsController.stream;
+
+  @override
+  DiscoveryTransportSnapshot snapshot() {
+    final receivePort = _receiveSocket?.port;
+    final sendPort = _sendSocket?.port;
+    final mode = receivePort == null
+        ? (sendPort == null ? 'stopped' : 'sender-only')
+        : (_receivePortFallback ? 'fallback-receive' : 'receive-send');
+    return DiscoveryTransportSnapshot(
+      mode: mode,
+      preferredPort: _preferredPort ?? 0,
+      receivePort: receivePort,
+      sendPort: sendPort,
+      receivePortFallback: _receivePortFallback,
+      lastError: _lastError,
+      broadcastTargets: _broadcastTargets
+          .map((target) => '${target.localAddress}->${target.address}')
+          .toList(growable: false),
+    );
+  }
 
   @override
   Future<void> start({required int port}) async {
     if (_sendSocket != null || _receiveSocket != null) {
       return;
     }
+    _preferredPort = port;
+    _receivePortFallback = false;
+    _lastError = null;
 
     final preferredInterfaces = await _resolvePreferredInterfaceSnapshots();
     final preferredInterfaceIds = preferredInterfaces
@@ -50,20 +77,36 @@ class RawUdpDiscoveryTransport implements DiscoveryTransport {
     RawDatagramSocket? receiveSocket;
     try {
       receiveSocket = await _bindSocket(port);
-      receiveSocket.readEventsEnabled = true;
-      await _joinMulticastGroups(receiveSocket, preferredInterfaceIds);
-      _receiveSocket = receiveSocket;
-      _receiveSubscription = receiveSocket.listen(_handleSocketEvent);
     } catch (error, stackTrace) {
       if (!_isAddressInUse(error)) {
         rethrow;
       }
+      _lastError = error.toString();
       _logger.warning(
         AppLogCategory.discovery,
-        'Discovery receive bind failed on UDP $port, switching to sender-only mode',
+        'Discovery receive bind failed on UDP $port, trying fallback receive port',
         error: error,
         stackTrace: stackTrace,
       );
+      try {
+        receiveSocket = await _bindSocket(0);
+        _receivePortFallback = true;
+      } catch (fallbackError, fallbackStackTrace) {
+        _lastError = fallbackError.toString();
+        _logger.warning(
+          AppLogCategory.discovery,
+          'Discovery fallback receive bind failed, switching to sender-only mode',
+          error: fallbackError,
+          stackTrace: fallbackStackTrace,
+        );
+      }
+    }
+
+    if (receiveSocket != null) {
+      receiveSocket.readEventsEnabled = true;
+      await _joinMulticastGroups(receiveSocket, preferredInterfaceIds);
+      _receiveSocket = receiveSocket;
+      _receiveSubscription = receiveSocket.listen(_handleSocketEvent);
     }
 
     final sendSocket = await _bindSocket(0);
@@ -74,7 +117,8 @@ class RawUdpDiscoveryTransport implements DiscoveryTransport {
     if (receiveSocket != null) {
       _logger.info(
         AppLogCategory.discovery,
-        'Discovery transport listening on UDP $port with broadcast targets: '
+        'Discovery transport listening on UDP ${receiveSocket.port} '
+        '(preferred $port) with broadcast targets: '
         '${_broadcastTargets.map((target) => '${target.localAddress}->${target.address}').join(', ')}',
       );
     } else {
@@ -139,6 +183,8 @@ class RawUdpDiscoveryTransport implements DiscoveryTransport {
     }
     _sendSocketsByLocalAddress.clear();
     _broadcastTargets = const [];
+    _preferredPort = null;
+    _receivePortFallback = false;
     if (!_packetsController.isClosed) {
       await _packetsController.close();
     }

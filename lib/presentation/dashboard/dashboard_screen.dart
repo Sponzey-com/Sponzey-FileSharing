@@ -94,7 +94,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                             value: '${overview.incompatibleCount}',
                           ),
                           _MetricCard(
-                            label: 'Cached Offline',
+                            label: 'Offline Peers',
                             value: '${overview.offlineCount}',
                           ),
                         ],
@@ -117,11 +117,16 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                             ),
                             const SizedBox(height: AppSpacing.md),
                             if (recentPeers.isEmpty)
-                              const ListTile(
+                              ListTile(
                                 contentPadding: EdgeInsets.zero,
-                                leading: Icon(Icons.hub_rounded),
-                                title: Text('발견된 피어가 없습니다'),
-                                subtitle: Text('같은 네트워크의 다른 앱 인스턴스를 기다리는 중'),
+                                leading: const Icon(Icons.hub_rounded),
+                                title: const Text('발견된 피어가 없습니다'),
+                                subtitle: Text(
+                                  '같은 ID/PW 인스턴스를 기다리는 중 · '
+                                  'transport ${discoveryState.discoveryTransportMode ?? '-'} · '
+                                  'rx ${discoveryState.discoveryReceivePort ?? '-'} · '
+                                  'targets ${discoveryState.discoveryBroadcastTargetCount}',
+                                ),
                               ),
                             for (final peer in recentPeers) ...[
                               ListTile(

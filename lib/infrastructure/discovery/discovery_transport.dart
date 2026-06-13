@@ -18,6 +18,28 @@ class DiscoveryDatagram {
   final int port;
 }
 
+class DiscoveryTransportSnapshot {
+  const DiscoveryTransportSnapshot({
+    required this.mode,
+    required this.preferredPort,
+    this.receivePort,
+    this.sendPort,
+    this.receivePortFallback = false,
+    this.lastError,
+    this.broadcastTargets = const [],
+  });
+
+  final String mode;
+  final int preferredPort;
+  final int? receivePort;
+  final int? sendPort;
+  final bool receivePortFallback;
+  final String? lastError;
+  final List<String> broadcastTargets;
+
+  int get broadcastTargetCount => broadcastTargets.length;
+}
+
 abstract interface class DiscoveryTransport {
   Stream<DiscoveryDatagram> get packets;
 
@@ -32,6 +54,10 @@ abstract interface class DiscoveryTransport {
   });
 
   Future<void> close();
+}
+
+abstract interface class DiscoveryTransportDiagnostics {
+  DiscoveryTransportSnapshot snapshot();
 }
 
 final discoveryTransportProvider = Provider<DiscoveryTransport>((ref) {

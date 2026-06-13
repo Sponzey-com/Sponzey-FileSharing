@@ -35,6 +35,10 @@ abstract interface class AppLogger {
   });
 }
 
+abstract interface class AppLogFileLocator {
+  String? get logFilePath;
+}
+
 final appLoggerProvider = Provider<AppLogger>((ref) {
   throw UnimplementedError('AppLogger must be overridden during bootstrap.');
 });

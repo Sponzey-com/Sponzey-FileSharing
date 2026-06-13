@@ -1,6 +1,8 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sponzey_file_sharing/core/logger/app_logger.dart';
+import 'package:sponzey_file_sharing/core/logger/console_app_logger.dart';
 import 'package:sponzey_file_sharing/domain/network/network_interface_models.dart';
 import 'package:sponzey_file_sharing/infrastructure/discovery/raw_udp_discovery_transport.dart';
 
@@ -109,6 +111,33 @@ void main() {
       'Wi-Fi',
     ]);
   });
+
+  test(
+    'falls back to a receive port when preferred port is occupied',
+    () async {
+      final blocker = await RawDatagramSocket.bind(
+        InternetAddress.anyIPv4,
+        0,
+        reuseAddress: false,
+        reusePort: false,
+      );
+      final transport = RawUdpDiscoveryTransport(
+        logger: const ConsoleAppLogger(minimumLevel: AppLogLevel.error),
+      );
+      addTearDown(() async {
+        blocker.close();
+        await transport.close();
+      });
+
+      await transport.start(port: blocker.port);
+
+      final snapshot = transport.snapshot();
+      expect(snapshot.mode, 'fallback-receive');
+      expect(snapshot.preferredPort, blocker.port);
+      expect(snapshot.receivePort, isNot(blocker.port));
+      expect(snapshot.receivePortFallback, isTrue);
+    },
+  );
 }
 
 NetworkInterfaceSnapshot _snapshot({

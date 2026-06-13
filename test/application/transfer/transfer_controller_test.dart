@@ -87,7 +87,7 @@ void main() {
       await sourceFile.writeAsString('hello from alice to bob');
 
       await alice.transferController.sendFile(
-        peerId: 'team@device-b',
+        peerId: 'team@instance-device-b',
         filePath: sourceFile.path,
       );
 
@@ -146,7 +146,7 @@ void main() {
     await sourceB.writeAsString('beta file');
 
     await alice.transferController.sendFiles(
-      peerId: 'team@device-b',
+      peerId: 'team@instance-device-b',
       filePaths: [sourceA.path, sourceB.path],
     );
 
@@ -235,10 +235,10 @@ void main() {
       );
       for (var i = 0; i < 100; i += 1) {
         final aliceCarolSession = alice.container.read(
-          peerAuthSessionByPeerIdProvider('team@device-c'),
+          peerAuthSessionByPeerIdProvider('team@instance-device-c'),
         );
         final carolAliceSession = carol.container.read(
-          peerAuthSessionByPeerIdProvider('team@device-a'),
+          peerAuthSessionByPeerIdProvider('team@instance-device-a'),
         );
         if (aliceCarolSession?.isAuthenticated == true &&
             carolAliceSession?.isAuthenticated == true) {
@@ -257,7 +257,7 @@ void main() {
       await sourceFile.writeAsString('fanout payload');
 
       await alice.transferController.sendFileToPeers(
-        peerIds: const ['team@device-b', 'team@device-c'],
+        peerIds: const ['team@instance-device-b', 'team@instance-device-c'],
         filePath: sourceFile.path,
       );
 
@@ -335,7 +335,7 @@ void main() {
     await sourceFile.writeAsString(List<String>.filled(14000, 'abc123').join());
 
     await alice.transferController.sendFile(
-      peerId: 'team@device-b',
+      peerId: 'team@instance-device-b',
       filePath: sourceFile.path,
     );
 
@@ -425,7 +425,7 @@ void main() {
     await sourceFile.writeAsString('0123456789' * 9000);
 
     await alice.transferController.sendFile(
-      peerId: 'team@device-b',
+      peerId: 'team@instance-device-b',
       filePath: sourceFile.path,
     );
 
@@ -492,7 +492,7 @@ void main() {
     await sourceFile.writeAsString(List<String>.filled(6500, 'chunk20').join());
 
     await alice.transferController.sendFile(
-      peerId: 'team@device-b',
+      peerId: 'team@instance-device-b',
       filePath: sourceFile.path,
     );
 
@@ -582,7 +582,7 @@ void main() {
     await sourceFile.writeAsString('metric-log-test-' * 20000);
 
     await alice.transferController.sendFile(
-      peerId: 'team@device-b',
+      peerId: 'team@instance-device-b',
       filePath: sourceFile.path,
     );
 
@@ -680,7 +680,7 @@ void main() {
     await sourceFile.writeAsString('this transfer should fail');
 
     await alice.transferController.sendFile(
-      peerId: 'team@device-b',
+      peerId: 'team@instance-device-b',
       filePath: sourceFile.path,
     );
 
@@ -707,6 +707,7 @@ PeerNode _peerForDevice(
 }) {
   return PeerNode(
     deviceId: deviceId,
+    instanceId: 'instance-$deviceId',
     userId: _sharedUserId,
     displayName: _sharedUserId,
     deviceName: 'Node-$deviceId',
@@ -825,6 +826,7 @@ Future<void> _handshakePair({
   bob.peerAuthController.syncDiscoveredPeer(
     PeerNode(
       deviceId: 'device-a',
+      instanceId: 'instance-device-a',
       userId: _sharedUserId,
       displayName: _sharedUserId,
       deviceName: 'Node-device-a',
@@ -844,10 +846,10 @@ Future<void> _handshakePair({
 
   for (var i = 0; i < 100; i += 1) {
     final aliceSession = alice.container.read(
-      peerAuthSessionByPeerIdProvider('team@device-b'),
+      peerAuthSessionByPeerIdProvider('team@instance-device-b'),
     );
     final bobSession = bob.container.read(
-      peerAuthSessionByPeerIdProvider('team@device-a'),
+      peerAuthSessionByPeerIdProvider('team@instance-device-a'),
     );
     if (aliceSession?.isAuthenticated == true &&
         bobSession?.isAuthenticated == true) {
@@ -907,6 +909,7 @@ AuthPacket _copyPacket(AuthPacket packet, {String? transferChunkDataBase64}) {
     sessionId: packet.sessionId,
     fromUserId: packet.fromUserId,
     fromDeviceId: packet.fromDeviceId,
+    fromInstanceId: packet.fromInstanceId,
     fromDisplayName: packet.fromDisplayName,
     nonce: packet.nonce,
     token: packet.token,

@@ -32,6 +32,7 @@ class DiscoveryPacket {
     required this.deviceName,
     required this.osType,
     required this.port,
+    this.discoveryPort,
     this.controlPort,
     this.dataPort,
     this.dataPortRange = const [],
@@ -63,6 +64,7 @@ class DiscoveryPacket {
   final String deviceName;
   final String osType;
   final int port;
+  final int? discoveryPort;
   final int? controlPort;
   final int? dataPort;
   final List<int> dataPortRange;
@@ -87,6 +89,7 @@ class DiscoveryPacket {
         'deviceName': deviceName,
         'osType': osType,
         'port': port,
+        'discoveryPort': discoveryPort,
         'controlPort': controlPort ?? port,
         'dataPort': dataPort,
         'dataPortRange': dataPortRange,
@@ -120,6 +123,7 @@ class DiscoveryPacket {
       deviceName: _readString(payload, 'deviceName'),
       osType: _readString(payload, 'osType'),
       port: _readInt(payload, 'port'),
+      discoveryPort: _readOptionalInt(payload, 'discoveryPort'),
       controlPort: _readOptionalInt(payload, 'controlPort'),
       dataPort: _readOptionalInt(payload, 'dataPort'),
       dataPortRange: _readIntList(payload, 'dataPortRange'),

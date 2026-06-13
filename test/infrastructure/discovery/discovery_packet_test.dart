@@ -16,6 +16,7 @@ void main() {
       deviceName: 'Main Mac',
       osType: 'macos',
       port: 38401,
+      discoveryPort: 38400,
       receiveAvailable: true,
       sentAtEpochMs: 123456789,
       sourceInterfaceId: 'en0#4',
@@ -36,6 +37,7 @@ void main() {
     expect(decoded.deviceName, 'Main Mac');
     expect(decoded.osType, 'macos');
     expect(decoded.port, 38401);
+    expect(decoded.discoveryPort, 38400);
     expect(decoded.receiveAvailable, isTrue);
     expect(decoded.sentAtEpochMs, 123456789);
     expect(decoded.sourceInterfaceId, 'en0#4');
@@ -66,6 +68,7 @@ void main() {
     final decoded = DiscoveryPacket.decode(payload.codeUnits);
 
     expect(decoded.discoveryGroupTag, 'proof-001');
+    expect(decoded.discoveryPort, isNull);
     expect(decoded.sourceInterfaceId, isNull);
     expect(decoded.sourceInterfaceHint, isNull);
     expect(decoded.sourceAddress, isNull);

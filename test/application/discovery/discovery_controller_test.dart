@@ -29,6 +29,7 @@ import 'package:sponzey_file_sharing/infrastructure/network/dart_io_network_inte
 import 'package:sponzey_file_sharing/infrastructure/platform/app_secure_storage.dart';
 import 'package:sponzey_file_sharing/infrastructure/platform/app_storage_path_provider.dart';
 import 'package:sponzey_file_sharing/infrastructure/platform/local_device_identity_service.dart';
+import 'package:sponzey_file_sharing/infrastructure/repositories/peer_repository.dart';
 
 void main() {
   late AppDatabase database;
@@ -96,7 +97,7 @@ void main() {
       expect(afterDiscover.peers.single.presence, PeerPresence.online);
       expect(
         container
-            .read(peerAuthSessionByPeerIdProvider('admin@device-ops'))
+            .read(peerAuthSessionByPeerIdProvider('admin@instance-ops'))
             ?.status,
         PeerAuthStatus.authenticated,
       );
@@ -116,7 +117,7 @@ void main() {
       );
       expect(
         container
-            .read(peerAuthSessionByPeerIdProvider('admin@device-ops'))
+            .read(peerAuthSessionByPeerIdProvider('admin@instance-ops'))
             ?.status,
         PeerAuthStatus.idle,
       );
@@ -130,11 +131,49 @@ void main() {
         PeerPresence.offline,
       );
       expect(
-        container.read(peerAuthSessionByPeerIdProvider('admin@device-ops')),
+        container.read(peerAuthSessionByPeerIdProvider('admin@instance-ops')),
         isNull,
       );
     },
   );
+
+  test('does not surface cached peers as live discovery results', () async {
+    await PeerRepository(database).upsert(
+      PeerNode(
+        deviceId: 'cached-device',
+        userId: 'admin',
+        displayName: 'Cached Admin',
+        deviceName: 'Old Windows VM',
+        osType: 'windows',
+        protocolVersion: '1.0',
+        lastSeenAt: clock.value.subtract(const Duration(minutes: 1)),
+        address: '10.211.55.3',
+        port: 38401,
+        receiveAvailable: true,
+        presence: PeerPresence.online,
+      ),
+    );
+    final container = _createContainer(
+      database: database,
+      transport: transport,
+      clock: clock,
+      registry: _NoopLocalInstanceRegistry(),
+    );
+    addTearDown(container.dispose);
+
+    container.read(authControllerProvider);
+    await _flush();
+    await container
+        .read(authControllerProvider.notifier)
+        .signIn(userId: 'admin', password: 'secret');
+
+    container.read(discoveryControllerProvider);
+    await _flush();
+
+    final state = container.read(discoveryControllerProvider);
+    expect(state.peers, isEmpty);
+    expect(state.lastDecision, 'init: live discovery only');
+  });
 
   test('marks mismatched protocol peers as incompatible', () async {
     final container = _createContainer(
@@ -220,6 +259,48 @@ void main() {
       DiscoveryPacketType.discoverAck,
     );
     expect(transport.unicasts.single.port, 38400);
+  });
+
+  test('sends discovery ack to advertised discovery response port', () async {
+    final container = _createContainer(
+      database: database,
+      transport: transport,
+      clock: clock,
+    );
+    addTearDown(container.dispose);
+
+    container.read(authControllerProvider);
+    await _flush();
+    await container
+        .read(authControllerProvider.notifier)
+        .signIn(userId: 'admin', password: 'secret');
+
+    container.read(discoveryControllerProvider);
+    await _flush();
+
+    transport.emit(
+      DiscoveryPacket(
+        type: DiscoveryPacketType.discover,
+        protocolVersion: '1.0',
+        userId: 'admin',
+        discoveryGroupTag: _discoveryGroupTag('admin', 'secret'),
+        instanceId: 'instance-ops',
+        displayName: 'Ops Room',
+        deviceId: 'device-ops',
+        deviceName: 'Windows Tower',
+        osType: 'windows',
+        port: 41010,
+        discoveryPort: 52111,
+        controlPort: 41010,
+        receiveAvailable: true,
+        sentAtEpochMs: clock.value.millisecondsSinceEpoch,
+      ),
+      port: 52123,
+    );
+    await _flush();
+
+    expect(transport.unicasts, hasLength(1));
+    expect(transport.unicasts.single.port, 52111);
   });
 
   test('uses local receive time for discovery peer freshness', () async {
@@ -308,7 +389,7 @@ void main() {
     expect(peers.single.presence, PeerPresence.online);
     expect(
       container
-          .read(peerAuthSessionByPeerIdProvider('admin@peer-device'))
+          .read(peerAuthSessionByPeerIdProvider('admin@instance-peer'))
           ?.status,
       PeerAuthStatus.authenticated,
     );
@@ -462,6 +543,36 @@ void main() {
     expect(transport.broadcasts.single.packet.controlPort, 40210);
   });
 
+  test(
+    'broadcasts the actual discovery receive port from transport snapshot',
+    () async {
+      transport.receivePort = 52111;
+      transport.mode = 'fallback-receive';
+      transport.receivePortFallback = true;
+      final container = _createContainer(
+        database: database,
+        transport: transport,
+        clock: clock,
+      );
+      addTearDown(container.dispose);
+
+      container.read(authControllerProvider);
+      await _flush();
+      await container
+          .read(authControllerProvider.notifier)
+          .signIn(userId: 'team', password: 'secret');
+
+      container.read(discoveryControllerProvider);
+      await _flush();
+
+      final state = container.read(discoveryControllerProvider);
+      expect(transport.broadcasts.single.packet.discoveryPort, 52111);
+      expect(state.discoveryTransportMode, 'fallback-receive');
+      expect(state.discoveryReceivePort, 52111);
+      expect(state.discoveryReceivePortFallback, isTrue);
+    },
+  );
+
   test('ignores discovery packets from the same runtime instance', () async {
     final container = _createContainer(
       database: database,
@@ -596,14 +707,14 @@ void main() {
       expect(peer.port, 46000);
       final candidates = container.read(peerRouteCandidateStoreProvider);
       expect(candidates, hasLength(1));
-      expect(candidates.single.peerId, 'team@peer-device');
+      expect(candidates.single.peerId, 'team@peer-instance');
       expect(candidates.single.localAddress, '0.0.0.0');
       expect(candidates.single.remoteAddress, '10.20.30.40');
       expect(candidates.single.remotePort, 46000);
       expect(candidates.single.bindMode, UdpInterfaceBindMode.any);
 
       final session = container.read(
-        peerAuthSessionByPeerIdProvider('team@peer-device'),
+        peerAuthSessionByPeerIdProvider('team@peer-instance'),
       );
       expect(session?.status, PeerAuthStatus.authenticated);
       expect(session?.peerAddress, '10.20.30.40');
@@ -674,7 +785,7 @@ void main() {
 
       expect(container.read(discoveryControllerProvider).peers, hasLength(1));
       final candidates = container.read(
-        peerRouteCandidatesProvider('team@peer-device'),
+        peerRouteCandidatesProvider('team@peer-instance'),
       );
       expect(candidates, hasLength(2));
       expect(candidates.map((candidate) => candidate.localAddress).toSet(), {
@@ -683,7 +794,7 @@ void main() {
       });
       expect(
         container
-            .read(peerPathDiagnosticsProvider('team@peer-device'))
+            .read(peerPathDiagnosticsProvider('team@peer-instance'))
             .debugSummary,
         contains('candidates=2'),
       );
@@ -698,6 +809,86 @@ void main() {
       expect(
         events.map((event) => '${event.peerId} ${event.candidateId}').join(' '),
         isNot(contains('token')),
+      );
+    },
+  );
+
+  test(
+    'coalesces the same runtime instance discovered through multiple IP addresses',
+    () async {
+      final container = _createContainer(
+        database: database,
+        transport: transport,
+        clock: clock,
+        interfaceSnapshots: [
+          _interfaceSnapshot(
+            name: 'en0',
+            index: 1,
+            typeHint: InterfaceTypeHint.ethernet,
+            address: '192.168.0.10',
+          ),
+          _interfaceSnapshot(
+            name: 'bridge100',
+            index: 2,
+            typeHint: InterfaceTypeHint.bridge,
+            address: '10.211.55.2',
+          ),
+        ],
+        controlTransport: _SilentControlTransport(),
+      );
+      addTearDown(container.dispose);
+
+      container.read(authControllerProvider);
+      await _flush();
+      await container
+          .read(authControllerProvider.notifier)
+          .signIn(userId: 'admin', password: 'secret');
+
+      container.read(discoveryControllerProvider);
+      await _flush();
+
+      final firstPacket = DiscoveryPacket(
+        type: DiscoveryPacketType.discoverAck,
+        protocolVersion: '1.0',
+        userId: 'admin',
+        discoveryGroupTag: _discoveryGroupTag('admin', 'secret'),
+        instanceId: 'same-runtime-instance',
+        displayName: 'admin',
+        deviceId: 'device-over-lan',
+        deviceName: 'DONGWOOSHINC28B',
+        osType: 'windows',
+        port: 62280,
+        controlPort: 62280,
+        receiveAvailable: true,
+        sentAtEpochMs: clock.value.millisecondsSinceEpoch,
+      );
+      final secondPacket = DiscoveryPacket(
+        type: DiscoveryPacketType.discoverAck,
+        protocolVersion: '1.0',
+        userId: 'admin',
+        discoveryGroupTag: _discoveryGroupTag('admin', 'secret'),
+        instanceId: 'same-runtime-instance',
+        displayName: 'admin',
+        deviceId: 'device-over-parallels',
+        deviceName: 'DONGWOOSHINC28B',
+        osType: 'windows',
+        port: 38401,
+        controlPort: 38401,
+        receiveAvailable: true,
+        sentAtEpochMs: clock.value.millisecondsSinceEpoch,
+      );
+
+      transport.emit(firstPacket, address: InternetAddress('192.168.0.236'));
+      transport.emit(secondPacket, address: InternetAddress('10.211.55.3'));
+      await _flush();
+
+      final state = container.read(discoveryControllerProvider);
+      expect(state.peers, hasLength(1));
+      expect(state.peers.single.id, 'admin@same-runtime-instance');
+      expect(state.peers.single.address, '10.211.55.3');
+      expect(
+        container.read(peerRouteCandidatesProvider(state.peers.single.id)),
+        hasLength(2),
       );
     },
   );
@@ -776,7 +967,7 @@ void main() {
       await _flush();
 
       expect(
-        container.read(peerRouteCandidatesProvider('team@peer-device')),
+        container.read(peerRouteCandidatesProvider('team@peer-instance')),
         hasLength(1),
       );
       expect(
@@ -822,7 +1013,7 @@ void main() {
     await _flush();
 
     final candidates = container.read(
-      peerRouteCandidatesProvider('admin@peer-device'),
+      peerRouteCandidatesProvider('admin@instance-peer'),
     );
     expect(candidates, hasLength(1));
     expect(
@@ -897,7 +1088,7 @@ void main() {
           .refreshPresence();
 
       final candidates = container.read(
-        peerRouteCandidatesProvider('team@peer-device'),
+        peerRouteCandidatesProvider('team@peer-instance'),
       );
       expect(candidates.single.status.name, 'expired');
       expect(candidates.where((candidate) => candidate.isSelectable), isEmpty);
@@ -955,7 +1146,7 @@ void main() {
       );
       expect(
         container
-            .read(peerAuthSessionByPeerIdProvider('team@peer-device'))
+            .read(peerAuthSessionByPeerIdProvider('team@peer-instance'))
             ?.status,
         PeerAuthStatus.connecting,
       );
@@ -1067,16 +1258,36 @@ NetworkInterfaceSnapshot _interfaceSnapshot({
   );
 }
 
-class _FakeDiscoveryTransport implements DiscoveryTransport {
+class _FakeDiscoveryTransport
+    implements DiscoveryTransport, DiscoveryTransportDiagnostics {
   final StreamController<DiscoveryDatagram> _controller =
       StreamController<DiscoveryDatagram>.broadcast();
   final List<_OutboundDatagram> broadcasts = [];
   final List<_OutboundDatagram> unicasts = [];
 
   int? startedPort;
+  String mode = 'receive-send';
+  int? receivePort = 38400;
+  int? sendPort = 50000;
+  bool receivePortFallback = false;
+  String? lastError;
+  List<String> broadcastTargets = const ['0.0.0.0->255.255.255.255'];
 
   @override
   Stream<DiscoveryDatagram> get packets => _controller.stream;
+
+  @override
+  DiscoveryTransportSnapshot snapshot() {
+    return DiscoveryTransportSnapshot(
+      mode: mode,
+      preferredPort: startedPort ?? 0,
+      receivePort: receivePort,
+      sendPort: sendPort,
+      receivePortFallback: receivePortFallback,
+      lastError: lastError,
+      broadcastTargets: broadcastTargets,
+    );
+  }
 
   void emit(
     DiscoveryPacket packet, {
@@ -1210,6 +1421,22 @@ class _FakeLocalInstanceRegistry implements LocalInstanceRegistry {
   Future<void> remove(String instanceId) async {
     _entries.removeWhere((entry) => entry.instanceId == instanceId);
   }
+}
+
+class _NoopLocalInstanceRegistry implements LocalInstanceRegistry {
+  @override
+  Future<List<LocalInstancePresence>> listActive({
+    required DateTime now,
+    required Duration maxAge,
+  }) async {
+    return const <LocalInstancePresence>[];
+  }
+
+  @override
+  Future<void> publish(LocalInstancePresence presence) async {}
+
+  @override
+  Future<void> remove(String instanceId) async {}
 }
 
 class _AutoAcceptControlTransport implements ControlTransport {

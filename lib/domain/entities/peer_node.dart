@@ -3,6 +3,7 @@ enum PeerPresence { online, stale, offline, incompatible }
 class PeerNode {
   const PeerNode({
     required this.deviceId,
+    this.instanceId,
     required this.userId,
     required this.displayName,
     required this.deviceName,
@@ -16,6 +17,7 @@ class PeerNode {
   });
 
   final String deviceId;
+  final String? instanceId;
   final String userId;
   final String displayName;
   final String deviceName;
@@ -27,7 +29,7 @@ class PeerNode {
   final bool receiveAvailable;
   final PeerPresence presence;
 
-  String get id => '$userId@$deviceId';
+  String get id => '$userId@${instanceId ?? deviceId}';
 
   String get statusLabel {
     switch (presence) {
@@ -46,6 +48,7 @@ class PeerNode {
 
   PeerNode copyWith({
     String? deviceId,
+    String? instanceId,
     String? userId,
     String? displayName,
     String? deviceName,
@@ -59,6 +62,7 @@ class PeerNode {
   }) {
     return PeerNode(
       deviceId: deviceId ?? this.deviceId,
+      instanceId: instanceId ?? this.instanceId,
       userId: userId ?? this.userId,
       displayName: displayName ?? this.displayName,
       deviceName: deviceName ?? this.deviceName,

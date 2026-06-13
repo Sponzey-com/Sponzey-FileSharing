@@ -64,7 +64,11 @@ class PeerRouteCandidateProjection {
     RouteCandidateDiscoverySource discoveredBy =
         RouteCandidateDiscoverySource.broadcast,
   }) {
-    final peerId = '${packet.userId}@${packet.deviceId}';
+    final peerId = _peerId(
+      userId: packet.userId,
+      instanceId: packet.instanceId,
+      deviceId: packet.deviceId,
+    );
     final compatible = packet.protocolVersion == currentProtocolVersion;
     final effectiveLocalCandidates = localCandidates.isEmpty
         ? [_unknownAnyBindCandidate()]
@@ -101,7 +105,11 @@ class PeerRouteCandidateProjection {
     required LocalInstancePresence presence,
     required DateTime now,
   }) {
-    final peerId = '${presence.userId}@${presence.deviceId}';
+    final peerId = _peerId(
+      userId: presence.userId,
+      instanceId: presence.instanceId,
+      deviceId: presence.deviceId,
+    );
     final candidate = PeerRouteCandidate.create(
       peerId: peerId,
       remoteAddress: '127.0.0.1',
@@ -121,6 +129,7 @@ class PeerRouteCandidateProjection {
     final merged = collection.upsert(candidate);
     _representativePeers[peerId] = PeerNode(
       deviceId: presence.deviceId,
+      instanceId: presence.instanceId,
       userId: presence.userId,
       displayName: presence.displayName,
       deviceName: presence.deviceName,
@@ -133,6 +142,14 @@ class PeerRouteCandidateProjection {
       presence: PeerPresence.online,
     );
     return merged;
+  }
+
+  static String _peerId({
+    required String userId,
+    required String instanceId,
+    required String deviceId,
+  }) {
+    return '$userId@${instanceId.isEmpty ? deviceId : instanceId}';
   }
 
   List<PeerRouteCandidate> expire({
@@ -222,6 +239,7 @@ class PeerRouteCandidateProjection {
   }) {
     return PeerNode(
       deviceId: packet.deviceId,
+      instanceId: packet.instanceId,
       userId: packet.userId,
       displayName: packet.displayName,
       deviceName: packet.deviceName,

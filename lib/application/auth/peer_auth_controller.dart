@@ -187,6 +187,7 @@ class PeerAuthController extends Notifier<PeerAuthState> {
           sessionId: sessionId,
           fromUserId: user.userId,
           fromDeviceId: localIdentity.deviceId,
+          fromInstanceId: localIdentity.instanceId,
           fromDisplayName: user.displayName,
           sentAtEpochMs: _now().millisecondsSinceEpoch,
         ),
@@ -435,7 +436,7 @@ class PeerAuthController extends Notifier<PeerAuthState> {
 
     final context = _HandshakeContext(
       sessionId: packet.sessionId,
-      peerId: '${packet.fromUserId}@${packet.fromDeviceId}',
+      peerId: _peerIdFromPacket(packet),
       peerUserId: packet.fromUserId,
       peerDisplayName: packet.fromDisplayName ?? packet.fromUserId,
       peerAddress: datagram.address.address,
@@ -472,6 +473,7 @@ class PeerAuthController extends Notifier<PeerAuthState> {
         sessionId: packet.sessionId,
         fromUserId: user.userId,
         fromDeviceId: localIdentity.deviceId,
+        fromInstanceId: localIdentity.instanceId,
         fromDisplayName: user.displayName,
         nonce: context.nonce,
         sentAtEpochMs: _now().millisecondsSinceEpoch,
@@ -550,6 +552,7 @@ class PeerAuthController extends Notifier<PeerAuthState> {
           sessionId: packet.sessionId,
           fromUserId: user.userId,
           fromDeviceId: localIdentity.deviceId,
+          fromInstanceId: localIdentity.instanceId,
           fromDisplayName: user.displayName,
           token: token,
           sentAtEpochMs: now.millisecondsSinceEpoch,
@@ -628,6 +631,7 @@ class PeerAuthController extends Notifier<PeerAuthState> {
           sessionId: packet.sessionId,
           fromUserId: user.userId,
           fromDeviceId: localIdentity.deviceId,
+          fromInstanceId: localIdentity.instanceId,
           fromDisplayName: user.displayName,
           sentAtEpochMs: _now().millisecondsSinceEpoch,
         ),
@@ -703,6 +707,11 @@ class PeerAuthController extends Notifier<PeerAuthState> {
         );
   }
 
+  String _peerIdFromPacket(AuthPacket packet) {
+    final instanceId = packet.fromInstanceId;
+    return '${packet.fromUserId}@${instanceId == null || instanceId.isEmpty ? packet.fromDeviceId : instanceId}';
+  }
+
   Future<void> _rejectHandshake(
     _HandshakeContext context, {
     required InternetAddress address,
@@ -732,6 +741,7 @@ class PeerAuthController extends Notifier<PeerAuthState> {
         sessionId: context.sessionId,
         fromUserId: user.userId,
         fromDeviceId: localIdentity.deviceId,
+        fromInstanceId: localIdentity.instanceId,
         fromDisplayName: user.displayName,
         rejectCode: reasonCode,
         rejectMessage: message,

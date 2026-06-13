@@ -8,6 +8,7 @@ import 'package:sponzey_file_sharing/application/discovery/discovery_overview_pr
 import 'package:sponzey_file_sharing/application/discovery/discovery_sorting.dart';
 import 'package:sponzey_file_sharing/application/network/peer_connection_summary_provider.dart';
 import 'package:sponzey_file_sharing/application/transfer/transfer_controller.dart';
+import 'package:sponzey_file_sharing/core/logger/app_logger.dart';
 import 'package:sponzey_file_sharing/domain/entities/peer_node.dart';
 import 'package:sponzey_file_sharing/presentation/transfers/transfers_screen.dart';
 import 'package:sponzey_file_sharing/presentation/shared/page_header.dart';
@@ -188,6 +189,10 @@ class _DiscoveryDiagnosticsCard extends StatelessWidget {
     return Consumer(
       builder: (context, ref, _) {
         final authState = ref.watch(authControllerProvider);
+        final logger = ref.watch(appLoggerProvider);
+        final logFilePath = logger is AppLogFileLocator
+            ? (logger as AppLogFileLocator).logFilePath
+            : null;
         return SponzeyCard(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -217,6 +222,29 @@ class _DiscoveryDiagnosticsCard extends StatelessWidget {
                 label: 'Discovery Error',
                 value: state.errorMessage ?? '-',
               ),
+              _DiagnosticsLine(
+                label: 'Transport Mode',
+                value: state.discoveryTransportMode ?? '-',
+              ),
+              _DiagnosticsLine(
+                label: 'Discovery Ports',
+                value:
+                    'preferred ${state.discoveryPreferredPort ?? '-'} / '
+                    'rx ${state.discoveryReceivePort ?? '-'} / '
+                    'tx ${state.discoverySendPort ?? '-'} / '
+                    'fallback ${state.discoveryReceivePortFallback}',
+              ),
+              _DiagnosticsLine(
+                label: 'Broadcast Targets',
+                value:
+                    '${state.discoveryBroadcastTargetCount} '
+                    '${state.discoveryBroadcastTargetPreview.join(', ')}',
+              ),
+              _DiagnosticsLine(
+                label: 'Transport Error',
+                value: state.discoveryTransportError ?? '-',
+              ),
+              _DiagnosticsLine(label: 'Log File', value: logFilePath ?? '-'),
               _DiagnosticsLine(
                 label: 'Pairing User',
                 value: state.currentPairingUserId ?? '-',

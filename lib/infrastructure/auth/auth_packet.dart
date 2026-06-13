@@ -36,6 +36,7 @@ class AuthPacket {
     required this.fromUserId,
     required this.fromDeviceId,
     required this.sentAtEpochMs,
+    this.fromInstanceId,
     this.fromDisplayName,
     this.nonce,
     this.token,
@@ -60,6 +61,7 @@ class AuthPacket {
   final String sessionId;
   final String fromUserId;
   final String fromDeviceId;
+  final String? fromInstanceId;
   final int sentAtEpochMs;
   final String? fromDisplayName;
   final String? nonce;
@@ -87,6 +89,7 @@ class AuthPacket {
         'sessionId': sessionId,
         'fromUserId': fromUserId,
         'fromDeviceId': fromDeviceId,
+        'fromInstanceId': fromInstanceId,
         'fromDisplayName': fromDisplayName,
         'nonce': nonce,
         'token': token,
@@ -121,6 +124,7 @@ class AuthPacket {
       sessionId: _readString(payload, 'sessionId'),
       fromUserId: _readString(payload, 'fromUserId'),
       fromDeviceId: _readString(payload, 'fromDeviceId'),
+      fromInstanceId: _readOptionalString(payload, 'fromInstanceId'),
       sentAtEpochMs: _readInt(payload, 'sentAtEpochMs'),
       fromDisplayName: _readOptionalString(payload, 'fromDisplayName'),
       nonce: _readOptionalString(payload, 'nonce'),
