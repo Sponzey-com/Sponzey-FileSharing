@@ -233,6 +233,30 @@ class PeerAuthController extends Notifier<PeerAuthState> {
 
   void syncDiscoveredPeer(PeerNode peer, {String? message}) {
     final existing = state.sessions[peer.id];
+    if (existing?.isAuthenticated == true) {
+      if (existing!.peerAddress != peer.address ||
+          existing.peerPort != peer.port) {
+        ref
+            .read(appLoggerProvider)
+            .debug(
+              AppLogCategory.auth,
+              'Preserved authenticated peer route for ${peer.id}: '
+              '${existing.peerAddress}:${existing.peerPort}; '
+              'ignored discovery endpoint ${peer.address}:${peer.port}',
+            );
+      }
+      _upsertSession(
+        peer.id,
+        existing.copyWith(
+          peerUserId: peer.userId,
+          peerDisplayName: peer.displayName,
+          updatedAt: _now(),
+          message: message,
+        ),
+      );
+      return;
+    }
+
     if (existing != null &&
         existing.peerAddress == peer.address &&
         existing.peerPort == peer.port &&
@@ -321,6 +345,22 @@ class PeerAuthController extends Notifier<PeerAuthState> {
           updatedAt: _now(),
           message: '피어 응답을 다시 기다리는 중입니다.',
         );
+        continue;
+      }
+
+      if (entry.value.isAuthenticated) {
+        if (entry.value.peerAddress != peer.address ||
+            entry.value.peerPort != peer.port) {
+          ref
+              .read(appLoggerProvider)
+              .debug(
+                AppLogCategory.auth,
+                'Preserved authenticated peer route for ${entry.key}: '
+                '${entry.value.peerAddress}:${entry.value.peerPort}; '
+                'ignored presence endpoint ${peer.address}:${peer.port}',
+              );
+        }
+        nextSessions[entry.key] = entry.value.copyWith(updatedAt: _now());
         continue;
       }
 

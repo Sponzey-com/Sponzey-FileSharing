@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sponzey_file_sharing/app/app_config.dart';
 import 'package:sponzey_file_sharing/application/auth/auth_controller.dart';
 import 'package:sponzey_file_sharing/application/auth/peer_auth_controller.dart';
+import 'package:sponzey_file_sharing/application/network/peer_path_registry.dart';
 import 'package:sponzey_file_sharing/application/transfer/transfer_rtt_estimator.dart';
 import 'package:sponzey_file_sharing/core/errors/app_exception.dart';
 import 'package:sponzey_file_sharing/core/logger/app_log_category.dart';
@@ -17,8 +18,10 @@ import 'package:sponzey_file_sharing/core/message_bus/message_bus.dart';
 import 'package:sponzey_file_sharing/domain/entities/app_settings.dart';
 import 'package:sponzey_file_sharing/domain/entities/peer_auth_session.dart';
 import 'package:sponzey_file_sharing/domain/entities/transfer_job.dart';
+import 'package:sponzey_file_sharing/domain/network/network_interface_models.dart';
+import 'package:sponzey_file_sharing/domain/network/peer_connection_path.dart';
 import 'package:sponzey_file_sharing/infrastructure/auth/auth_packet.dart';
-import 'package:sponzey_file_sharing/infrastructure/auth/auth_transport.dart';
+import 'package:sponzey_file_sharing/infrastructure/control/control_transport.dart';
 import 'package:sponzey_file_sharing/infrastructure/platform/app_storage_path_provider.dart';
 import 'package:sponzey_file_sharing/infrastructure/platform/local_device_identity_service.dart';
 import 'package:sponzey_file_sharing/infrastructure/repositories/settings_repository.dart';
@@ -86,7 +89,7 @@ class TransferController extends Notifier<TransferState> {
 
   bool _didInitialize = false;
   final Random _random = Random.secure();
-  StreamSubscription<AuthDatagram>? _packetSubscription;
+  StreamSubscription<ControlDatagram>? _packetSubscription;
   LocalDeviceIdentity? _localIdentity;
   final Map<String, _OutgoingTransferContext> _outgoingTransfers = {};
   final Map<String, _IncomingTransferContext> _incomingTransfers = {};
@@ -130,6 +133,9 @@ class TransferController extends Notifier<TransferState> {
           .prepareOutgoingFile(filePath, chunkSize: _chunkSize);
       final transferId = _randomHex(12);
       final now = _now();
+      final targetAddress = InternetAddress(session.peerAddress);
+      final targetPort = session.peerPort;
+      final controlEndpoint = _activeControlEndpointForPeer(peerId);
       final context = _OutgoingTransferContext(
         session: session,
         preparedFile: preparedFile,
@@ -138,8 +144,19 @@ class TransferController extends Notifier<TransferState> {
         remoteWindowStart: 0,
         advertisedWindowSize: _receiverAdvertisedWindow,
         rttEstimator: TransferRttEstimator(),
+        controlEndpoint: controlEndpoint,
       );
       _outgoingTransfers[transferId] = context;
+      ref
+          .read(appLoggerProvider)
+          .info(
+            AppLogCategory.transferControl,
+            'Starting outgoing transfer ${_safeTransfer(transferId)} '
+            'peer=$peerId target=${targetAddress.address}:$targetPort '
+            'local=${_endpointLabel(controlEndpoint)} '
+            'file=${preparedFile.fileName} size=${preparedFile.fileSize} '
+            'chunks=${preparedFile.chunkCount}',
+          );
       _upsertJob(
         TransferJob(
           id: transferId,
@@ -176,8 +193,9 @@ class TransferController extends Notifier<TransferState> {
           transferChunkCount: preparedFile.chunkCount,
           sentAtEpochMs: now.millisecondsSinceEpoch,
         ),
-        address: InternetAddress(session.peerAddress),
-        port: session.peerPort,
+        address: targetAddress,
+        port: targetPort,
+        localEndpoint: controlEndpoint,
       );
 
       _updateJob(
@@ -245,9 +263,9 @@ class TransferController extends Notifier<TransferState> {
           .read(localDeviceIdentityServiceProvider)
           .load();
       await ref
-          .read(authTransportProvider)
+          .read(controlTransportProvider)
           .start(preferredPort: ref.read(appConfigProvider).authPort);
-      _packetSubscription = ref.read(authTransportProvider).packets.listen((
+      _packetSubscription = ref.read(controlTransportProvider).packets.listen((
         datagram,
       ) {
         unawaited(_handlePacket(datagram));
@@ -274,13 +292,13 @@ class TransferController extends Notifier<TransferState> {
     }
   }
 
-  Future<void> _handlePacket(AuthDatagram datagram) async {
+  Future<void> _handlePacket(ControlDatagram datagram) async {
     final packet = datagram.packet;
     switch (packet.type) {
       case AuthPacketType.transferInit:
         await _onTransferInit(packet, datagram);
       case AuthPacketType.transferInitAck:
-        _onTransferInitAck(packet);
+        _onTransferInitAck(packet, datagram);
       case AuthPacketType.transferChunk:
         await _onTransferChunk(packet, datagram);
       case AuthPacketType.transferChunkAck:
@@ -292,7 +310,7 @@ class TransferController extends Notifier<TransferState> {
       case AuthPacketType.transferComplete:
         await _onTransferComplete(packet, datagram);
       case AuthPacketType.transferCompleteAck:
-        _onTransferCompleteAck(packet);
+        _onTransferCompleteAck(packet, datagram);
       case AuthPacketType.connectRequest:
       case AuthPacketType.authChallenge:
       case AuthPacketType.authToken:
@@ -354,6 +372,7 @@ class TransferController extends Notifier<TransferState> {
         ),
         address: InternetAddress(context.session.peerAddress),
         port: context.session.peerPort,
+        localEndpoint: context.controlEndpoint,
       );
 
       final completeAck = await context.completeAck.future.timeout(
@@ -392,7 +411,8 @@ class TransferController extends Notifier<TransferState> {
         transferId,
         '상대 노드의 전송 응답 시간이 초과되었습니다. '
         '대상 ${context.session.peerAddress}:${context.session.peerPort} 에서 '
-        'TRANSFER_INIT_ACK 를 받지 못했습니다.',
+        'TRANSFER_INIT_ACK 를 받지 못했습니다. '
+        'local=${_endpointLabel(context.controlEndpoint)}',
       );
     } on AppException catch (error) {
       await _failOutgoingTransfer(transferId, error.message);
@@ -523,6 +543,7 @@ class TransferController extends Notifier<TransferState> {
       ),
       address: InternetAddress(context.session.peerAddress),
       port: context.session.peerPort,
+      localEndpoint: context.controlEndpoint,
     );
     context.inFlightChunks.add(chunkIndex);
     context.sentAtByChunk[chunkIndex] = now;
@@ -567,7 +588,10 @@ class TransferController extends Notifier<TransferState> {
     unawaited(_pumpOutgoingWindow(transferId, context));
   }
 
-  Future<void> _onTransferInit(AuthPacket packet, AuthDatagram datagram) async {
+  Future<void> _onTransferInit(
+    AuthPacket packet,
+    ControlDatagram datagram,
+  ) async {
     final transferId = packet.transferId;
     final fileName = packet.transferFileName;
     final fileSize = packet.transferFileSize;
@@ -582,6 +606,15 @@ class TransferController extends Notifier<TransferState> {
     }
 
     final peerId = _peerIdFromPacket(packet);
+    ref
+        .read(appLoggerProvider)
+        .info(
+          AppLogCategory.transferControl,
+          'Received TRANSFER_INIT ${_safeTransfer(transferId)} '
+          'peer=$peerId source=${datagram.address.address}:${datagram.port} '
+          'local=${_endpointLabel(datagram.localEndpoint)} '
+          'file=$fileName size=$fileSize chunks=$chunkCount',
+        );
     final session = ref.read(peerAuthSessionByPeerIdProvider(peerId));
     if (session == null || !session.isAuthenticated) {
       await _sendTransferInitAck(
@@ -591,6 +624,7 @@ class TransferController extends Notifier<TransferState> {
         port: datagram.port,
         accepted: false,
         message: '인증된 피어만 파일을 전송할 수 있습니다.',
+        localEndpoint: datagram.localEndpoint,
       );
       return;
     }
@@ -641,6 +675,7 @@ class TransferController extends Notifier<TransferState> {
         port: datagram.port,
         accepted: true,
         savePath: settings.defaultSavePath,
+        localEndpoint: datagram.localEndpoint,
       );
       _updateJob(
         transferId,
@@ -659,6 +694,7 @@ class TransferController extends Notifier<TransferState> {
         port: datagram.port,
         accepted: false,
         message: error.message,
+        localEndpoint: datagram.localEndpoint,
       );
     } catch (error, stackTrace) {
       ref
@@ -676,11 +712,12 @@ class TransferController extends Notifier<TransferState> {
         port: datagram.port,
         accepted: false,
         message: '수신 임시 파일을 준비하지 못했습니다.',
+        localEndpoint: datagram.localEndpoint,
       );
     }
   }
 
-  void _onTransferInitAck(AuthPacket packet) {
+  void _onTransferInitAck(AuthPacket packet, ControlDatagram datagram) {
     final transferId = packet.transferId;
     if (transferId == null) {
       return;
@@ -690,6 +727,14 @@ class TransferController extends Notifier<TransferState> {
     if (context == null || context.initAck.isCompleted) {
       return;
     }
+    ref
+        .read(appLoggerProvider)
+        .info(
+          AppLogCategory.transferControl,
+          'Received TRANSFER_INIT_ACK ${_safeTransfer(transferId)} '
+          'from=${datagram.address.address}:${datagram.port} '
+          'accepted=${packet.transferAccepted ?? false}',
+        );
     context.initAck.complete(
       _TransferInitAckResult(
         accepted: packet.transferAccepted ?? false,
@@ -701,7 +746,7 @@ class TransferController extends Notifier<TransferState> {
 
   Future<void> _onTransferChunk(
     AuthPacket packet,
-    AuthDatagram datagram,
+    ControlDatagram datagram,
   ) async {
     final transferId = packet.transferId;
     final chunkIndex = packet.transferChunkIndex;
@@ -722,6 +767,7 @@ class TransferController extends Notifier<TransferState> {
         address: datagram.address,
         port: datagram.port,
         chunkIndexes: [context.nextExpectedChunk],
+        localEndpoint: datagram.localEndpoint,
       );
       return;
     }
@@ -734,6 +780,7 @@ class TransferController extends Notifier<TransferState> {
         address: datagram.address,
         port: datagram.port,
         chunkIndex: chunkIndex,
+        localEndpoint: datagram.localEndpoint,
       );
       await _sendWindowUpdate(
         sessionId: context.sessionId,
@@ -742,6 +789,7 @@ class TransferController extends Notifier<TransferState> {
         port: datagram.port,
         windowStart: context.nextExpectedChunk,
         windowSize: _receiverWindowSize(context),
+        localEndpoint: datagram.localEndpoint,
       );
       _updateIncomingMetrics(
         transferId,
@@ -769,6 +817,7 @@ class TransferController extends Notifier<TransferState> {
           address: datagram.address,
           port: datagram.port,
           chunkIndex: chunkIndex,
+          localEndpoint: datagram.localEndpoint,
         );
       } else {
         context.bufferedChunks[chunkIndex] = bytes;
@@ -778,6 +827,7 @@ class TransferController extends Notifier<TransferState> {
           address: datagram.address,
           port: datagram.port,
           chunkIndex: chunkIndex,
+          localEndpoint: datagram.localEndpoint,
         );
         final missingIndexes = _missingIndexesUntil(
           context,
@@ -791,6 +841,7 @@ class TransferController extends Notifier<TransferState> {
             address: datagram.address,
             port: datagram.port,
             chunkIndexes: missingIndexes,
+            localEndpoint: datagram.localEndpoint,
           );
         }
       }
@@ -802,6 +853,7 @@ class TransferController extends Notifier<TransferState> {
         port: datagram.port,
         windowStart: context.nextExpectedChunk,
         windowSize: _receiverWindowSize(context),
+        localEndpoint: datagram.localEndpoint,
       );
       _updateIncomingMetrics(
         transferId,
@@ -936,7 +988,7 @@ class TransferController extends Notifier<TransferState> {
 
   Future<void> _onTransferComplete(
     AuthPacket packet,
-    AuthDatagram datagram,
+    ControlDatagram datagram,
   ) async {
     final transferId = packet.transferId;
     if (transferId == null) {
@@ -961,6 +1013,7 @@ class TransferController extends Notifier<TransferState> {
           address: datagram.address,
           port: datagram.port,
           chunkIndexes: missingIndexes,
+          localEndpoint: datagram.localEndpoint,
         );
       }
       await _sendWindowUpdate(
@@ -970,6 +1023,7 @@ class TransferController extends Notifier<TransferState> {
         port: datagram.port,
         windowStart: context.nextExpectedChunk,
         windowSize: _receiverWindowSize(context),
+        localEndpoint: datagram.localEndpoint,
       );
       _updateIncomingMetrics(
         transferId,
@@ -1048,6 +1102,7 @@ class TransferController extends Notifier<TransferState> {
         accepted: true,
         savePath: finalPath,
         message: '수신 파일 검증이 완료되었습니다.',
+        localEndpoint: datagram.localEndpoint,
       );
     } on AppException catch (error) {
       await _sendTransferCompleteAck(
@@ -1057,6 +1112,7 @@ class TransferController extends Notifier<TransferState> {
         port: datagram.port,
         accepted: false,
         message: error.message,
+        localEndpoint: datagram.localEndpoint,
       );
       await _failIncomingTransfer(transferId, error.message);
     } catch (error, stackTrace) {
@@ -1075,12 +1131,13 @@ class TransferController extends Notifier<TransferState> {
         port: datagram.port,
         accepted: false,
         message: '수신 파일을 완료하지 못했습니다.',
+        localEndpoint: datagram.localEndpoint,
       );
       await _failIncomingTransfer(transferId, '수신 파일을 완료하지 못했습니다.');
     }
   }
 
-  void _onTransferCompleteAck(AuthPacket packet) {
+  void _onTransferCompleteAck(AuthPacket packet, ControlDatagram datagram) {
     final transferId = packet.transferId;
     if (transferId == null) {
       return;
@@ -1090,6 +1147,14 @@ class TransferController extends Notifier<TransferState> {
     if (context == null || context.completeAck.isCompleted) {
       return;
     }
+    ref
+        .read(appLoggerProvider)
+        .info(
+          AppLogCategory.transferControl,
+          'Received TRANSFER_COMPLETE_ACK ${_safeTransfer(transferId)} '
+          'from=${datagram.address.address}:${datagram.port} '
+          'accepted=${packet.transferAccepted ?? false}',
+        );
     context.completeAck.complete(
       _TransferCompleteAckResult(
         accepted: packet.transferAccepted ?? false,
@@ -1107,6 +1172,7 @@ class TransferController extends Notifier<TransferState> {
     required bool accepted,
     String? message,
     String? savePath,
+    UdpInterfaceEndpoint? localEndpoint,
   }) {
     return _send(
       AuthPacket(
@@ -1125,6 +1191,7 @@ class TransferController extends Notifier<TransferState> {
       ),
       address: address,
       port: port,
+      localEndpoint: localEndpoint,
     );
   }
 
@@ -1134,6 +1201,7 @@ class TransferController extends Notifier<TransferState> {
     required InternetAddress address,
     required int port,
     required int chunkIndex,
+    UdpInterfaceEndpoint? localEndpoint,
   }) {
     return _send(
       AuthPacket(
@@ -1150,6 +1218,7 @@ class TransferController extends Notifier<TransferState> {
       ),
       address: address,
       port: port,
+      localEndpoint: localEndpoint,
     );
   }
 
@@ -1159,6 +1228,7 @@ class TransferController extends Notifier<TransferState> {
     required InternetAddress address,
     required int port,
     required List<int> chunkIndexes,
+    UdpInterfaceEndpoint? localEndpoint,
   }) {
     final compactIndexes = chunkIndexes.toSet().toList(growable: false)..sort();
     if (compactIndexes.isEmpty) {
@@ -1180,6 +1250,7 @@ class TransferController extends Notifier<TransferState> {
       ),
       address: address,
       port: port,
+      localEndpoint: localEndpoint,
     );
   }
 
@@ -1190,6 +1261,7 @@ class TransferController extends Notifier<TransferState> {
     required int port,
     required int windowStart,
     required int windowSize,
+    UdpInterfaceEndpoint? localEndpoint,
   }) {
     return _send(
       AuthPacket(
@@ -1207,6 +1279,7 @@ class TransferController extends Notifier<TransferState> {
       ),
       address: address,
       port: port,
+      localEndpoint: localEndpoint,
     );
   }
 
@@ -1218,6 +1291,7 @@ class TransferController extends Notifier<TransferState> {
     required bool accepted,
     String? message,
     String? savePath,
+    UdpInterfaceEndpoint? localEndpoint,
   }) {
     return _send(
       AuthPacket(
@@ -1236,6 +1310,7 @@ class TransferController extends Notifier<TransferState> {
       ),
       address: address,
       port: port,
+      localEndpoint: localEndpoint,
     );
   }
 
@@ -1535,10 +1610,53 @@ class TransferController extends Notifier<TransferState> {
     AuthPacket packet, {
     required InternetAddress address,
     required int port,
+    UdpInterfaceEndpoint? localEndpoint,
   }) {
+    if (packet.type != AuthPacketType.transferChunk) {
+      ref
+          .read(appLoggerProvider)
+          .info(
+            AppLogCategory.transferControl,
+            'Sending ${packet.type.wireName} ${_safeTransfer(packet.transferId)} '
+            'to ${address.address}:$port '
+            'local=${_endpointLabel(localEndpoint)} '
+            'session=${_safeSession(packet.sessionId)}',
+          );
+    }
     return ref
-        .read(authTransportProvider)
-        .send(packet, address: address, port: port);
+        .read(controlTransportProvider)
+        .send(
+          packet,
+          address: address,
+          port: port,
+          localEndpoint: localEndpoint,
+        );
+  }
+
+  UdpInterfaceEndpoint? _activeControlEndpointForPeer(String peerId) {
+    final path = ref.read(peerPathRegistryProvider).selectedForPeer(peerId);
+    if (path == null || path.status != PeerPathStatus.active) {
+      return null;
+    }
+    return path.controlEndpoint;
+  }
+
+  String _endpointLabel(UdpInterfaceEndpoint? endpoint) {
+    if (endpoint == null) {
+      return 'any';
+    }
+    return '${endpoint.localAddress}:${endpoint.port}/${endpoint.bindMode.name}';
+  }
+
+  String _safeSession(String sessionId) {
+    return sessionId.length <= 8 ? sessionId : sessionId.substring(0, 8);
+  }
+
+  String _safeTransfer(String? transferId) {
+    if (transferId == null || transferId.isEmpty) {
+      return '-';
+    }
+    return transferId.length <= 8 ? transferId : transferId.substring(0, 8);
   }
 
   DateTime _now() => ref.read(transferNowProvider)();
@@ -1614,12 +1732,14 @@ class _OutgoingTransferContext {
     required this.remoteWindowStart,
     required this.advertisedWindowSize,
     required this.rttEstimator,
+    this.controlEndpoint,
   });
 
   final PeerAuthSession session;
   final PreparedTransferFile preparedFile;
   final DateTime startedAt;
   final TransferRttEstimator rttEstimator;
+  final UdpInterfaceEndpoint? controlEndpoint;
   final Completer<_TransferInitAckResult> initAck =
       Completer<_TransferInitAckResult>();
   final Completer<void> allChunksAcked = Completer<void>();

@@ -482,6 +482,70 @@ void main() {
   });
 
   test(
+    'discovery updates do not replace an authenticated route endpoint',
+    () async {
+      final harness = await _createNode(
+        clock: clock,
+        loginUserId: 'team',
+        loginPassword: 'shared-secret',
+        localDeviceId: 'device-a',
+        authPort: 40001,
+      );
+      addTearDown(harness.dispose);
+      final authenticatedPeer = await _authenticatePeerOnRoute(
+        harness,
+        clock,
+        address: '10.211.55.3',
+        port: 56951,
+      );
+
+      harness.controller.syncDiscoveredPeer(
+        authenticatedPeer.copyWith(address: '192.168.0.236'),
+      );
+      await _flush();
+
+      final session = harness.container.read(
+        peerAuthSessionByPeerIdProvider(authenticatedPeer.id),
+      );
+      expect(session?.status, PeerAuthStatus.authenticated);
+      expect(session?.peerAddress, '10.211.55.3');
+      expect(session?.peerPort, 56951);
+    },
+  );
+
+  test(
+    'online presence sync preserves an authenticated route endpoint',
+    () async {
+      final harness = await _createNode(
+        clock: clock,
+        loginUserId: 'team',
+        loginPassword: 'shared-secret',
+        localDeviceId: 'device-a',
+        authPort: 40001,
+      );
+      addTearDown(harness.dispose);
+      final authenticatedPeer = await _authenticatePeerOnRoute(
+        harness,
+        clock,
+        address: '10.211.55.3',
+        port: 56951,
+      );
+
+      harness.controller.syncPeerPresence([
+        authenticatedPeer.copyWith(address: '192.168.0.236'),
+      ]);
+      await _flush();
+
+      final session = harness.container.read(
+        peerAuthSessionByPeerIdProvider(authenticatedPeer.id),
+      );
+      expect(session?.status, PeerAuthStatus.authenticated);
+      expect(session?.peerAddress, '10.211.55.3');
+      expect(session?.peerPort, 56951);
+    },
+  );
+
+  test(
     'offline presence clears authenticated session and active path',
     () async {
       final harness = await _createNode(
@@ -586,6 +650,41 @@ void main() {
     expect(session?.message, 'controlBindFailed');
     expect(harness.transport.sentPackets, isEmpty);
   });
+}
+
+Future<PeerNode> _authenticatePeerOnRoute(
+  _NodeHarness harness,
+  _MutableClock clock, {
+  required String address,
+  required int port,
+}) async {
+  final peer = _peerNode(clock.value, port: port).copyWith(address: address);
+
+  await harness.controller.startHandshake(peer);
+  await _flush();
+  final request = harness.transport.sentPackets.single.packet;
+  harness.transport.emit(
+    AuthPacket(
+      type: AuthPacketType.authAccept,
+      protocolVersion: '1.0',
+      sessionId: request.sessionId,
+      fromUserId: peer.userId,
+      fromDeviceId: peer.deviceId,
+      fromDisplayName: peer.displayName,
+      sentAtEpochMs: clock.value.millisecondsSinceEpoch,
+    ),
+    address: InternetAddress(address),
+    port: port,
+  );
+  await _flush();
+
+  final session = harness.container.read(
+    peerAuthSessionByPeerIdProvider(peer.id),
+  );
+  expect(session?.status, PeerAuthStatus.authenticated);
+  expect(session?.peerAddress, address);
+  expect(session?.peerPort, port);
+  return peer;
 }
 
 PeerNode _peerNode(DateTime now, {required int port}) {
