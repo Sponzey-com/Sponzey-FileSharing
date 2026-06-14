@@ -29,6 +29,7 @@ permissions:
 
 env:
   APP_SLUG: sponzey-file-sharing
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build-macos:
@@ -37,10 +38,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Flutter
-        uses: subosito/flutter-action@v2
+        uses: subosito/flutter-action@v2.23.0
         with:
           channel: stable
           cache: true
@@ -55,7 +56,7 @@ jobs:
         run: flutter analyze
 
       - name: Test
-        run: flutter test
+        run: flutter test --concurrency=1 --reporter expanded
 
       - name: Build macOS release
         run: flutter build macos --release
@@ -75,7 +76,7 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent "${app_dir}" "dist/${APP_SLUG}-macos-${version}.zip"
 
       - name: Upload macOS artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos-release
           path: dist/*.zip
@@ -87,10 +88,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Flutter
-        uses: subosito/flutter-action@v2
+        uses: subosito/flutter-action@v2.23.0
         with:
           channel: stable
           cache: true
@@ -113,7 +114,7 @@ jobs:
           Compress-Archive -Path "$releaseDir\*" -DestinationPath "dist\$env:APP_SLUG-windows-$version.zip" -Force
 
       - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-release
           path: dist/*.zip
@@ -125,7 +126,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Linux desktop dependencies
         run: |
@@ -140,7 +141,7 @@ jobs:
             libsecret-1-dev
 
       - name: Setup Flutter
-        uses: subosito/flutter-action@v2
+        uses: subosito/flutter-action@v2.23.0
         with:
           channel: stable
           cache: true
@@ -155,7 +156,7 @@ jobs:
         run: flutter analyze
 
       - name: Test
-        run: flutter test
+        run: flutter test --concurrency=1 --reporter expanded
 
       - name: Build Linux release
         run: flutter build linux --release
@@ -175,7 +176,7 @@ jobs:
           tar -czf "dist/${APP_SLUG}-linux-${version}.tar.gz" -C "build/linux/x64/release" bundle
 
       - name: Upload Linux artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: linux-release
           path: dist/*.tar.gz
@@ -194,13 +195,13 @@ jobs:
 
     steps:
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
 
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag || github.ref_name }}
           target_commitish: ${{ github.sha }}

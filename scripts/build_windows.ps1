@@ -47,7 +47,7 @@ Invoke-Step "Resolve dependencies" { flutter pub get }
 Invoke-Step "Analyze" { flutter analyze }
 
 if (-not $SkipTests) {
-  Invoke-Step "Test" { flutter test }
+  Invoke-Step "Test" { flutter test --concurrency=1 --reporter expanded }
 }
 
 Invoke-Step "Build Windows release" { flutter build windows --release }
