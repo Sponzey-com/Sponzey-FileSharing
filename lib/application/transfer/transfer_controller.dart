@@ -77,7 +77,8 @@ class TransferState {
 }
 
 class TransferController extends Notifier<TransferState> {
-  static const int _chunkSize = 8 * 1024;
+  // Keep the encoded JSON + base64 UDP datagram below common 1500-byte MTU.
+  static const int _chunkSize = 384;
   static const Duration _initAckTimeout = Duration(seconds: 10);
   static const Duration _completeAckTimeout = Duration(seconds: 10);
   static const int _initialWindowSize = 4;

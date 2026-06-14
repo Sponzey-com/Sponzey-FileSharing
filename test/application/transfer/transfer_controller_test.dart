@@ -104,6 +104,70 @@ void main() {
     },
   );
 
+  test('keeps transfer chunk packets within UDP safe datagram size', () async {
+    final transferChunkPacketSizes = <int>[];
+    final network = _LinkedFakeAuthNetwork(
+      interceptor:
+          ({
+            required packet,
+            required address,
+            required sourcePort,
+            required targetPort,
+            required deliver,
+          }) async {
+            if (packet.type == AuthPacketType.transferChunk) {
+              transferChunkPacketSizes.add(packet.encode().length);
+            }
+            deliver(packet, address: address, port: sourcePort);
+          },
+    );
+    final alice = await _createNode(
+      network: network,
+      clock: clock,
+      loginUserId: _sharedUserId,
+      loginPassword: _sharedPassword,
+      localDeviceId: 'device-a',
+      authPort: 41003,
+      receivePath: '${workspaceDirectory.path}/alice-mtu',
+    );
+    final bob = await _createNode(
+      network: network,
+      clock: clock,
+      loginUserId: _sharedUserId,
+      loginPassword: _sharedPassword,
+      localDeviceId: 'device-b',
+      authPort: 41004,
+      receivePath: '${workspaceDirectory.path}/bob-mtu',
+    );
+    addTearDown(alice.dispose);
+    addTearDown(bob.dispose);
+
+    await _prepareAuthenticatedPair(
+      alice: alice,
+      bob: bob,
+      bobReceivePath: '${workspaceDirectory.path}/bob-mtu',
+      bobPort: 41004,
+      clock: clock,
+    );
+
+    final sourceFile = File('${workspaceDirectory.path}/alice-mtu/source.bin');
+    await sourceFile.parent.create(recursive: true);
+    await sourceFile.writeAsBytes(List<int>.filled(4096, 7));
+
+    await alice.transferController.sendFile(
+      peerId: 'team@instance-device-b',
+      filePath: sourceFile.path,
+    );
+
+    final aliceJob = await _waitForTerminalTransfer(alice.container);
+    final bobJob = await _waitForTerminalTransfer(bob.container);
+
+    expect(aliceJob.status, TransferJobStatus.completed);
+    expect(bobJob.status, TransferJobStatus.completed);
+    expect(transferChunkPacketSizes, isNotEmpty);
+    expect(transferChunkPacketSizes, everyElement(lessThanOrEqualTo(1200)));
+  });
+
   test('sends multiple files to one authenticated peer', () async {
     final network = _LinkedFakeAuthNetwork();
     final alice = await _createNode(
@@ -566,7 +630,7 @@ void main() {
 
     final sourceFile = File('${workspaceDirectory.path}/alice-20p/source.bin');
     await sourceFile.parent.create(recursive: true);
-    await sourceFile.writeAsString(List<String>.filled(6500, 'chunk20').join());
+    await sourceFile.writeAsBytes(List<int>.filled(1920, 9));
 
     await alice.transferController.sendFile(
       peerId: 'team@instance-device-b',
