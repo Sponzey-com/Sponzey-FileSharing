@@ -73,7 +73,8 @@ class RawUdpDiscoveryTransport
     _receivePortFallback = false;
     _lastError = null;
 
-    final preferredInterfaces = await _resolvePreferredInterfaceSnapshots();
+    final interfaceScan = await _resolveInterfaceScan();
+    final preferredInterfaces = interfaceScan.selected;
     final preferredInterfaceIds = preferredInterfaces
         .map((interface) => interface.id.stableId)
         .toSet();
@@ -81,10 +82,44 @@ class RawUdpDiscoveryTransport
       interfaces: preferredInterfaces,
       port: port,
     );
+    _logger.info(
+      AppLogCategory.discovery,
+      'Discovery transport start requested. preferredPort=$port '
+      'scannedInterfaces=${interfaceScan.all.length} '
+      'selectedInterfaces=${preferredInterfaces.length}',
+    );
+    _logger.info(
+      AppLogCategory.discovery,
+      'Discovery interface scan details '
+      '${_allInterfacePreview(interfaceScan.all).join(' | ')}',
+    );
+    _logger.info(
+      AppLogCategory.discovery,
+      'Discovery selected interfaces '
+      '${_interfacePreview(preferredInterfaces).join(' | ')}',
+    );
+    if (_broadcastTargets.isEmpty) {
+      _logger.warning(
+        AppLogCategory.discovery,
+        'Discovery broadcast target plan is empty. '
+        'No active ethernet/bridge/wifi IPv4 interface was selected.',
+      );
+    } else {
+      _logger.info(
+        AppLogCategory.discovery,
+        'Discovery broadcast target plan count=${_broadcastTargets.length} '
+        'targets=${_targetPreview(_broadcastTargets, limit: 32).join(' | ')}',
+      );
+    }
 
     RawDatagramSocket? receiveSocket;
     try {
       receiveSocket = await _bindSocket(port);
+      _logger.info(
+        AppLogCategory.discovery,
+        'Discovery receive socket bound address=${receiveSocket.address.address} '
+        'port=${receiveSocket.port} preferredPort=$port fallback=false',
+      );
     } catch (error, stackTrace) {
       if (!_isAddressInUse(error)) {
         rethrow;
@@ -99,6 +134,12 @@ class RawUdpDiscoveryTransport
       try {
         receiveSocket = await _bindSocket(0);
         _receivePortFallback = true;
+        _logger.warning(
+          AppLogCategory.discovery,
+          'Discovery receive socket bound to fallback port '
+          '${receiveSocket.port}. Peers must learn this port from outgoing '
+          'DISCOVER packets before they can reply directly.',
+        );
       } catch (fallbackError, fallbackStackTrace) {
         _lastError = fallbackError.toString();
         _logger.warning(
@@ -120,6 +161,11 @@ class RawUdpDiscoveryTransport
     final sendSocket = await _bindSocket(0);
     sendSocket.readEventsEnabled = false;
     _sendSocket = sendSocket;
+    _logger.info(
+      AppLogCategory.discovery,
+      'Discovery wildcard send socket bound address=${sendSocket.address.address} '
+      'port=${sendSocket.port}',
+    );
     await _initializeInterfaceSendSockets();
 
     if (receiveSocket != null) {
@@ -153,6 +199,14 @@ class RawUdpDiscoveryTransport
     var successCount = 0;
     var failureCount = 0;
 
+    if (_broadcastTargets.isEmpty) {
+      _logger.warning(
+        AppLogCategory.discovery,
+        'Discovery broadcast skipped because target list is empty. '
+        'packet=${_packetSummary(packet)} preferredPort=$port',
+      );
+    }
+
     void attemptSend({
       required String sender,
       required RawDatagramSocket selectedSocket,
@@ -169,12 +223,22 @@ class RawUdpDiscoveryTransport
           '$sender ${target.localAddress}->${target.address}:$port ${target.type.name}';
       if (result.success) {
         successCount += 1;
+        _logger.info(
+          AppLogCategory.discovery,
+          'Discovery broadcast send OK $endpoint bytes=${result.bytesSent} '
+          'packet=${_packetSummary(packet)}',
+        );
         if (attemptPreview.length < 12) {
           attemptPreview.add('$endpoint OK ${result.bytesSent}B');
         }
         return;
       }
       failureCount += 1;
+      _logger.warning(
+        AppLogCategory.discovery,
+        'Discovery broadcast send FAIL $endpoint '
+        'error=${result.errorMessage ?? '-'} packet=${_packetSummary(packet)}',
+      );
       if (attemptPreview.length < 12) {
         attemptPreview.add('$endpoint FAIL ${result.errorMessage}');
       }
@@ -213,13 +277,17 @@ class RawUdpDiscoveryTransport
       _lastError = 'broadcast send failures $failureCount/$attemptCount';
       _logger.warning(
         AppLogCategory.discovery,
-        'Discovery broadcast completed with $failureCount failed send attempt(s) out of $attemptCount.',
+        'Discovery broadcast completed with $failureCount failed send '
+        'attempt(s) out of $attemptCount. packet=${_packetSummary(packet)} '
+        'preview=${attemptPreview.join(' | ')}',
       );
     } else {
       _lastError = null;
-      _logger.debug(
+      _logger.info(
         AppLogCategory.discovery,
-        'Discovery broadcast completed with $successCount successful send attempt(s).',
+        'Discovery broadcast completed with $successCount successful send '
+        'attempt(s). packet=${_packetSummary(packet)} '
+        'preview=${attemptPreview.join(' | ')}',
       );
     }
   }
@@ -231,7 +299,35 @@ class RawUdpDiscoveryTransport
     required int port,
   }) async {
     final socket = _requireSendSocket();
-    socket.send(packet.encode(), address, port);
+    final payload = packet.encode();
+    try {
+      final sent = socket.send(payload, address, port);
+      if (sent == 0) {
+        _lastError =
+            'unicast send returned 0 bytes to ${address.address}:$port';
+        _logger.warning(
+          AppLogCategory.discovery,
+          'Discovery unicast send returned 0 bytes. '
+          'target=${address.address}:$port packet=${_packetSummary(packet)}',
+        );
+        return;
+      }
+      _logger.info(
+        AppLogCategory.discovery,
+        'Discovery unicast sent target=${address.address}:$port bytes=$sent '
+        'packet=${_packetSummary(packet)}',
+      );
+    } catch (error, stackTrace) {
+      _lastError = error.toString();
+      _logger.warning(
+        AppLogCategory.discovery,
+        'Discovery unicast send failed. target=${address.address}:$port '
+        'packet=${_packetSummary(packet)}',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      rethrow;
+    }
   }
 
   @override
@@ -267,8 +363,19 @@ class RawUdpDiscoveryTransport
     Datagram? datagram;
     while ((datagram = socket.receive()) != null) {
       final current = datagram!;
+      _logger.info(
+        AppLogCategory.discovery,
+        'Discovery datagram received from '
+        '${current.address.address}:${current.port} bytes=${current.data.length}',
+      );
       try {
         final packet = DiscoveryPacket.decode(current.data);
+        _logger.info(
+          AppLogCategory.discovery,
+          'Discovery datagram decoded from '
+          '${current.address.address}:${current.port} '
+          'packet=${_packetSummary(packet)}',
+        );
         _packetsController.add(
           DiscoveryDatagram(
             packet: packet,
@@ -279,7 +386,9 @@ class RawUdpDiscoveryTransport
       } on FormatException catch (error, stackTrace) {
         _logger.warning(
           AppLogCategory.discovery,
-          'Ignored malformed discovery datagram',
+          'Ignored malformed discovery datagram from '
+          '${current.address.address}:${current.port} '
+          'bytes=${current.data.length}',
           error: error,
           stackTrace: stackTrace,
         );
@@ -357,10 +466,12 @@ class RawUdpDiscoveryTransport
     }
   }
 
-  Future<List<NetworkInterfaceSnapshot>>
-  _resolvePreferredInterfaceSnapshots() async {
+  Future<_DiscoveryInterfaceScan> _resolveInterfaceScan() async {
     final snapshots = await const DartIoNetworkInterfaceInventory().scan();
-    return selectPreferredInterfaces(snapshots);
+    return _DiscoveryInterfaceScan(
+      all: snapshots,
+      selected: selectPreferredInterfaces(snapshots),
+    );
   }
 
   List<DiscoveryTarget> _buildBroadcastTargets({
@@ -385,6 +496,11 @@ class RawUdpDiscoveryTransport
         final socket = await _bindSocketOnAddress(localAddress, 0);
         socket.readEventsEnabled = false;
         _sendSocketsByLocalAddress[localAddress] = socket;
+        _logger.info(
+          AppLogCategory.discovery,
+          'Discovery interface send socket bound local=$localAddress '
+          'port=${socket.port}',
+        );
       } catch (error, stackTrace) {
         _logger.warning(
           AppLogCategory.discovery,
@@ -415,8 +531,7 @@ class RawUdpDiscoveryTransport
     Iterable<NetworkInterfaceSnapshot> interfaces,
   ) {
     final selected = interfaces
-        .where((interface) => interface.activeIpv4Addresses.isNotEmpty)
-        .where(_isDefaultDiscoveryInterface)
+        .where((interface) => discoveryInterfaceDecision(interface).isSelected)
         .toList(growable: false);
     selected.sort((a, b) {
       final priorityCompare = _interfacePriority(
@@ -428,6 +543,26 @@ class RawUdpDiscoveryTransport
       return a.id.compareTo(b.id);
     });
     return selected;
+  }
+
+  static DiscoveryInterfaceDecision discoveryInterfaceDecision(
+    NetworkInterfaceSnapshot interface,
+  ) {
+    if (interface.isLoopback) {
+      return const DiscoveryInterfaceDecision.excluded('loopback');
+    }
+    if (!interface.isUp) {
+      return const DiscoveryInterfaceDecision.excluded('interface-down');
+    }
+    if (interface.activeIpv4Addresses.isEmpty) {
+      return const DiscoveryInterfaceDecision.excluded('no-active-lan-ipv4');
+    }
+    if (!_isDefaultDiscoveryInterface(interface)) {
+      return DiscoveryInterfaceDecision.excluded(
+        'type-${interface.typeHint.name}',
+      );
+    }
+    return const DiscoveryInterfaceDecision.selected();
   }
 
   static bool _isDefaultDiscoveryInterface(NetworkInterfaceSnapshot interface) {
@@ -494,7 +629,7 @@ class RawUdpDiscoveryTransport
     try {
       final sent = socket.send(payload, address, port);
       if (sent == 0) {
-        _logger.debug(
+        _logger.warning(
           AppLogCategory.discovery,
           'Discovery datagram send returned 0 bytes for ${address.address}:$port',
         );
@@ -502,7 +637,7 @@ class RawUdpDiscoveryTransport
       }
       return _DiscoverySendResult.success(sent);
     } catch (error, stackTrace) {
-      _logger.debug(
+      _logger.warning(
         AppLogCategory.discovery,
         'Discovery datagram send failed for ${address.address}:$port',
         error: error,
@@ -562,6 +697,12 @@ class RawUdpDiscoveryTransport
     for (var index = 0; index < attempts.length; index++) {
       final options = attempts[index];
       try {
+        _logger.info(
+          AppLogCategory.discovery,
+          'Discovery socket bind attempt address=${bindAddress.address} '
+          'port=$port reuseAddress=${options.reuseAddress} '
+          'reusePort=${options.reusePort}',
+        );
         return await RawDatagramSocket.bind(
           bindAddress,
           port,
@@ -641,6 +782,92 @@ class RawUdpDiscoveryTransport
     }
     return error.toString().toLowerCase().contains('invalid argument');
   }
+
+  static List<String> _interfacePreview(
+    Iterable<NetworkInterfaceSnapshot> interfaces, {
+    int limit = 24,
+  }) {
+    return interfaces
+        .take(limit)
+        .map((interface) {
+          final addresses = interface.activeIpv4Addresses
+              .map((address) {
+                final prefix = address.prefixLength == null
+                    ? ''
+                    : '/${address.prefixLength}';
+                final broadcast = address.broadcastAddress == null
+                    ? ''
+                    : ' bcast=${address.broadcastAddress}';
+                return '${address.address}$prefix$broadcast';
+              })
+              .join(',');
+          return '${interface.id.stableId} type=${interface.typeHint.name} '
+              'up=${interface.isUp} multicast=${interface.supportsMulticast} '
+              'ipv4=[$addresses]';
+        })
+        .toList(growable: false);
+  }
+
+  static List<String> _allInterfacePreview(
+    Iterable<NetworkInterfaceSnapshot> interfaces, {
+    int limit = 64,
+  }) {
+    return interfaces
+        .take(limit)
+        .map((interface) {
+          final addresses = interface.addresses
+              .map((address) {
+                final prefix = address.prefixLength == null
+                    ? ''
+                    : '/${address.prefixLength}';
+                final flags = [
+                  address.family.name,
+                  if (address.isPrivate) 'private',
+                  if (address.isLinkLocal) 'linkLocal',
+                  if (address.isLoopback) 'loopback',
+                ].join(',');
+                return '${address.address}$prefix($flags)';
+              })
+              .join(',');
+          final decision = discoveryInterfaceDecision(interface);
+          return '${interface.id.stableId} decision=${decision.label} '
+              'type=${interface.typeHint.name} up=${interface.isUp} '
+              'loopback=${interface.isLoopback} '
+              'multicast=${interface.supportsMulticast} '
+              'addresses=[$addresses]';
+        })
+        .toList(growable: false);
+  }
+
+  static List<String> _targetPreview(
+    Iterable<DiscoveryTarget> targets, {
+    int limit = 24,
+  }) {
+    return targets
+        .take(limit)
+        .map((target) {
+          return '${target.interfaceId.stableId} '
+              '${target.localAddress}->${target.address}:${target.port} '
+              '${target.type.name}';
+        })
+        .toList(growable: false);
+  }
+
+  static String _packetSummary(DiscoveryPacket packet) {
+    return 'type=${packet.type.wireName} user=${packet.userId} '
+        'device=${packet.deviceId} instance=${_short(packet.instanceId)} '
+        'group=${_short(packet.discoveryGroupTag)} '
+        'discoveryPort=${packet.discoveryPort ?? '-'} '
+        'controlPort=${packet.controlPort ?? packet.port} '
+        'dataPort=${packet.dataPort ?? '-'} msg=${_short(packet.messageId)}';
+  }
+
+  static String _short(String value, {int max = 12}) {
+    if (value.isEmpty) {
+      return '-';
+    }
+    return value.length <= max ? value : value.substring(0, max);
+  }
 }
 
 class _DiscoverySendResult {
@@ -659,6 +886,31 @@ class _DiscoverySendResult {
   final bool success;
   final int bytesSent;
   final String? errorMessage;
+}
+
+class DiscoveryInterfaceDecision {
+  const DiscoveryInterfaceDecision._({
+    required this.isSelected,
+    required this.reason,
+  });
+
+  const DiscoveryInterfaceDecision.selected()
+    : this._(isSelected: true, reason: 'selected');
+
+  const DiscoveryInterfaceDecision.excluded(String reason)
+    : this._(isSelected: false, reason: reason);
+
+  final bool isSelected;
+  final String reason;
+
+  String get label => isSelected ? 'selected' : 'excluded:$reason';
+}
+
+class _DiscoveryInterfaceScan {
+  const _DiscoveryInterfaceScan({required this.all, required this.selected});
+
+  final List<NetworkInterfaceSnapshot> all;
+  final List<NetworkInterfaceSnapshot> selected;
 }
 
 class _DiscoverySocketBindOptions {

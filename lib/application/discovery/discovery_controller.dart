@@ -197,10 +197,12 @@ class DiscoveryController extends Notifier<DiscoveryState> {
   LocalDeviceIdentity? _localIdentity;
   LocalInstanceRegistry? _localInstanceRegistry;
   int? _localAuthPort;
+  AppLogger? _cachedLogger;
   final Map<String, DateTime> _lastAutoHandshakeAt = {};
 
   @override
   DiscoveryState build() {
+    _cachedLogger ??= ref.read(appLoggerProvider);
     ref.onDispose(() {
       unawaited(_dispose());
     });
@@ -242,12 +244,25 @@ class DiscoveryController extends Notifier<DiscoveryState> {
   @visibleForTesting
   Future<void> broadcastNow() async {
     final packet = await _buildLocalPacket(DiscoveryPacketType.discover);
+    final logger = ref.read(appLoggerProvider);
     if (packet == null) {
+      logger.warning(
+        AppLogCategory.discovery,
+        'Discovery broadcast skipped because local packet could not be built. '
+        'authUser=${_currentUser()?.userId ?? '-'} '
+        'identityLoaded=${_localIdentity != null} '
+        'groupTag=${_discoveryGroupTagPreview(_currentDiscoveryGroupTag()) ?? '-'}',
+      );
       return;
     }
 
     final config = ref.read(appConfigProvider);
     final transport = ref.read(discoveryTransportProvider);
+    logger.info(
+      AppLogCategory.discovery,
+      'Discovery broadcast start configuredPort=${config.discoveryPort} '
+      'packet=${_packetSummary(packet)}',
+    );
     await ref
         .read(discoveryTransportProvider)
         .sendBroadcast(packet, port: config.discoveryPort);
@@ -267,9 +282,12 @@ class DiscoveryController extends Notifier<DiscoveryState> {
       ),
     );
 
-    ref
-        .read(appLoggerProvider)
-        .debug(AppLogCategory.discovery, 'Sent DISCOVER broadcast');
+    logger.info(
+      AppLogCategory.discovery,
+      'Discovery local registry published instance=${_short(packet.instanceId)} '
+      'user=${packet.userId} controlPort=${packet.controlPort ?? packet.port} '
+      'discoveryPort=${packet.discoveryPort ?? '-'}',
+    );
 
     state = state.copyWith(
       lastBroadcastAt: _now(),
@@ -278,6 +296,10 @@ class DiscoveryController extends Notifier<DiscoveryState> {
       clearError: true,
     );
     _applyTransportDiagnostics(transport);
+    logger.info(
+      AppLogCategory.discovery,
+      'Discovery broadcast state applied ${_transportSnapshotSummary(transport)}',
+    );
     await refreshPresence();
   }
 
@@ -287,6 +309,7 @@ class DiscoveryController extends Notifier<DiscoveryState> {
     }
 
     final logger = ref.read(appLoggerProvider);
+    _cachedLogger = logger;
     _isStarting = true;
     var initStage = 'begin';
     String? currentPairingUserId;
@@ -301,6 +324,11 @@ class DiscoveryController extends Notifier<DiscoveryState> {
         _currentDiscoveryGroupTag(),
       );
       if (!authState.isAuthenticated || user == null) {
+        logger.info(
+          AppLogCategory.discovery,
+          'Discovery initialization paused. authenticated=${authState.isAuthenticated} '
+          'user=${user?.userId ?? '-'}',
+        );
         state = const DiscoveryState(
           peers: <PeerNode>[],
           isLoading: false,
@@ -316,6 +344,12 @@ class DiscoveryController extends Notifier<DiscoveryState> {
       if (!ref.mounted) {
         return;
       }
+      logger.info(
+        AppLogCategory.discovery,
+        'Discovery local identity loaded device=${_localIdentity!.deviceId} '
+        'instance=${_short(_localIdentity!.instanceId)} '
+        'os=${_localIdentity!.osType}',
+      );
       initStage = 'peer-auth-ready';
       _localAuthPort = await ref
           .read(peerAuthControllerProvider.notifier)
@@ -323,6 +357,10 @@ class DiscoveryController extends Notifier<DiscoveryState> {
       if (!ref.mounted) {
         return;
       }
+      logger.info(
+        AppLogCategory.discovery,
+        'Discovery peer control listener ready port=$_localAuthPort',
+      );
       initStage = 'local-registry';
       _localInstanceRegistry = ref.read(localInstanceRegistryProvider);
       initStage = 'transport-provider';
@@ -342,15 +380,28 @@ class DiscoveryController extends Notifier<DiscoveryState> {
       );
 
       initStage = 'transport-start';
+      logger.info(
+        AppLogCategory.discovery,
+        'Discovery transport start stage. discoveryPort=${config.discoveryPort} '
+        'controlPort=${config.controlPort} dataPort=${config.dataPort}',
+      );
       await transport.start(port: config.discoveryPort);
       if (!ref.mounted) {
         return;
       }
       _applyTransportDiagnostics(transport);
+      logger.info(
+        AppLogCategory.discovery,
+        'Discovery transport started ${_transportSnapshotSummary(transport)}',
+      );
       initStage = 'packet-subscription';
       _packetSubscription = transport.packets.listen((datagram) {
         unawaited(_handlePacket(datagram));
       });
+      logger.info(
+        AppLogCategory.discovery,
+        'Discovery packet subscription attached',
+      );
       initStage = 'timers';
       _broadcastTimer = Timer.periodic(config.discoveryBroadcastInterval, (_) {
         unawaited(broadcastNow());
@@ -358,6 +409,12 @@ class DiscoveryController extends Notifier<DiscoveryState> {
       _presenceTimer = Timer.periodic(const Duration(seconds: 1), (_) {
         unawaited(refreshPresence());
       });
+      logger.info(
+        AppLogCategory.discovery,
+        'Discovery timers started broadcastInterval='
+        '${config.discoveryBroadcastInterval.inSeconds}s '
+        'presenceInterval=1s',
+      );
 
       initStage = 'first-broadcast';
       await broadcastNow();
@@ -377,7 +434,7 @@ class DiscoveryController extends Notifier<DiscoveryState> {
     } catch (error, stackTrace) {
       logger.error(
         AppLogCategory.discovery,
-        'Failed to initialize discovery engine',
+        'Failed to initialize discovery engine at stage $initStage',
         error: error,
         stackTrace: stackTrace,
       );
@@ -401,10 +458,29 @@ class DiscoveryController extends Notifier<DiscoveryState> {
     final packet = datagram.packet;
     final localIdentity = _localIdentity;
     if (localIdentity == null) {
+      logger.warning(
+        AppLogCategory.discovery,
+        'Discovery packet ignored because local identity is not loaded. '
+        'source=${datagram.address.address}:${datagram.port} '
+        'packet=${_packetSummary(packet)}',
+      );
       return;
     }
 
+    logger.info(
+      AppLogCategory.discovery,
+      'Discovery packet handling start source=${datagram.address.address}:'
+      '${datagram.port} packet=${_packetSummary(packet)} '
+      'localInstance=${_short(localIdentity.instanceId)}',
+    );
+
     if (packet.instanceId == localIdentity.instanceId) {
+      logger.info(
+        AppLogCategory.discovery,
+        'Discovery packet ignored as self packet. '
+        'source=${datagram.address.address}:${datagram.port} '
+        'packet=${_packetSummary(packet)}',
+      );
       state = state.copyWith(
         receivedPacketCount: state.receivedPacketCount + 1,
         lastPacketAt: _now(),
@@ -414,6 +490,14 @@ class DiscoveryController extends Notifier<DiscoveryState> {
       return;
     }
     if (!_matchesCurrentPairingGroup(packet)) {
+      logger.info(
+        AppLogCategory.discovery,
+        'Discovery packet ignored by group/user filter. '
+        'source=${datagram.address.address}:${datagram.port} '
+        'packetUser=${packet.userId} localUser=${_currentUser()?.userId ?? '-'} '
+        'packetGroup=${_discoveryGroupTagPreview(packet.discoveryGroupTag) ?? '-'} '
+        'localGroup=${_discoveryGroupTagPreview(_currentDiscoveryGroupTag()) ?? '-'}',
+      );
       state = state.copyWith(
         receivedPacketCount: state.receivedPacketCount + 1,
         lastPacketAt: _now(),
@@ -445,7 +529,7 @@ class DiscoveryController extends Notifier<DiscoveryState> {
       lastDecision: 'accepted peer: ${peer.id} ${peer.address}:${peer.port}',
     );
     if (routeCandidates.isNotEmpty) {
-      logger.debug(
+      logger.info(
         AppLogCategory.discovery,
         'Projected ${routeCandidates.length} route candidate(s) for ${peer.id}',
       );
@@ -472,9 +556,10 @@ class DiscoveryController extends Notifier<DiscoveryState> {
         .syncDiscoveredPeer(peer, message: 'Discovery에서 피어를 발견했습니다.');
     await _maybeAutoHandshake(peer);
 
-    logger.debug(
+    logger.info(
       AppLogCategory.discovery,
-      'Received ${packet.type.wireName} from ${peer.id} (${peer.address})',
+      'Discovery peer accepted peer=${peer.id} address=${peer.address}:'
+      '${peer.port} presence=${peer.presence.name} packet=${_packetSummary(packet)}',
     );
 
     if (packet.type == DiscoveryPacketType.discover) {
@@ -482,15 +567,27 @@ class DiscoveryController extends Notifier<DiscoveryState> {
         DiscoveryPacketType.discoverAck,
       );
       if (ackPacket != null) {
-        await ref
-            .read(discoveryTransportProvider)
-            .sendUnicast(
-              ackPacket,
-              address: datagram.address,
-              port:
-                  packet.discoveryPort ??
-                  ref.read(appConfigProvider).discoveryPort,
-            );
+        final ackPort =
+            packet.discoveryPort ?? ref.read(appConfigProvider).discoveryPort;
+        try {
+          await ref
+              .read(discoveryTransportProvider)
+              .sendUnicast(ackPacket, address: datagram.address, port: ackPort);
+          logger.info(
+            AppLogCategory.discovery,
+            'Discovery ACK sent peer=${peer.id} target='
+            '${datagram.address.address}:$ackPort '
+            'packet=${_packetSummary(ackPacket)}',
+          );
+        } catch (error, stackTrace) {
+          logger.warning(
+            AppLogCategory.discovery,
+            'Discovery ACK send failed peer=${peer.id} target='
+            '${datagram.address.address}:$ackPort',
+            error: error,
+            stackTrace: stackTrace,
+          );
+        }
       }
     }
   }
@@ -634,13 +731,36 @@ class DiscoveryController extends Notifier<DiscoveryState> {
     if (!ref.mounted) {
       return peers;
     }
+    ref
+        .read(appLoggerProvider)
+        .info(
+          AppLogCategory.discovery,
+          'Discovery local registry scan entries=${entries.length} '
+          'localInstance=${_short(localIdentity.instanceId)}',
+        );
 
     var merged = peers;
     for (final entry in entries) {
       if (entry.instanceId == localIdentity.instanceId) {
+        ref
+            .read(appLoggerProvider)
+            .info(
+              AppLogCategory.discovery,
+              'Discovery local registry entry ignored as self '
+              'instance=${_short(entry.instanceId)} user=${entry.userId}',
+            );
         continue;
       }
       if (!_matchesCurrentPairingGroupEntry(entry)) {
+        ref
+            .read(appLoggerProvider)
+            .info(
+              AppLogCategory.discovery,
+              'Discovery local registry entry ignored by group/user filter '
+              'entryUser=${entry.userId} localUser=${_currentUser()?.userId ?? '-'} '
+              'entryGroup=${_discoveryGroupTagPreview(entry.discoveryGroupTag) ?? '-'} '
+              'localGroup=${_discoveryGroupTagPreview(_currentDiscoveryGroupTag()) ?? '-'}',
+            );
         continue;
       }
 
@@ -672,6 +792,13 @@ class DiscoveryController extends Notifier<DiscoveryState> {
       ref
           .read(peerAuthControllerProvider.notifier)
           .syncDiscoveredPeer(peer, message: 'Local discovery에서 피어를 발견했습니다.');
+      ref
+          .read(appLoggerProvider)
+          .info(
+            AppLogCategory.discovery,
+            'Discovery local registry peer accepted peer=${peer.id} '
+            'address=${peer.address}:${peer.port}',
+          );
       await _maybeAutoHandshake(peer);
       if (!ref.mounted) {
         return _applyPresence(merged);
@@ -870,6 +997,42 @@ class DiscoveryController extends Notifier<DiscoveryState> {
 
   String _eventId(String prefix) => '$prefix-${_now().microsecondsSinceEpoch}';
 
+  String _packetSummary(DiscoveryPacket packet) {
+    return 'type=${packet.type.wireName} user=${packet.userId} '
+        'device=${packet.deviceId} instance=${_short(packet.instanceId)} '
+        'group=${_discoveryGroupTagPreview(packet.discoveryGroupTag) ?? '-'} '
+        'discoveryPort=${packet.discoveryPort ?? '-'} '
+        'controlPort=${packet.controlPort ?? packet.port} '
+        'dataPort=${packet.dataPort ?? '-'} '
+        'source=${packet.sourceAddress ?? '-'} '
+        'msg=${_short(packet.messageId)}';
+  }
+
+  String _transportSnapshotSummary(DiscoveryTransport transport) {
+    if (transport is! DiscoveryTransportDiagnostics) {
+      return 'transportDiagnostics=unavailable';
+    }
+    final snapshot = (transport as DiscoveryTransportDiagnostics).snapshot();
+    return 'mode=${snapshot.mode} preferredPort=${snapshot.preferredPort} '
+        'receivePort=${snapshot.receivePort ?? '-'} '
+        'sendPort=${snapshot.sendPort ?? '-'} '
+        'fallback=${snapshot.receivePortFallback} '
+        'targetCount=${snapshot.broadcastTargetCount} '
+        'attempts=${snapshot.lastBroadcastAttemptCount} '
+        'success=${snapshot.lastBroadcastSuccessCount} '
+        'fail=${snapshot.lastBroadcastFailureCount} '
+        'error=${snapshot.lastError ?? '-'} '
+        'targets=${snapshot.broadcastTargets.take(8).join(' | ')} '
+        'sendPreview=${snapshot.lastBroadcastAttemptPreview.take(12).join(' | ')}';
+  }
+
+  String _short(String value, {int max = 12}) {
+    if (value.isEmpty) {
+      return '-';
+    }
+    return value.length <= max ? value : value.substring(0, max);
+  }
+
   Future<void> _autoHandshakePeers(List<PeerNode> peers) async {
     for (final peer in peers) {
       await _maybeAutoHandshake(peer);
@@ -878,6 +1041,13 @@ class DiscoveryController extends Notifier<DiscoveryState> {
 
   Future<void> _maybeAutoHandshake(PeerNode peer) async {
     if (!peer.isCompatible || peer.presence != PeerPresence.online) {
+      ref
+          .read(appLoggerProvider)
+          .info(
+            AppLogCategory.discovery,
+            'Auto handshake skipped peer=${peer.id} compatible=${peer.isCompatible} '
+            'presence=${peer.presence.name}',
+          );
       return;
     }
 
@@ -891,7 +1061,7 @@ class DiscoveryController extends Notifier<DiscoveryState> {
     _lastAutoHandshakeAt[peer.id] = now;
     ref
         .read(appLoggerProvider)
-        .debug(
+        .info(
           AppLogCategory.discovery,
           'Auto-starting peer handshake for ${peer.id} ${peer.address}:${peer.port}',
         );
@@ -903,6 +1073,12 @@ class DiscoveryController extends Notifier<DiscoveryState> {
   }
 
   Future<void> _stop({required bool clearPeers}) async {
+    _cachedLogger?.info(
+      AppLogCategory.discovery,
+      'Discovery stopping clearPeers=$clearPeers '
+      'hasPacketSubscription=${_packetSubscription != null} '
+      'hasBroadcastTimer=${_broadcastTimer != null}',
+    );
     _broadcastTimer?.cancel();
     _broadcastTimer = null;
     _presenceTimer?.cancel();

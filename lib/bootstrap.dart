@@ -20,6 +20,22 @@ Future<void> bootstrap({required AppConfig config}) async {
 
   final logger = await _createLogger(config);
   final presenter = ErrorPresenter();
+  final logFilePath = logger is AppLogFileLocator
+      ? (logger as AppLogFileLocator).logFilePath
+      : null;
+
+  logger.info(
+    AppLogCategory.system,
+    'App bootstrap configured app=${config.appName} '
+    'environment=${config.environment.name} '
+    'protocol=${config.protocolVersion} '
+    'discoveryPort=${config.discoveryPort} '
+    'controlPort=${config.controlPort} '
+    'dataPort=${config.dataPort} '
+    'dataPortRange=${config.dataPortRange.start}-${config.dataPortRange.end} '
+    'logLevel=${config.defaultLogLevel.name} '
+    'logFile=${logFilePath ?? '-'}',
+  );
 
   FlutterError.onError = (details) {
     logger.error(

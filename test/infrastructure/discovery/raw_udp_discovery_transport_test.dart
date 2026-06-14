@@ -112,6 +112,84 @@ void main() {
     ]);
   });
 
+  test('explains discovery interface selection decisions', () {
+    final ethernet = _snapshot(
+      name: 'Ethernet',
+      index: 1,
+      typeHint: InterfaceTypeHint.ethernet,
+      address: InterfaceAddress.ipv4(address: '10.0.0.10'),
+    );
+    final parallelsBridge = _snapshot(
+      name: 'vnic0',
+      index: 2,
+      typeHint: InterfaceTypeHint.bridge,
+      address: InterfaceAddress.ipv4(address: '10.211.55.2'),
+    );
+    final docker = _snapshot(
+      name: 'docker0',
+      index: 3,
+      typeHint: InterfaceTypeHint.virtual,
+      address: InterfaceAddress.ipv4(address: '172.21.0.1'),
+    );
+    final vpn = _snapshot(
+      name: 'utun4',
+      index: 4,
+      typeHint: InterfaceTypeHint.vpn,
+      address: InterfaceAddress.ipv4(address: '10.8.0.2'),
+    );
+    final loopback = _snapshot(
+      name: 'lo0',
+      index: 5,
+      typeHint: InterfaceTypeHint.loopback,
+      address: InterfaceAddress.ipv4(address: '127.0.0.1'),
+      isLoopback: true,
+    );
+    final down = _snapshot(
+      name: 'en9',
+      index: 6,
+      typeHint: InterfaceTypeHint.ethernet,
+      address: InterfaceAddress.ipv4(address: '10.9.0.2'),
+      isUp: false,
+    );
+    final noLanIpv4 = _snapshot(
+      name: 'en10',
+      index: 7,
+      typeHint: InterfaceTypeHint.ethernet,
+      address: InterfaceAddress.ipv6(address: 'fe80::1'),
+    );
+
+    expect(
+      RawUdpDiscoveryTransport.discoveryInterfaceDecision(ethernet).label,
+      'selected',
+    );
+    expect(
+      RawUdpDiscoveryTransport.discoveryInterfaceDecision(
+        parallelsBridge,
+      ).label,
+      'selected',
+    );
+    expect(
+      RawUdpDiscoveryTransport.discoveryInterfaceDecision(docker).label,
+      'excluded:type-virtual',
+    );
+    expect(
+      RawUdpDiscoveryTransport.discoveryInterfaceDecision(vpn).label,
+      'excluded:type-vpn',
+    );
+    expect(
+      RawUdpDiscoveryTransport.discoveryInterfaceDecision(loopback).label,
+      'excluded:loopback',
+    );
+    expect(
+      RawUdpDiscoveryTransport.discoveryInterfaceDecision(down).label,
+      'excluded:interface-down',
+    );
+    expect(
+      RawUdpDiscoveryTransport.discoveryInterfaceDecision(noLanIpv4).label,
+      'excluded:no-active-lan-ipv4',
+    );
+  });
+
   test(
     'falls back to a receive port when preferred port is occupied',
     () async {
@@ -145,14 +223,17 @@ NetworkInterfaceSnapshot _snapshot({
   required int index,
   required InterfaceTypeHint typeHint,
   required InterfaceAddress address,
+  bool isUp = true,
+  bool supportsMulticast = true,
+  bool isLoopback = false,
 }) {
   return NetworkInterfaceSnapshot(
     id: NetworkInterfaceId(name: name, index: index),
     name: name,
     typeHint: typeHint,
-    isUp: true,
-    supportsMulticast: true,
-    isLoopback: false,
+    isUp: isUp,
+    supportsMulticast: supportsMulticast,
+    isLoopback: isLoopback,
     addresses: [address],
     capturedAt: DateTime.utc(2026),
   );
