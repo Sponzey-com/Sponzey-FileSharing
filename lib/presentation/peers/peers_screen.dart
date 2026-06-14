@@ -241,6 +241,19 @@ class _DiscoveryDiagnosticsCard extends StatelessWidget {
                     '${state.discoveryBroadcastTargetPreview.join(', ')}',
               ),
               _DiagnosticsLine(
+                label: 'Broadcast Send',
+                value:
+                    'attempt ${state.discoveryBroadcastAttemptCount} / '
+                    'ok ${state.discoveryBroadcastSuccessCount} / '
+                    'fail ${state.discoveryBroadcastFailureCount}',
+              ),
+              _DiagnosticsLine(
+                label: 'Send Preview',
+                value: state.discoveryBroadcastAttemptPreview.isEmpty
+                    ? '-'
+                    : state.discoveryBroadcastAttemptPreview.join(', '),
+              ),
+              _DiagnosticsLine(
                 label: 'Transport Error',
                 value: state.discoveryTransportError ?? '-',
               ),

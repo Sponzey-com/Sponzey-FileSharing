@@ -544,11 +544,14 @@ void main() {
   });
 
   test(
-    'broadcasts the actual discovery receive port from transport snapshot',
+    'broadcasts the actual discovery receive port and send feedback from transport snapshot',
     () async {
       transport.receivePort = 52111;
       transport.mode = 'fallback-receive';
       transport.receivePortFallback = true;
+      transport.lastBroadcastAttemptPreview = const [
+        'tx-bridge100 10.211.55.2->10.211.55.255:38400 directedBroadcast OK 512B',
+      ];
       final container = _createContainer(
         database: database,
         transport: transport,
@@ -570,6 +573,13 @@ void main() {
       expect(state.discoveryTransportMode, 'fallback-receive');
       expect(state.discoveryReceivePort, 52111);
       expect(state.discoveryReceivePortFallback, isTrue);
+      expect(state.discoveryBroadcastAttemptCount, 1);
+      expect(state.discoveryBroadcastSuccessCount, 1);
+      expect(state.discoveryBroadcastFailureCount, 0);
+      expect(
+        state.discoveryBroadcastAttemptPreview.single,
+        contains('10.211.55.255'),
+      );
     },
   );
 
@@ -1272,6 +1282,10 @@ class _FakeDiscoveryTransport
   bool receivePortFallback = false;
   String? lastError;
   List<String> broadcastTargets = const ['0.0.0.0->255.255.255.255'];
+  int lastBroadcastAttemptCount = 0;
+  int lastBroadcastSuccessCount = 0;
+  int lastBroadcastFailureCount = 0;
+  List<String> lastBroadcastAttemptPreview = const [];
 
   @override
   Stream<DiscoveryDatagram> get packets => _controller.stream;
@@ -1286,6 +1300,10 @@ class _FakeDiscoveryTransport
       receivePortFallback: receivePortFallback,
       lastError: lastError,
       broadcastTargets: broadcastTargets,
+      lastBroadcastAttemptCount: lastBroadcastAttemptCount,
+      lastBroadcastSuccessCount: lastBroadcastSuccessCount,
+      lastBroadcastFailureCount: lastBroadcastFailureCount,
+      lastBroadcastAttemptPreview: lastBroadcastAttemptPreview,
     );
   }
 
@@ -1313,6 +1331,14 @@ class _FakeDiscoveryTransport
     DiscoveryPacket packet, {
     required int port,
   }) async {
+    lastBroadcastAttemptCount = 1;
+    lastBroadcastSuccessCount = 1;
+    lastBroadcastFailureCount = 0;
+    if (lastBroadcastAttemptPreview.isEmpty) {
+      lastBroadcastAttemptPreview = [
+        'tx-any 0.0.0.0->255.255.255.255:$port limitedBroadcast OK 512B',
+      ];
+    }
     broadcasts.add(
       _OutboundDatagram(
         packet: packet,

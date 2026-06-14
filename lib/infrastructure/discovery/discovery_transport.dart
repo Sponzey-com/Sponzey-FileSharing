@@ -27,6 +27,10 @@ class DiscoveryTransportSnapshot {
     this.receivePortFallback = false,
     this.lastError,
     this.broadcastTargets = const [],
+    this.lastBroadcastAttemptCount = 0,
+    this.lastBroadcastSuccessCount = 0,
+    this.lastBroadcastFailureCount = 0,
+    this.lastBroadcastAttemptPreview = const [],
   });
 
   final String mode;
@@ -36,6 +40,10 @@ class DiscoveryTransportSnapshot {
   final bool receivePortFallback;
   final String? lastError;
   final List<String> broadcastTargets;
+  final int lastBroadcastAttemptCount;
+  final int lastBroadcastSuccessCount;
+  final int lastBroadcastFailureCount;
+  final List<String> lastBroadcastAttemptPreview;
 
   int get broadcastTargetCount => broadcastTargets.length;
 }

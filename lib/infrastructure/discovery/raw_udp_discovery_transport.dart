@@ -32,6 +32,10 @@ class RawUdpDiscoveryTransport
   int? _preferredPort;
   bool _receivePortFallback = false;
   String? _lastError;
+  int _lastBroadcastAttemptCount = 0;
+  int _lastBroadcastSuccessCount = 0;
+  int _lastBroadcastFailureCount = 0;
+  List<String> _lastBroadcastAttemptPreview = const [];
 
   @override
   Stream<DiscoveryDatagram> get packets => _packetsController.stream;
@@ -53,6 +57,10 @@ class RawUdpDiscoveryTransport
       broadcastTargets: _broadcastTargets
           .map((target) => '${target.localAddress}->${target.address}')
           .toList(growable: false),
+      lastBroadcastAttemptCount: _lastBroadcastAttemptCount,
+      lastBroadcastSuccessCount: _lastBroadcastSuccessCount,
+      lastBroadcastFailureCount: _lastBroadcastFailureCount,
+      lastBroadcastAttemptPreview: _lastBroadcastAttemptPreview,
     );
   }
 
@@ -140,23 +148,79 @@ class RawUdpDiscoveryTransport
     final receiveSocket = _receiveSocket;
     final receiveSocketDestinationsSent = <String>{};
     final wildcardDestinationsSent = <String>{};
+    final attemptPreview = <String>[];
+    var attemptCount = 0;
+    var successCount = 0;
+    var failureCount = 0;
+
+    void attemptSend({
+      required String sender,
+      required RawDatagramSocket selectedSocket,
+      required DiscoveryTarget target,
+    }) {
+      attemptCount += 1;
+      final result = _sendDatagram(
+        selectedSocket,
+        payload,
+        InternetAddress(target.address),
+        port,
+      );
+      final endpoint =
+          '$sender ${target.localAddress}->${target.address}:$port ${target.type.name}';
+      if (result.success) {
+        successCount += 1;
+        if (attemptPreview.length < 12) {
+          attemptPreview.add('$endpoint OK ${result.bytesSent}B');
+        }
+        return;
+      }
+      failureCount += 1;
+      if (attemptPreview.length < 12) {
+        attemptPreview.add('$endpoint FAIL ${result.errorMessage}');
+      }
+    }
 
     for (final target in _broadcastTargets) {
-      final address = InternetAddress(target.address);
       final destinationKey = '${target.address}:$port';
       if (receiveSocket != null &&
           receiveSocketDestinationsSent.add(destinationKey)) {
-        _sendDatagram(receiveSocket, payload, address, port);
+        attemptSend(
+          sender: 'rx-any',
+          selectedSocket: receiveSocket,
+          target: target,
+        );
       }
 
       final targetSocket =
           _sendSocketsByLocalAddress[target.localAddress] ?? socket;
-      _sendDatagram(targetSocket, payload, address, port);
+      attemptSend(
+        sender: 'tx-${target.interfaceId.name}',
+        selectedSocket: targetSocket,
+        target: target,
+      );
 
       if (!identical(targetSocket, socket) &&
           wildcardDestinationsSent.add(destinationKey)) {
-        _sendDatagram(socket, payload, address, port);
+        attemptSend(sender: 'tx-any', selectedSocket: socket, target: target);
       }
+    }
+
+    _lastBroadcastAttemptCount = attemptCount;
+    _lastBroadcastSuccessCount = successCount;
+    _lastBroadcastFailureCount = failureCount;
+    _lastBroadcastAttemptPreview = attemptPreview;
+    if (failureCount > 0) {
+      _lastError = 'broadcast send failures $failureCount/$attemptCount';
+      _logger.warning(
+        AppLogCategory.discovery,
+        'Discovery broadcast completed with $failureCount failed send attempt(s) out of $attemptCount.',
+      );
+    } else {
+      _lastError = null;
+      _logger.debug(
+        AppLogCategory.discovery,
+        'Discovery broadcast completed with $successCount successful send attempt(s).',
+      );
     }
   }
 
@@ -421,18 +485,30 @@ class RawUdpDiscoveryTransport
     return socket;
   }
 
-  void _sendDatagram(
+  _DiscoverySendResult _sendDatagram(
     RawDatagramSocket socket,
     List<int> payload,
     InternetAddress address,
     int port,
   ) {
-    final sent = socket.send(payload, address, port);
-    if (sent == 0) {
+    try {
+      final sent = socket.send(payload, address, port);
+      if (sent == 0) {
+        _logger.debug(
+          AppLogCategory.discovery,
+          'Discovery datagram send returned 0 bytes for ${address.address}:$port',
+        );
+        return const _DiscoverySendResult.failure('0 bytes sent');
+      }
+      return _DiscoverySendResult.success(sent);
+    } catch (error, stackTrace) {
       _logger.debug(
         AppLogCategory.discovery,
-        'Discovery datagram send returned 0 bytes for ${address.address}:$port',
+        'Discovery datagram send failed for ${address.address}:$port',
+        error: error,
+        stackTrace: stackTrace,
       );
+      return _DiscoverySendResult.failure(error.toString());
     }
   }
 
@@ -565,6 +641,24 @@ class RawUdpDiscoveryTransport
     }
     return error.toString().toLowerCase().contains('invalid argument');
   }
+}
+
+class _DiscoverySendResult {
+  const _DiscoverySendResult._({
+    required this.success,
+    required this.bytesSent,
+    this.errorMessage,
+  });
+
+  const _DiscoverySendResult.success(int bytesSent)
+    : this._(success: true, bytesSent: bytesSent);
+
+  const _DiscoverySendResult.failure(String errorMessage)
+    : this._(success: false, bytesSent: 0, errorMessage: errorMessage);
+
+  final bool success;
+  final int bytesSent;
+  final String? errorMessage;
 }
 
 class _DiscoverySocketBindOptions {

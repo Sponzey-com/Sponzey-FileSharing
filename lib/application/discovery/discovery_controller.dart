@@ -50,6 +50,10 @@ class DiscoveryState {
     this.discoveryReceivePortFallback = false,
     this.discoveryBroadcastTargetCount = 0,
     this.discoveryBroadcastTargetPreview = const [],
+    this.discoveryBroadcastAttemptCount = 0,
+    this.discoveryBroadcastSuccessCount = 0,
+    this.discoveryBroadcastFailureCount = 0,
+    this.discoveryBroadcastAttemptPreview = const [],
     this.discoveryTransportError,
   }) : currentDiscoveryGroupTagPreview =
            currentDiscoveryGroupTagPreview ?? currentPairingProofPreview;
@@ -73,6 +77,10 @@ class DiscoveryState {
       discoveryReceivePortFallback = false,
       discoveryBroadcastTargetCount = 0,
       discoveryBroadcastTargetPreview = const [],
+      discoveryBroadcastAttemptCount = 0,
+      discoveryBroadcastSuccessCount = 0,
+      discoveryBroadcastFailureCount = 0,
+      discoveryBroadcastAttemptPreview = const [],
       discoveryTransportError = null;
 
   final List<PeerNode> peers;
@@ -97,6 +105,10 @@ class DiscoveryState {
   final bool discoveryReceivePortFallback;
   final int discoveryBroadcastTargetCount;
   final List<String> discoveryBroadcastTargetPreview;
+  final int discoveryBroadcastAttemptCount;
+  final int discoveryBroadcastSuccessCount;
+  final int discoveryBroadcastFailureCount;
+  final List<String> discoveryBroadcastAttemptPreview;
   final String? discoveryTransportError;
 
   DiscoveryState copyWith({
@@ -120,6 +132,10 @@ class DiscoveryState {
     bool? discoveryReceivePortFallback,
     int? discoveryBroadcastTargetCount,
     List<String>? discoveryBroadcastTargetPreview,
+    int? discoveryBroadcastAttemptCount,
+    int? discoveryBroadcastSuccessCount,
+    int? discoveryBroadcastFailureCount,
+    List<String>? discoveryBroadcastAttemptPreview,
     String? discoveryTransportError,
     bool clearError = false,
     bool clearLastDecision = false,
@@ -156,6 +172,15 @@ class DiscoveryState {
       discoveryBroadcastTargetPreview:
           discoveryBroadcastTargetPreview ??
           this.discoveryBroadcastTargetPreview,
+      discoveryBroadcastAttemptCount:
+          discoveryBroadcastAttemptCount ?? this.discoveryBroadcastAttemptCount,
+      discoveryBroadcastSuccessCount:
+          discoveryBroadcastSuccessCount ?? this.discoveryBroadcastSuccessCount,
+      discoveryBroadcastFailureCount:
+          discoveryBroadcastFailureCount ?? this.discoveryBroadcastFailureCount,
+      discoveryBroadcastAttemptPreview:
+          discoveryBroadcastAttemptPreview ??
+          this.discoveryBroadcastAttemptPreview,
       discoveryTransportError: clearDiscoveryTransportError
           ? null
           : discoveryTransportError ?? this.discoveryTransportError,
@@ -530,6 +555,12 @@ class DiscoveryController extends Notifier<DiscoveryState> {
       discoveryBroadcastTargetCount: snapshot.broadcastTargetCount,
       discoveryBroadcastTargetPreview: snapshot.broadcastTargets
           .take(8)
+          .toList(),
+      discoveryBroadcastAttemptCount: snapshot.lastBroadcastAttemptCount,
+      discoveryBroadcastSuccessCount: snapshot.lastBroadcastSuccessCount,
+      discoveryBroadcastFailureCount: snapshot.lastBroadcastFailureCount,
+      discoveryBroadcastAttemptPreview: snapshot.lastBroadcastAttemptPreview
+          .take(12)
           .toList(),
       discoveryTransportError: snapshot.lastError,
       clearDiscoveryTransportError: snapshot.lastError == null,
