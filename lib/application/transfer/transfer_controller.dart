@@ -527,24 +527,6 @@ class TransferController extends Notifier<TransferState> {
           chunkIndex: chunkIndex,
         );
     final now = _now();
-    await _send(
-      AuthPacket(
-        type: AuthPacketType.transferChunk,
-        protocolVersion: ref.read(appConfigProvider).protocolVersion,
-        sessionId: context.session.sessionId,
-        fromUserId: _currentUserId(),
-        fromDeviceId: _currentDeviceId(),
-        fromInstanceId: _currentInstanceId(),
-        fromDisplayName: _currentDisplayName(),
-        transferId: transferId,
-        transferChunkIndex: chunkIndex,
-        transferChunkDataBase64: base64Encode(bytes),
-        sentAtEpochMs: now.millisecondsSinceEpoch,
-      ),
-      address: InternetAddress(context.session.peerAddress),
-      port: context.session.peerPort,
-      localEndpoint: context.controlEndpoint,
-    );
     context.inFlightChunks.add(chunkIndex);
     context.sentAtByChunk[chunkIndex] = now;
     context.scheduleTimer(
@@ -552,6 +534,31 @@ class TransferController extends Notifier<TransferState> {
       context.rttEstimator.currentTimeout,
       () => _onChunkTimeout(transferId, chunkIndex),
     );
+    try {
+      await _send(
+        AuthPacket(
+          type: AuthPacketType.transferChunk,
+          protocolVersion: ref.read(appConfigProvider).protocolVersion,
+          sessionId: context.session.sessionId,
+          fromUserId: _currentUserId(),
+          fromDeviceId: _currentDeviceId(),
+          fromInstanceId: _currentInstanceId(),
+          fromDisplayName: _currentDisplayName(),
+          transferId: transferId,
+          transferChunkIndex: chunkIndex,
+          transferChunkDataBase64: base64Encode(bytes),
+          sentAtEpochMs: now.millisecondsSinceEpoch,
+        ),
+        address: InternetAddress(context.session.peerAddress),
+        port: context.session.peerPort,
+        localEndpoint: context.controlEndpoint,
+      );
+    } catch (_) {
+      context.inFlightChunks.remove(chunkIndex);
+      context.sentAtByChunk.remove(chunkIndex);
+      context.cancelTimer(chunkIndex);
+      rethrow;
+    }
     _updateOutgoingMetrics(
       transferId,
       context,
@@ -563,9 +570,12 @@ class TransferController extends Notifier<TransferState> {
 
   void _onChunkTimeout(String transferId, int chunkIndex) {
     final context = _outgoingTransfers[transferId];
-    if (context == null ||
-        context.hasFailed ||
-        context.acknowledgedChunks.contains(chunkIndex)) {
+    if (context == null || context.hasFailed) {
+      return;
+    }
+    if (context.acknowledgedChunks.contains(chunkIndex)) {
+      context.inFlightChunks.remove(chunkIndex);
+      context.cancelTimer(chunkIndex);
       return;
     }
 

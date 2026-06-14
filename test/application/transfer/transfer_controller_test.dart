@@ -349,6 +349,7 @@ void main() {
   });
 
   test('handles out-of-order and duplicate chunks', () async {
+    AuthPacket? firstChunkZero;
     AuthPacket? heldChunkFive;
     var duplicated = false;
     final network = _LinkedFakeAuthNetwork(
@@ -360,6 +361,13 @@ void main() {
             required targetPort,
             required deliver,
           }) async {
+            if (packet.type == AuthPacketType.transferChunk &&
+                sourcePort == 41031 &&
+                targetPort == 41032 &&
+                packet.transferChunkIndex == 0 &&
+                firstChunkZero == null) {
+              firstChunkZero = packet;
+            }
             if (packet.type == AuthPacketType.transferChunk &&
                 sourcePort == 41031 &&
                 targetPort == 41032 &&
@@ -375,18 +383,14 @@ void main() {
                 heldChunkFive != null) {
               deliver(packet, address: address, port: sourcePort);
               deliver(heldChunkFive!, address: address, port: sourcePort);
+              if (firstChunkZero != null && !duplicated) {
+                duplicated = true;
+                deliver(firstChunkZero!, address: address, port: sourcePort);
+              }
               heldChunkFive = null;
               return;
             }
             deliver(packet, address: address, port: sourcePort);
-            if (packet.type == AuthPacketType.transferChunk &&
-                sourcePort == 41031 &&
-                targetPort == 41032 &&
-                packet.transferChunkIndex == 8 &&
-                !duplicated) {
-              duplicated = true;
-              deliver(packet, address: address, port: sourcePort);
-            }
           },
     );
     final alice = await _createNode(
@@ -434,7 +438,80 @@ void main() {
 
     expect(aliceJob.status, TransferJobStatus.completed);
     expect(bobJob.status, TransferJobStatus.completed);
+    expect(duplicated, isTrue);
     expect(bobJob.duplicateCount, greaterThan(0));
+  });
+
+  test('completes when chunk ack arrives before send future returns', () async {
+    var earlyAckInjected = false;
+    final network = _LinkedFakeAuthNetwork(
+      interceptor:
+          ({
+            required packet,
+            required address,
+            required sourcePort,
+            required targetPort,
+            required deliver,
+          }) async {
+            if (packet.type == AuthPacketType.transferChunk &&
+                sourcePort == 41033 &&
+                targetPort == 41034 &&
+                packet.transferChunkIndex == 1 &&
+                !earlyAckInjected) {
+              earlyAckInjected = true;
+              deliver(packet, address: address, port: sourcePort);
+              await Future<void>.delayed(const Duration(milliseconds: 10));
+              return;
+            }
+            deliver(packet, address: address, port: sourcePort);
+          },
+    );
+    final alice = await _createNode(
+      network: network,
+      clock: clock,
+      loginUserId: _sharedUserId,
+      loginPassword: _sharedPassword,
+      localDeviceId: 'device-a',
+      authPort: 41033,
+      receivePath: '${workspaceDirectory.path}/alice-fast-ack',
+    );
+    final bob = await _createNode(
+      network: network,
+      clock: clock,
+      loginUserId: _sharedUserId,
+      loginPassword: _sharedPassword,
+      localDeviceId: 'device-b',
+      authPort: 41034,
+      receivePath: '${workspaceDirectory.path}/bob-fast-ack',
+    );
+    addTearDown(alice.dispose);
+    addTearDown(bob.dispose);
+
+    await _prepareAuthenticatedPair(
+      alice: alice,
+      bob: bob,
+      bobReceivePath: '${workspaceDirectory.path}/bob-fast-ack',
+      bobPort: 41034,
+      clock: clock,
+    );
+
+    final sourceFile = File(
+      '${workspaceDirectory.path}/alice-fast-ack/source.txt',
+    );
+    await sourceFile.parent.create(recursive: true);
+    await sourceFile.writeAsString('fast-ack-' * 6000);
+
+    await alice.transferController.sendFile(
+      peerId: 'team@instance-device-b',
+      filePath: sourceFile.path,
+    );
+
+    final aliceJob = await _waitForTerminalTransfer(alice.container);
+    final bobJob = await _waitForTerminalTransfer(bob.container);
+
+    expect(earlyAckInjected, isTrue);
+    expect(aliceJob.status, TransferJobStatus.completed);
+    expect(bobJob.status, TransferJobStatus.completed);
   });
 
   test('completes under deterministic 20 percent packet loss', () async {
