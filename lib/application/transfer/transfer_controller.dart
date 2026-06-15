@@ -9,6 +9,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sponzey_file_sharing/app/app_config.dart';
 import 'package:sponzey_file_sharing/application/auth/auth_controller.dart';
 import 'package:sponzey_file_sharing/application/auth/peer_auth_controller.dart';
+import 'package:sponzey_file_sharing/application/discovery/peer_route_candidate_projection.dart';
+import 'package:sponzey_file_sharing/application/network/network_diagnostics_provider.dart';
 import 'package:sponzey_file_sharing/application/network/peer_path_registry.dart';
 import 'package:sponzey_file_sharing/application/transfer/transfer_diagnostics_ring_buffer.dart';
 import 'package:sponzey_file_sharing/application/transfer/transfer_data_endpoint_resolver.dart';
@@ -24,6 +26,7 @@ import 'package:sponzey_file_sharing/domain/entities/peer_auth_session.dart';
 import 'package:sponzey_file_sharing/domain/entities/transfer_job.dart';
 import 'package:sponzey_file_sharing/domain/network/network_interface_models.dart';
 import 'package:sponzey_file_sharing/domain/network/peer_connection_path.dart';
+import 'package:sponzey_file_sharing/domain/network/peer_route_candidate.dart';
 import 'package:sponzey_file_sharing/domain/transfer/data_transfer_tuning_policy.dart';
 import 'package:sponzey_file_sharing/domain/transfer/data_transfer_protocol.dart';
 import 'package:sponzey_file_sharing/domain/transfer/transfer_job_state_machine.dart';
@@ -935,6 +938,7 @@ class TransferController extends Notifier<TransferState> {
       activeRoute = _requireActiveTransferRoute(
         peerId: peerId,
         session: session,
+        observedDatagram: datagram,
       );
     } on AppException catch (error) {
       await _sendTransferInitAck(
@@ -3000,8 +3004,20 @@ class TransferController extends Notifier<TransferState> {
   PeerConnectionPath _requireActiveTransferRoute({
     required String peerId,
     required PeerAuthSession session,
+    ControlDatagram? observedDatagram,
   }) {
-    final path = ref.read(peerPathRegistryProvider).selectedForPeer(peerId);
+    final currentPath = ref
+        .read(peerPathRegistryProvider)
+        .selectedForPeer(peerId);
+    final path = currentPath?.status == PeerPathStatus.active
+        ? currentPath
+        : observedDatagram == null
+        ? null
+        : _recoverIncomingTransferRoute(
+            peerId: peerId,
+            datagram: observedDatagram,
+            currentPath: currentPath,
+          );
     if (path == null || path.status != PeerPathStatus.active) {
       throw const AppException(
         code: 'transfer_active_route_missing',
@@ -3024,6 +3040,142 @@ class TransferController extends Notifier<TransferState> {
       );
     }
     return path;
+  }
+
+  PeerConnectionPath? _recoverIncomingTransferRoute({
+    required String peerId,
+    required ControlDatagram datagram,
+    PeerConnectionPath? currentPath,
+  }) {
+    final observedPath = _observedIncomingTransferPath(
+      peerId: peerId,
+      datagram: datagram,
+      currentPath: currentPath,
+    );
+    if (observedPath == null) {
+      return null;
+    }
+
+    final mutations = ref.read(peerPathRegistryMutationsProvider);
+    mutations.select(observedPath);
+    mutations.applyEvent(peerId: peerId, event: PeerPathEvent.authStarted);
+    mutations.applyEvent(peerId: peerId, event: PeerPathEvent.authSucceeded);
+    final activePath = ref
+        .read(peerPathRegistryProvider)
+        .selectedForPeer(peerId);
+    if (activePath?.status != PeerPathStatus.active) {
+      return null;
+    }
+    ref
+        .read(appLoggerProvider)
+        .info(
+          AppLogCategory.transferControl,
+          'Recovered incoming transfer route for peer=$peerId '
+          'route=${activePath!.pathId} '
+          'source=${datagram.address.address}:${datagram.port} '
+          'local=${_endpointLabel(datagram.localEndpoint)}',
+        );
+    return activePath;
+  }
+
+  PeerConnectionPath? _observedIncomingTransferPath({
+    required String peerId,
+    required ControlDatagram datagram,
+    PeerConnectionPath? currentPath,
+  }) {
+    final candidates = <PeerRouteCandidate>[
+      if (currentPath != null &&
+          _matchesIncomingTransferRoute(currentPath.candidate, datagram))
+        currentPath.candidate,
+      ...ref
+          .read(peerRouteCandidateStoreProvider)
+          .where(
+            (candidate) =>
+                candidate.peerId == peerId &&
+                _matchesIncomingTransferRoute(candidate, datagram),
+          ),
+    ];
+    final observedCandidate = candidates.isEmpty
+        ? _upsertObservedIncomingTransferCandidate(
+            peerId: peerId,
+            datagram: datagram,
+            currentPath: currentPath,
+          )
+        : _upsertReachableIncomingTransferCandidate(candidates.first);
+    return PeerPathSelectionPolicy()
+        .select(candidates: [observedCandidate], selectedAt: _now())
+        ?.path;
+  }
+
+  bool _matchesIncomingTransferRoute(
+    PeerRouteCandidate candidate,
+    ControlDatagram datagram,
+  ) {
+    if (candidate.remoteAddress != datagram.address.address ||
+        candidate.remotePort != datagram.port) {
+      return false;
+    }
+    final localEndpoint = datagram.localEndpoint;
+    if (localEndpoint == null || localEndpoint.isWildcardBind) {
+      return true;
+    }
+    return candidate.localAddress == localEndpoint.localAddress ||
+        candidate.bindMode == UdpInterfaceBindMode.any;
+  }
+
+  PeerRouteCandidate _upsertReachableIncomingTransferCandidate(
+    PeerRouteCandidate candidate,
+  ) {
+    return ref
+        .read(peerRouteCandidateProjectionProvider.notifier)
+        .upsertCandidate(
+          candidate.copyWith(
+            lastSeenAt: _now(),
+            failureCount: 0,
+            status: RouteCandidateStatus.reachable,
+          ),
+        );
+  }
+
+  PeerRouteCandidate _upsertObservedIncomingTransferCandidate({
+    required String peerId,
+    required ControlDatagram datagram,
+    PeerConnectionPath? currentPath,
+  }) {
+    final endpoint = datagram.localEndpoint;
+    final localAddress =
+        endpoint?.localAddress ??
+        currentPath?.controlEndpoint.localAddress ??
+        InternetAddress.anyIPv4.address;
+    final interfaceId =
+        endpoint?.interfaceId ??
+        currentPath?.controlEndpoint.interfaceId ??
+        const NetworkInterfaceId(
+          name: 'observed-transfer-control',
+          index: -3,
+          stableId: 'observed-transfer-control',
+        );
+    final bindMode =
+        endpoint?.bindMode ??
+        currentPath?.controlEndpoint.bindMode ??
+        UdpInterfaceBindMode.any;
+    final candidate = PeerRouteCandidate.create(
+      peerId: peerId,
+      remoteAddress: datagram.address.address,
+      remotePort: datagram.port,
+      localInterfaceId: interfaceId,
+      localAddress: localAddress,
+      discoveredBy: RouteCandidateDiscoverySource.unicastProbe,
+      seenAt: _now(),
+      status: RouteCandidateStatus.reachable,
+      localInterfaceTypeHint: localAddress.startsWith('127.')
+          ? InterfaceTypeHint.loopback
+          : InterfaceTypeHint.unknown,
+      bindMode: bindMode,
+    );
+    return ref
+        .read(peerRouteCandidateProjectionProvider.notifier)
+        .upsertCandidate(candidate);
   }
 
   TransferRouteSnapshot _snapshotFromActiveRoute(PeerConnectionPath path) {

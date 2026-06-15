@@ -158,6 +158,82 @@ void main() {
     expect(harness.transport.sentPackets, hasLength(1));
   });
 
+  test(
+    'authenticated peer with expired active path reselects a route and handshakes',
+    () async {
+      final harness = await _createHarness(clock);
+      addTearDown(harness.dispose);
+      final peer = _peer(clock.value);
+      final first = _candidate(
+        peerId: peer.id,
+        id: 'en0',
+        localAddress: '10.20.30.5',
+        remoteAddress: peer.address,
+      );
+      final second = _candidate(
+        peerId: peer.id,
+        id: 'en1',
+        localAddress: '10.20.30.6',
+        remoteAddress: peer.address,
+      );
+      harness.seedCandidate(first);
+
+      final firstResult = await harness.coordinator.connect(peer);
+      await _flush();
+      final request = harness.transport.sentPackets.single.packet;
+      harness.transport.emit(
+        AuthPacket(
+          type: AuthPacketType.authAccept,
+          protocolVersion: '1.0',
+          sessionId: request.sessionId,
+          fromUserId: peer.userId,
+          fromDeviceId: peer.deviceId,
+          fromDisplayName: peer.displayName,
+          sentAtEpochMs: clock.value.millisecondsSinceEpoch,
+        ),
+        address: InternetAddress(peer.address),
+        port: 49152,
+      );
+      await _flush();
+      expect(
+        harness.container
+            .read(peerPathRegistryProvider)
+            .selectedForPeer(peer.id)!
+            .status,
+        PeerPathStatus.active,
+      );
+
+      final expiredFirst = harness.container
+          .read(peerRouteCandidateProjectionProvider.notifier)
+          .expire(now: clock.value, ttl: const Duration(seconds: 30))
+          .singleWhere(
+            (candidate) => candidate.candidateId == first.candidateId,
+          );
+      harness.container
+          .read(peerPathRegistryMutationsProvider)
+          .expireLeaseForCandidate(
+            candidate: expiredFirst,
+            reasonCode: 'ttlExceeded',
+          );
+      harness.seedCandidate(second);
+
+      final retryResult = await harness.coordinator.connect(peer);
+      await _flush();
+
+      expect(firstResult.path!.candidate.candidateId, first.candidateId);
+      expect(retryResult.status, PeerConnectionAttemptStatus.started);
+      expect(retryResult.path!.candidate.candidateId, second.candidateId);
+      expect(harness.transport.sentPackets, hasLength(2));
+      expect(
+        harness.container
+            .read(peerPathRegistryProvider)
+            .selectedForPeer(peer.id)!
+            .status,
+        PeerPathStatus.authenticating,
+      );
+    },
+  );
+
   test('failed selected candidate is skipped on retry', () async {
     final harness = await _createHarness(clock);
     addTearDown(harness.dispose);

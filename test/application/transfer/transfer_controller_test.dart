@@ -371,6 +371,96 @@ void main() {
   });
 
   test(
+    'receiver recovers failover route from authenticated transfer init',
+    () async {
+      final controlNetwork = _LinkedFakeAuthNetwork();
+      final dataNetwork = _LinkedFakeDataNetwork();
+      final alice = await _createNode(
+        network: controlNetwork,
+        dataTransport: dataNetwork.attach(),
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41251,
+        receivePath: '${workspaceDirectory.path}/alice-recover-route',
+      );
+      final bob = await _createNode(
+        network: controlNetwork,
+        dataTransport: dataNetwork.attach(),
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-b',
+        authPort: 41252,
+        receivePath: '${workspaceDirectory.path}/bob-recover-route',
+      );
+      addTearDown(alice.dispose);
+      addTearDown(bob.dispose);
+
+      await _prepareAuthenticatedPair(
+        alice: alice,
+        bob: bob,
+        bobReceivePath: '${workspaceDirectory.path}/bob-recover-route',
+        bobPort: 41252,
+        alicePort: 41251,
+        clock: clock,
+      );
+      final bobPathToAlice = bob.container
+          .read(peerPathRegistryProvider)
+          .selectedForPeer('team@instance-device-a')!;
+      bob.container
+          .read(peerPathRegistryMutationsProvider)
+          .expireLeaseForCandidate(
+            candidate: bobPathToAlice.candidate,
+            reasonCode: 'ttlExceeded',
+          );
+      expect(
+        bob.container
+            .read(peerPathRegistryProvider)
+            .selectedForPeer('team@instance-device-a')!
+            .status,
+        PeerPathStatus.failoverRequested,
+      );
+
+      final sourceFile = File(
+        '${workspaceDirectory.path}/alice-recover-route/source.txt',
+      );
+      await sourceFile.parent.create(recursive: true);
+      await sourceFile.writeAsString('incoming transfer init revives route');
+
+      await alice.transferController.sendFile(
+        peerId: 'team@instance-device-b',
+        filePath: sourceFile.path,
+      );
+      expect(
+        alice.container.read(transferControllerProvider).errorMessage,
+        isNull,
+      );
+      expect(alice.container.read(transferJobsProvider), isNotEmpty);
+
+      final aliceJob = await _waitForTerminalTransfer(alice.container);
+      final bobJob = await _waitForTerminalTransfer(bob.container);
+
+      expect(aliceJob.status, TransferJobStatus.completed);
+      expect(bobJob.status, TransferJobStatus.completed);
+      expect(
+        bob.container
+            .read(peerPathRegistryProvider)
+            .selectedForPeer('team@instance-device-a')!
+            .status,
+        PeerPathStatus.active,
+      );
+      expect(
+        await File(
+          '${workspaceDirectory.path}/bob-recover-route/source.txt',
+        ).readAsString(),
+        'incoming transfer init revives route',
+      );
+    },
+  );
+
+  test(
     'receiver temp draft failure rejects transfer init before data starts',
     () async {
       final controlNetwork = _LinkedFakeAuthNetwork();

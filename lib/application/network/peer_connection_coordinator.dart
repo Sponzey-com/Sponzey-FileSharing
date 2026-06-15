@@ -94,7 +94,13 @@ class PeerConnectionCoordinator
     }
 
     final session = ref.read(peerAuthSessionByPeerIdProvider(peer.id));
-    if (session?.isAuthenticated == true) {
+    final activePath = ref.read(activePeerPathProvider(peer.id));
+    final authenticatedWithActivePath =
+        session?.isAuthenticated == true &&
+        activePath?.status == PeerPathStatus.active;
+    final shouldRefreshAuthenticatedPath =
+        session?.isAuthenticated == true && !authenticatedWithActivePath;
+    if (authenticatedWithActivePath) {
       return _skip(
         peerId: peer.id,
         status: PeerConnectionAttemptStatus.skippedAuthenticated,
@@ -143,7 +149,11 @@ class PeerConnectionCoordinator
 
     await ref
         .read(peerAuthControllerProvider.notifier)
-        .startHandshake(peer, selectedPath: path);
+        .startHandshake(
+          peer,
+          selectedPath: path,
+          restartAuthenticatedSession: shouldRefreshAuthenticatedPath,
+        );
     return PeerConnectionAttemptResult(
       status: PeerConnectionAttemptStatus.started,
       path: path,

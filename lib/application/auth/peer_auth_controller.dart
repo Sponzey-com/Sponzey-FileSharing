@@ -123,10 +123,15 @@ class PeerAuthController extends Notifier<PeerAuthState> {
   Future<void> startHandshake(
     PeerNode peer, {
     PeerConnectionPath? selectedPath,
+    bool restartAuthenticatedSession = false,
   }) async {
     final existingSession = state.sessions[peer.id];
-    if (existingSession?.isAuthenticated == true) {
+    if (existingSession?.isAuthenticated == true &&
+        !restartAuthenticatedSession) {
       return;
+    }
+    if (restartAuthenticatedSession) {
+      _cancelContextsForPeer(peer.id);
     }
     if (_contexts.values.any((context) => context.peerId == peer.id)) {
       return;
@@ -1077,6 +1082,10 @@ class PeerAuthController extends Notifier<PeerAuthState> {
 
   void _clearPeerPathAndContexts(String peerId) {
     ref.read(peerPathRegistryMutationsProvider).clear(peerId);
+    _cancelContextsForPeer(peerId);
+  }
+
+  void _cancelContextsForPeer(String peerId) {
     final sessionIds = _contexts.entries
         .where((entry) => entry.value.peerId == peerId)
         .map((entry) => entry.key)
