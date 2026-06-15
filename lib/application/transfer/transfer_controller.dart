@@ -764,18 +764,23 @@ class TransferController extends Notifier<TransferState> {
       return;
     }
 
-    final peerId = _peerIdFromPacket(packet);
+    final packetPeerId = _peerIdFromPacket(packet);
     ref
         .read(appLoggerProvider)
         .info(
           AppLogCategory.transferControl,
           'Received TRANSFER_INIT ${_safeTransfer(transferId)} '
-          'peer=$peerId source=${datagram.address.address}:${datagram.port} '
+          'peer=$packetPeerId source=${datagram.address.address}:${datagram.port} '
           'local=${_endpointLabel(datagram.localEndpoint)} '
           'file=$fileName size=$fileSize chunks=$chunkCount',
         );
-    final session = ref.read(peerAuthSessionByPeerIdProvider(peerId));
-    if (session == null || !session.isAuthenticated) {
+    final session = _authenticatedSessionForTransferInit(
+      packet,
+      datagram,
+      packetPeerId: packetPeerId,
+    );
+    final peerId = session?.peerId ?? packetPeerId;
+    if (session == null) {
       await _sendTransferInitAck(
         sessionId: packet.sessionId,
         transferId: transferId,
@@ -786,6 +791,17 @@ class TransferController extends Notifier<TransferState> {
         localEndpoint: datagram.localEndpoint,
       );
       return;
+    }
+    if (peerId != packetPeerId) {
+      ref
+          .read(appLoggerProvider)
+          .debug(
+            AppLogCategory.transferControl,
+            'Resolved TRANSFER_INIT peer alias '
+            'packetPeer=$packetPeerId sessionPeer=$peerId '
+            'session=${_safeSession(session.sessionId)} '
+            'source=${datagram.address.address}:${datagram.port}',
+          );
     }
 
     IncomingTransferDraft? draft;
@@ -2316,6 +2332,45 @@ class TransferController extends Notifier<TransferState> {
             stackTrace: stackTrace,
           );
     }
+  }
+
+  PeerAuthSession? _authenticatedSessionForTransferInit(
+    AuthPacket packet,
+    ControlDatagram datagram, {
+    required String packetPeerId,
+  }) {
+    final exact = ref.read(peerAuthSessionByPeerIdProvider(packetPeerId));
+    if (exact?.isAuthenticated == true) {
+      return exact;
+    }
+
+    final sourceAddress = datagram.address.address;
+    for (final session
+        in ref.read(peerAuthControllerProvider).sessions.values) {
+      if (!session.isAuthenticated) {
+        continue;
+      }
+      if (session.sessionId != packet.sessionId) {
+        continue;
+      }
+      if (session.peerUserId != packet.fromUserId) {
+        continue;
+      }
+      if (session.peerAddress != sourceAddress) {
+        continue;
+      }
+      return session;
+    }
+
+    ref
+        .read(appLoggerProvider)
+        .warning(
+          AppLogCategory.transferControl,
+          'Rejected TRANSFER_INIT because authenticated session was not found '
+          'packetPeer=$packetPeerId session=${_safeSession(packet.sessionId)} '
+          'source=${datagram.address.address}:${datagram.port}',
+        );
+    return null;
   }
 
   PeerAuthSession _requireAuthenticatedSession(String peerId) {

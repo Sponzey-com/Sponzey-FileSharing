@@ -125,6 +125,99 @@ void main() {
   );
 
   test(
+    'accepts transfer init when packet peer id differs from authenticated session alias',
+    () async {
+      final network = _LinkedFakeAuthNetwork(
+        interceptor:
+            ({
+              required packet,
+              required address,
+              required sourcePort,
+              required targetPort,
+              required deliver,
+            }) async {
+              if (packet.type == AuthPacketType.transferInit &&
+                  sourcePort == 41022 &&
+                  targetPort == 41021) {
+                deliver(
+                  _copyPacket(packet, clearFromInstanceId: true),
+                  address: address,
+                  port: sourcePort,
+                );
+                return;
+              }
+              deliver(packet, address: address, port: sourcePort);
+            },
+      );
+      final aliceReceivePath = '${workspaceDirectory.path}/alice-alias';
+      final bobReceivePath = '${workspaceDirectory.path}/bob-alias';
+      final alice = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41021,
+        receivePath: aliceReceivePath,
+      );
+      final bob = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-b',
+        authPort: 41022,
+        receivePath: bobReceivePath,
+      );
+      addTearDown(alice.dispose);
+      addTearDown(bob.dispose);
+      await alice.container
+          .read(settingsRepositoryProvider)
+          .save(
+            const AppSettings(
+              defaultSavePath: '',
+              autoReceiveEnabled: true,
+              receivePolicy: ReceivePolicy.autoReceiveAll,
+              logLevel: AppLogLevel.error,
+            ).copyWith(defaultSavePath: aliceReceivePath),
+          );
+
+      await _handshakePair(
+        alice: alice,
+        bob: bob,
+        clock: clock.value,
+        alicePort: 41021,
+        bobPort: 41022,
+      );
+
+      final sourceFile = File('$bobReceivePath/alias-source.txt');
+      await sourceFile.parent.create(recursive: true);
+      await sourceFile.writeAsString('session id should resolve peer alias');
+
+      await bob.transferController.sendFile(
+        peerId: 'team@instance-device-a',
+        filePath: sourceFile.path,
+      );
+      expect(
+        bob.container.read(transferControllerProvider).errorMessage,
+        isNull,
+      );
+      expect(bob.container.read(transferJobsProvider), isNotEmpty);
+
+      final bobJob = await _waitForTerminalTransfer(bob.container);
+      final aliceJob = await _waitForTerminalTransfer(alice.container);
+
+      expect(bobJob.status, TransferJobStatus.completed);
+      expect(aliceJob.status, TransferJobStatus.completed);
+      expect(aliceJob.peerId, 'team@instance-device-b');
+      expect(
+        await File('$aliceReceivePath/alias-source.txt').readAsString(),
+        'session id should resolve peer alias',
+      );
+    },
+  );
+
+  test(
     'receiver uses default receive path when settings repository cannot load',
     () async {
       final network = _LinkedFakeAuthNetwork();
@@ -1333,14 +1426,18 @@ Future<void> _flush() async {
   await Future<void>.delayed(const Duration(milliseconds: 20));
 }
 
-AuthPacket _copyPacket(AuthPacket packet, {String? transferChunkDataBase64}) {
+AuthPacket _copyPacket(
+  AuthPacket packet, {
+  String? transferChunkDataBase64,
+  bool clearFromInstanceId = false,
+}) {
   return AuthPacket(
     type: packet.type,
     protocolVersion: packet.protocolVersion,
     sessionId: packet.sessionId,
     fromUserId: packet.fromUserId,
     fromDeviceId: packet.fromDeviceId,
-    fromInstanceId: packet.fromInstanceId,
+    fromInstanceId: clearFromInstanceId ? null : packet.fromInstanceId,
     fromDisplayName: packet.fromDisplayName,
     nonce: packet.nonce,
     token: packet.token,
@@ -1359,6 +1456,14 @@ AuthPacket _copyPacket(AuthPacket packet, {String? transferChunkDataBase64}) {
     transferSavePath: packet.transferSavePath,
     transferWindowStart: packet.transferWindowStart,
     transferWindowSize: packet.transferWindowSize,
+    transferDataAddress: packet.transferDataAddress,
+    transferDataPort: packet.transferDataPort,
+    transferAcceptedChunkSize: packet.transferAcceptedChunkSize,
+    transferAcceptedWindowSize: packet.transferAcceptedWindowSize,
+    transferReceiverBufferBudget: packet.transferReceiverBufferBudget,
+    transferDataProtocol: packet.transferDataProtocol,
+    transferCapabilities: packet.transferCapabilities,
+    transferDataAuthContextId: packet.transferDataAuthContextId,
     sentAtEpochMs: packet.sentAtEpochMs,
   );
 }
