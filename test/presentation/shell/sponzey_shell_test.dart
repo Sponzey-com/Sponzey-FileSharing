@@ -61,4 +61,59 @@ void main() {
     expect(oldTapCount, 0);
     expect(find.text('New page'), findsOneWidget);
   });
+
+  testWidgets('incoming shell page receives the first tap during transition', (
+    tester,
+  ) async {
+    var currentLocation = '/old';
+    var newTapCount = 0;
+
+    Widget buildPane() {
+      return MaterialApp(
+        home: StatefulBuilder(
+          builder: (context, setState) {
+            return Column(
+              children: [
+                ElevatedButton(
+                  onPressed: () {
+                    setState(() {
+                      currentLocation = '/new';
+                    });
+                  },
+                  child: const Text('Switch'),
+                ),
+                Expanded(
+                  child: ShellContentPane(
+                    currentLocation: currentLocation,
+                    child: currentLocation == '/old'
+                        ? const Align(
+                            alignment: Alignment.topLeft,
+                            child: Text('Old page'),
+                          )
+                        : Align(
+                            alignment: Alignment.bottomRight,
+                            child: ElevatedButton(
+                              onPressed: () {
+                                newTapCount += 1;
+                              },
+                              child: const Text('New action'),
+                            ),
+                          ),
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+    }
+
+    await tester.pumpWidget(buildPane());
+    await tester.tap(find.widgetWithText(ElevatedButton, 'Switch'));
+    await tester.pump(const Duration(milliseconds: 40));
+    await tester.tap(find.widgetWithText(ElevatedButton, 'New action'));
+    await tester.pumpAndSettle();
+
+    expect(newTapCount, 1);
+  });
 }

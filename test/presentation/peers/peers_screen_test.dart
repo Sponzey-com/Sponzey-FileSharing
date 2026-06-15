@@ -71,6 +71,53 @@ void main() {
       expect(find.textContaining('password'), findsNothing);
     },
   );
+
+  testWidgets(
+    'authenticated peer can send while path registry is still synchronizing',
+    (tester) async {
+      final peer = _peer();
+      final candidate = _candidate(peer.id);
+      final authenticatingPath = PeerConnectionPath.fromCandidate(
+        candidate: candidate,
+        selectedAt: DateTime.utc(2026),
+        selectionReason: PeerPathSelectionReason.sameSubnet,
+      ).copyWith(status: PeerPathStatus.authenticating);
+      final registry = PeerPathRegistry()..select(authenticatingPath);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            discoveryControllerProvider.overrideWith(
+              _PeersScreenDiscoveryController.new,
+            ),
+            discoveryOverviewProvider.overrideWith(
+              (ref) => DiscoveryOverview(
+                peers: [peer],
+                onlineCount: 1,
+                staleCount: 0,
+                offlineCount: 0,
+                incompatibleCount: 0,
+              ),
+            ),
+            peerAuthSessionByPeerIdProvider(peer.id).overrideWith(
+              (ref) => _session(peer, status: PeerAuthStatus.authenticated),
+            ),
+            peerRouteCandidateStoreProvider.overrideWith((ref) => [candidate]),
+            peerPathRegistryProvider.overrideWithValue(registry),
+          ],
+          child: const MaterialApp(home: Scaffold(body: PeersScreen())),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('연결됨'), findsOneWidget);
+      expect(find.text('파일 보내기'), findsOneWidget);
+      final sendButton = tester.widget<ElevatedButton>(
+        find.widgetWithText(ElevatedButton, '파일 보내기'),
+      );
+      expect(sendButton.onPressed, isNotNull);
+    },
+  );
 }
 
 class _PeersScreenDiscoveryController extends DiscoveryController {

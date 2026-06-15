@@ -40,6 +40,56 @@ void main() {
     },
   );
 
+  test(
+    'shows connected when authenticated route exists but path is still synchronizing',
+    () {
+      final peer = _peer();
+      final candidate = _candidate(peer.id);
+      final authenticatingPath = PeerConnectionPath.fromCandidate(
+        candidate: candidate,
+        selectedAt: DateTime.utc(2026),
+        selectionReason: PeerPathSelectionReason.sameSubnet,
+      ).copyWith(status: PeerPathStatus.authenticating);
+
+      final summary = PeerConnectionSummary.resolve(
+        peer: peer,
+        authSession: _session(peer, status: PeerAuthStatus.authenticated),
+        diagnostics: PeerPathDiagnostics(
+          peerId: peer.id,
+          activePath: authenticatingPath,
+          candidates: [candidate],
+          degradedTransfers: const [],
+        ),
+      );
+
+      expect(summary.status, PeerConnectionProductStatus.connected);
+      expect(summary.label, '연결됨');
+      expect(summary.canSendFiles, isTrue);
+    },
+  );
+
+  test(
+    'shows connected for incoming authenticated sessions without registry path',
+    () {
+      final peer = _peer();
+
+      final summary = PeerConnectionSummary.resolve(
+        peer: peer,
+        authSession: _session(peer, status: PeerAuthStatus.authenticated),
+        diagnostics: PeerPathDiagnostics(
+          peerId: peer.id,
+          activePath: null,
+          candidates: const [],
+          degradedTransfers: const [],
+        ),
+      );
+
+      expect(summary.status, PeerConnectionProductStatus.connected);
+      expect(summary.label, '연결됨');
+      expect(summary.canSendFiles, isTrue);
+    },
+  );
+
   test('shows checking when candidates exist but active path is missing', () {
     final peer = _peer();
     final container = ProviderContainer(
