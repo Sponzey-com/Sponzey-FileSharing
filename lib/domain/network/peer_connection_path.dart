@@ -136,10 +136,19 @@ class PeerPathSelectionPolicy {
     required Iterable<PeerRouteCandidate> candidates,
     required DateTime selectedAt,
   }) {
-    final scored = candidates
+    final selectableCandidates = candidates
         .where((candidate) => candidate.isSelectable)
+        .toList(growable: false);
+    final hasNonLoopbackCandidate = selectableCandidates.any(
+      (candidate) =>
+          candidate.localInterfaceTypeHint != InterfaceTypeHint.loopback,
+    );
+    final scored = selectableCandidates
         .map((candidate) {
-          final score = _score(candidate);
+          final score = _score(
+            candidate,
+            penalizeLoopback: hasNonLoopbackCandidate,
+          );
           return (candidate: candidate, score: score);
         })
         .toList(growable: false);
@@ -174,7 +183,7 @@ class PeerPathSelectionPolicy {
     );
   }
 
-  int _score(PeerRouteCandidate candidate) {
+  int _score(PeerRouteCandidate candidate, {required bool penalizeLoopback}) {
     var score = 1000;
     if (_sameSubnet24(candidate.localAddress, candidate.remoteAddress)) {
       score += 300;
@@ -198,6 +207,9 @@ class PeerPathSelectionPolicy {
       case InterfaceTypeHint.wifi:
         score += 10;
       case InterfaceTypeHint.loopback:
+        if (penalizeLoopback) {
+          score -= 1400;
+        }
       case InterfaceTypeHint.unknown:
         break;
     }

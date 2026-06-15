@@ -30,6 +30,7 @@ permissions:
 env:
   APP_SLUG: sponzey-file-sharing
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  SPONZEY_APP_VERSION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag || github.ref_name }}
 
 jobs:
   build-macos:
@@ -59,7 +60,7 @@ jobs:
         run: flutter test --concurrency=1 --reporter expanded
 
       - name: Build macOS release
-        run: flutter build macos --release
+        run: flutter build macos --release --dart-define=SPONZEY_APP_VERSION="${SPONZEY_APP_VERSION}"
 
       - name: Package macOS artifact
         shell: bash
@@ -98,7 +99,7 @@ jobs:
 
       - name: Build Windows release
         shell: pwsh
-        run: scripts\build_windows.ps1
+        run: scripts\build_windows.ps1 -AppVersion "${env:SPONZEY_APP_VERSION}"
 
       - name: Package Windows artifact
         shell: pwsh
@@ -159,7 +160,7 @@ jobs:
         run: flutter test --concurrency=1 --reporter expanded
 
       - name: Build Linux release
-        run: flutter build linux --release
+        run: flutter build linux --release --dart-define=SPONZEY_APP_VERSION="${SPONZEY_APP_VERSION}"
 
       - name: Package Linux artifact
         shell: bash
@@ -206,7 +207,7 @@ jobs:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag || github.ref_name }}
           target_commitish: ${{ github.sha }}
           name: Sponzey FileSharing ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag || github.ref_name }}
-          draft: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.draft == 'true' || false }}
+          draft: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.draft == 'true' }}
           prerelease: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.prerelease == 'true' || contains(github.ref_name, '-') }}
           files: dist/*
           fail_on_unmatched_files: true

@@ -4,6 +4,7 @@ import 'package:sponzey_file_sharing/application/network/network_diagnostics_pro
 import 'package:sponzey_file_sharing/application/network/peer_link_reason_code.dart';
 import 'package:sponzey_file_sharing/domain/entities/peer_auth_session.dart';
 import 'package:sponzey_file_sharing/domain/entities/peer_node.dart';
+import 'package:sponzey_file_sharing/domain/network/peer_connection_path.dart';
 
 enum PeerConnectionProductStatus {
   checking,
@@ -64,11 +65,19 @@ class PeerConnectionSummary {
     if (session != null) {
       switch (session.status) {
         case PeerAuthStatus.authenticated:
+          if (diagnostics.activePath?.status == PeerPathStatus.active) {
+            return const PeerConnectionSummary(
+              status: PeerConnectionProductStatus.connected,
+              label: '연결됨',
+              description: '파일 전송 준비가 완료되었습니다.',
+              canSendFiles: true,
+            );
+          }
           return const PeerConnectionSummary(
-            status: PeerConnectionProductStatus.connected,
-            label: '연결됨',
-            description: '파일 전송 준비가 완료되었습니다.',
-            canSendFiles: true,
+            status: PeerConnectionProductStatus.checking,
+            label: '경로 확인 중',
+            description: '인증은 완료되었고 네트워크 경로 상태를 확인하는 중입니다.',
+            canSendFiles: false,
           );
         case PeerAuthStatus.connecting:
         case PeerAuthStatus.challengeIssued:

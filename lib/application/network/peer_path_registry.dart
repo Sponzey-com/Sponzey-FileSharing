@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sponzey_file_sharing/core/state_machine/state_machine.dart';
 import 'package:sponzey_file_sharing/domain/network/peer_connection_path.dart';
+import 'package:sponzey_file_sharing/domain/network/peer_route_candidate.dart';
 
 class PeerPathRegistry {
   final Map<String, PeerConnectionPath> _pathsByPeerId = {};
@@ -12,6 +13,11 @@ class PeerPathRegistry {
   }
 
   PeerConnectionPath? selectedForPeer(String peerId) => _pathsByPeerId[peerId];
+
+  List<PeerConnectionPath> snapshot() {
+    return _pathsByPeerId.values.toList(growable: false)
+      ..sort((a, b) => a.peerId.compareTo(b.peerId));
+  }
 
   TransitionResult<PeerConnectionPath>? applyEvent({
     required String peerId,
@@ -41,6 +47,26 @@ class PeerPathRegistry {
       status: PeerPathStatus.failed,
       failureReasonCode: reasonCode,
     );
+  }
+
+  bool expireLeaseForCandidate({
+    required PeerRouteCandidate candidate,
+    required String reasonCode,
+  }) {
+    final current = _pathsByPeerId[candidate.peerId];
+    if (current == null ||
+        current.candidate.candidateId != candidate.candidateId) {
+      return false;
+    }
+    if (current.status == PeerPathStatus.failed ||
+        current.status == PeerPathStatus.failoverRequested) {
+      return false;
+    }
+    _pathsByPeerId[candidate.peerId] = current.copyWith(
+      status: PeerPathStatus.failoverRequested,
+      failureReasonCode: reasonCode,
+    );
+    return true;
   }
 
   void clear(String peerId) {
@@ -95,6 +121,19 @@ class PeerPathRegistryMutations {
         .read(peerPathRegistryProvider)
         .markFailed(peerId: peerId, reasonCode: reasonCode);
     _bump();
+  }
+
+  bool expireLeaseForCandidate({
+    required PeerRouteCandidate candidate,
+    required String reasonCode,
+  }) {
+    final changed = _ref
+        .read(peerPathRegistryProvider)
+        .expireLeaseForCandidate(candidate: candidate, reasonCode: reasonCode);
+    if (changed) {
+      _bump();
+    }
+    return changed;
   }
 
   void clear(String peerId) {

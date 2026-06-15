@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
+import 'package:sponzey_file_sharing/core/errors/app_exception.dart';
 import 'package:sponzey_file_sharing/infrastructure/transfer/transfer_file_service.dart';
 
 void main() {
@@ -97,6 +98,63 @@ void main() {
     await writer.close();
 
     expect(await File(draft.tempFilePath).readAsString(), 'fast-path-receive');
+  });
+
+  test(
+    'finalize uses duplicate filename suffix instead of overwrite',
+    () async {
+      final existing = File(p.join(tempDirectory.path, 'report.txt'));
+      await existing.writeAsString('existing');
+      final draft = await service.createIncomingDraft(
+        transferId: 'transfer-duplicate-name',
+        fileName: 'report.txt',
+      );
+      await service.appendChunk(
+        tempFilePath: draft.tempFilePath,
+        bytes: utf8.encode('received'),
+      );
+
+      final finalPath = await service.finalizeIncomingFile(
+        tempFilePath: draft.tempFilePath,
+        destinationDirectory: tempDirectory.path,
+        fileName: 'report.txt',
+      );
+
+      expect(p.basename(finalPath), 'report (1).txt');
+      expect(await existing.readAsString(), 'existing');
+      expect(await File(finalPath).readAsString(), 'received');
+    },
+  );
+
+  test('finalize failure removes temporary draft directory', () async {
+    final destinationFile = File(p.join(tempDirectory.path, 'not-directory'));
+    await destinationFile.writeAsString('block directory creation');
+    final draft = await service.createIncomingDraft(
+      transferId: 'transfer-finalize-fail',
+      fileName: 'fail.txt',
+    );
+    await service.appendChunk(
+      tempFilePath: draft.tempFilePath,
+      bytes: utf8.encode('temporary payload'),
+    );
+
+    await expectLater(
+      service.finalizeIncomingFile(
+        tempFilePath: draft.tempFilePath,
+        destinationDirectory: destinationFile.path,
+        fileName: 'fail.txt',
+      ),
+      throwsA(
+        isA<AppException>().having(
+          (error) => error.code,
+          'code',
+          'incoming_finalize_failed',
+        ),
+      ),
+    );
+
+    expect(await File(draft.tempFilePath).exists(), isFalse);
+    expect(await Directory(draft.tempDirectoryPath).exists(), isFalse);
   });
 
   test('sanitizes Windows sender path names for incoming drafts', () async {

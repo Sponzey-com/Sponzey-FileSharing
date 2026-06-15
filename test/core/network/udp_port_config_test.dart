@@ -12,6 +12,7 @@ void main() {
     expect(config.authPort, 38401);
     expect(config.dataPort, 38410);
     expect(config.dataPortRange.contains(38430), isTrue);
+    expect(config.appVersion, isNotEmpty);
   });
 
   test('authPort remains a migration alias for controlPort', () {

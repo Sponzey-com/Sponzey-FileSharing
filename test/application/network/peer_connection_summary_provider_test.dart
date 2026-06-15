@@ -41,7 +41,7 @@ void main() {
   );
 
   test(
-    'shows connected when authenticated route exists but path is still synchronizing',
+    'keeps route checking when authenticated route is still synchronizing',
     () {
       final peer = _peer();
       final candidate = _candidate(peer.id);
@@ -62,14 +62,14 @@ void main() {
         ),
       );
 
-      expect(summary.status, PeerConnectionProductStatus.connected);
-      expect(summary.label, '연결됨');
-      expect(summary.canSendFiles, isTrue);
+      expect(summary.status, PeerConnectionProductStatus.checking);
+      expect(summary.label, '경로 확인 중');
+      expect(summary.canSendFiles, isFalse);
     },
   );
 
   test(
-    'shows connected for incoming authenticated sessions without registry path',
+    'does not show connected for authenticated sessions without registry path',
     () {
       final peer = _peer();
 
@@ -84,9 +84,9 @@ void main() {
         ),
       );
 
-      expect(summary.status, PeerConnectionProductStatus.connected);
-      expect(summary.label, '연결됨');
-      expect(summary.canSendFiles, isTrue);
+      expect(summary.status, PeerConnectionProductStatus.checking);
+      expect(summary.label, '경로 확인 중');
+      expect(summary.canSendFiles, isFalse);
     },
   );
 

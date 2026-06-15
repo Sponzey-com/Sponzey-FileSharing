@@ -31,6 +31,9 @@ class DiscoveryTransportSnapshot {
     this.lastBroadcastSuccessCount = 0,
     this.lastBroadcastFailureCount = 0,
     this.lastBroadcastAttemptPreview = const [],
+    this.discoveryTargetSkipPreview = const [],
+    this.lastReceiveDecisionCode,
+    this.malformedPacketCount = 0,
   });
 
   final String mode;
@@ -44,6 +47,9 @@ class DiscoveryTransportSnapshot {
   final int lastBroadcastSuccessCount;
   final int lastBroadcastFailureCount;
   final List<String> lastBroadcastAttemptPreview;
+  final List<String> discoveryTargetSkipPreview;
+  final String? lastReceiveDecisionCode;
+  final int malformedPacketCount;
 
   int get broadcastTargetCount => broadcastTargets.length;
 }

@@ -1,7 +1,8 @@
 param(
   [switch]$SkipTests,
   [switch]$UseGlobalPubCache,
-  [switch]$Clean
+  [switch]$Clean,
+  [string]$AppVersion = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,6 +16,21 @@ if (-not $isWindowsHost) {
 }
 
 $projectRoot = Get-Location
+
+if ([string]::IsNullOrWhiteSpace($AppVersion)) {
+  $AppVersion = $env:SPONZEY_APP_VERSION
+}
+
+if ([string]::IsNullOrWhiteSpace($AppVersion)) {
+  $versionLine = Select-String -Path (Join-Path $projectRoot "pubspec.yaml") -Pattern "^version:\s*(.+)$" | Select-Object -First 1
+  if ($null -ne $versionLine) {
+    $AppVersion = $versionLine.Matches[0].Groups[1].Value.Trim()
+  }
+}
+
+if ([string]::IsNullOrWhiteSpace($AppVersion)) {
+  Write-Error "Unable to determine app version. Pass -AppVersion or set SPONZEY_APP_VERSION."
+}
 
 if (-not $UseGlobalPubCache) {
   $localPubCache = Join-Path $projectRoot ".dart_tool\pub-cache"
@@ -50,7 +66,9 @@ if (-not $SkipTests) {
   Invoke-Step "Test" { flutter test --concurrency=1 --reporter expanded }
 }
 
-Invoke-Step "Build Windows release" { flutter build windows --release }
+Invoke-Step "Build Windows release" {
+  flutter build windows --release "--dart-define=SPONZEY_APP_VERSION=$AppVersion"
+}
 
 $artifact = Join-Path (Get-Location) "build\windows\x64\runner\Release"
 

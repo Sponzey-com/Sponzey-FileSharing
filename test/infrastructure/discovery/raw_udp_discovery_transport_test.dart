@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sponzey_file_sharing/core/logger/app_logger.dart';
 import 'package:sponzey_file_sharing/core/logger/console_app_logger.dart';
+import 'package:sponzey_file_sharing/domain/network/network_interface_inventory.dart';
 import 'package:sponzey_file_sharing/domain/network/network_interface_models.dart';
 import 'package:sponzey_file_sharing/infrastructure/discovery/raw_udp_discovery_transport.dart';
 
@@ -62,6 +63,23 @@ void main() {
       ),
       isFalse,
     );
+  });
+
+  test('discovery bind policy never enables reusePort on Windows', () {
+    final windows = RawUdpDiscoveryTransport.bindOptionsFor(
+      platform: DiscoverySocketPlatform.windows,
+    );
+    final posix = RawUdpDiscoveryTransport.bindOptionsFor(
+      platform: DiscoverySocketPlatform.posix,
+    );
+
+    expect(windows, isNotEmpty);
+    expect(windows.every((option) => option.reusePort == false), isTrue);
+    expect(
+      windows.first,
+      const DiscoverySocketBindOptions(reuseAddress: false, reusePort: false),
+    );
+    expect(posix.first.reusePort, isTrue);
   });
 
   test('keeps every default connectable LAN interface for discovery', () {
@@ -216,6 +234,55 @@ void main() {
       expect(snapshot.receivePortFallback, isTrue);
     },
   );
+
+  test('records malformed receive decisions in diagnostics', () async {
+    final transport = RawUdpDiscoveryTransport(
+      logger: const ConsoleAppLogger(minimumLevel: AppLogLevel.error),
+    );
+    final sender = await RawDatagramSocket.bind(
+      InternetAddress.loopbackIPv4,
+      0,
+    );
+    addTearDown(() async {
+      sender.close();
+      await transport.close();
+    });
+
+    await transport.start(port: 0);
+    final receivePort = transport.snapshot().receivePort;
+    expect(receivePort, isNotNull);
+
+    sender.send([1, 2, 3, 4], InternetAddress.loopbackIPv4, receivePort!);
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+
+    final snapshot = transport.snapshot();
+    expect(snapshot.malformedPacketCount, 1);
+    expect(snapshot.lastReceiveDecisionCode, 'malformed');
+  });
+
+  test('interface sender bind failure does not fail discovery start', () async {
+    final transport = RawUdpDiscoveryTransport(
+      logger: const ConsoleAppLogger(minimumLevel: AppLogLevel.error),
+      networkInterfaceInventory: _FakeNetworkInterfaceInventory([
+        _snapshot(
+          name: 'ghost0',
+          index: 99,
+          typeHint: InterfaceTypeHint.ethernet,
+          address: InterfaceAddress.ipv4(
+            address: '203.0.113.10',
+            prefixLength: 24,
+          ),
+        ),
+      ]),
+    );
+    addTearDown(transport.close);
+
+    await transport.start(port: 0);
+
+    final snapshot = transport.snapshot();
+    expect(snapshot.mode, 'receive-send');
+    expect(snapshot.broadcastTargetCount, greaterThan(0));
+  });
 }
 
 NetworkInterfaceSnapshot _snapshot({
@@ -237,4 +304,13 @@ NetworkInterfaceSnapshot _snapshot({
     addresses: [address],
     capturedAt: DateTime.utc(2026),
   );
+}
+
+class _FakeNetworkInterfaceInventory implements NetworkInterfaceInventory {
+  const _FakeNetworkInterfaceInventory(this.snapshots);
+
+  final List<NetworkInterfaceSnapshot> snapshots;
+
+  @override
+  Future<List<NetworkInterfaceSnapshot>> scan() async => snapshots;
 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sponzey_file_sharing/app/theme/app_colors.dart';
 import 'package:sponzey_file_sharing/app/theme/app_spacing.dart';
+import 'package:sponzey_file_sharing/application/auth/peer_auth_controller.dart';
 import 'package:sponzey_file_sharing/application/discovery/discovery_controller.dart';
 import 'package:sponzey_file_sharing/application/discovery/discovery_overview_provider.dart';
 import 'package:sponzey_file_sharing/application/transfer/transfer_overview_provider.dart';
@@ -34,9 +35,20 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   Widget build(BuildContext context) {
     final discoveryState = ref.watch(discoveryControllerProvider);
     final overview = ref.watch(discoveryOverviewProvider);
+    final authSessions = ref.watch(peerAuthControllerProvider).sessions;
     final jobs = ref.watch(transferJobsProvider);
     final activeJobs = ref.watch(activeTransferJobsProvider);
-    final recentPeers = overview.peers.take(4).toList();
+    final recentPeers = overview.peers.take(4).map((peer) {
+      final session = authSessions[peer.id];
+      if (session?.isAuthenticated != true) {
+        return peer;
+      }
+      return peer.copyWith(
+        address: session!.peerAddress,
+        port: session.peerPort,
+        presence: PeerPresence.online,
+      );
+    }).toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -134,7 +146,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                                 leading: const Icon(Icons.devices_rounded),
                                 title: Text(peer.displayName),
                                 subtitle: Text(
-                                  '${peer.deviceName} • ${peer.address}:${peer.port}',
+                                  '${peer.deviceName} • ${peer.address}',
                                 ),
                                 trailing: StatusBadge(
                                   label: peer.statusLabel,

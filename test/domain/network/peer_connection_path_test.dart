@@ -95,6 +95,72 @@ void main() {
       expect(selection!.path.candidate.localInterfaceId.name, 'bridge100');
     });
 
+    test('does not prefer loopback when a bridge route is available', () {
+      final selection = const PeerPathSelectionPolicy().select(
+        candidates: [
+          _candidate(
+            id: 'loopback',
+            rttMs: 1,
+            localAddress: '127.0.0.1',
+            remoteAddress: '127.0.0.1',
+            typeHint: InterfaceTypeHint.loopback,
+            discoveredBy: RouteCandidateDiscoverySource.localRegistry,
+          ),
+          _candidate(
+            id: 'bridge100',
+            rttMs: 50,
+            localAddress: '10.211.55.2',
+            remoteAddress: '10.211.55.3',
+            typeHint: InterfaceTypeHint.bridge,
+          ),
+        ],
+        selectedAt: DateTime.utc(2026),
+      );
+
+      expect(selection!.path.candidate.localInterfaceId.name, 'bridge100');
+    });
+
+    test('does not keep previous loopback success over bridge route', () {
+      final loopback = _candidate(
+        id: 'loopback',
+        rttMs: 1,
+        localAddress: '127.0.0.1',
+        remoteAddress: '127.0.0.1',
+        typeHint: InterfaceTypeHint.loopback,
+        discoveredBy: RouteCandidateDiscoverySource.localRegistry,
+      );
+      final bridge = _candidate(
+        id: 'bridge100',
+        rttMs: 50,
+        localAddress: '10.211.55.2',
+        remoteAddress: '10.211.55.3',
+        typeHint: InterfaceTypeHint.bridge,
+      );
+
+      final selection = PeerPathSelectionPolicy(
+        previousSuccessCandidateIds: {loopback.candidateId},
+      ).select(candidates: [loopback, bridge], selectedAt: DateTime.utc(2026));
+
+      expect(selection!.path.candidate.localInterfaceId.name, 'bridge100');
+    });
+
+    test('keeps loopback selectable when it is the only route', () {
+      final selection = const PeerPathSelectionPolicy().select(
+        candidates: [
+          _candidate(
+            id: 'loopback',
+            localAddress: '127.0.0.1',
+            remoteAddress: '127.0.0.1',
+            typeHint: InterfaceTypeHint.loopback,
+            discoveredBy: RouteCandidateDiscoverySource.localRegistry,
+          ),
+        ],
+        selectedAt: DateTime.utc(2026),
+      );
+
+      expect(selection!.path.candidate.localInterfaceId.name, 'loopback');
+    });
+
     test('prioritizes fresh candidate over degraded candidate', () {
       final selection = const PeerPathSelectionPolicy().select(
         candidates: [
@@ -209,6 +275,8 @@ PeerRouteCandidate _candidate({
   String? remoteAddress,
   InterfaceTypeHint typeHint = InterfaceTypeHint.ethernet,
   RouteCandidateStatus status = RouteCandidateStatus.fresh,
+  RouteCandidateDiscoverySource discoveredBy =
+      RouteCandidateDiscoverySource.broadcast,
 }) {
   return PeerRouteCandidate.create(
     peerId: 'user@device',
@@ -218,7 +286,7 @@ PeerRouteCandidate _candidate({
     remotePort: 38401,
     localInterfaceId: NetworkInterfaceId(name: id, index: id.codeUnitAt(0)),
     localAddress: localAddress,
-    discoveredBy: RouteCandidateDiscoverySource.broadcast,
+    discoveredBy: discoveredBy,
     seenAt: DateTime.utc(2026),
     rttMs: rttMs,
     failureCount: failureCount,

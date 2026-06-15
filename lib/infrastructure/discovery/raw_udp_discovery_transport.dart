@@ -3,7 +3,9 @@ import 'dart:io';
 
 import 'package:sponzey_file_sharing/core/logger/app_log_category.dart';
 import 'package:sponzey_file_sharing/core/logger/app_logger.dart';
+import 'package:sponzey_file_sharing/domain/discovery/discovery_receive_decision.dart';
 import 'package:sponzey_file_sharing/domain/network/discovery_target.dart';
+import 'package:sponzey_file_sharing/domain/network/network_interface_inventory.dart';
 import 'package:sponzey_file_sharing/domain/network/network_interface_models.dart';
 import 'package:sponzey_file_sharing/infrastructure/discovery/discovery_packet.dart';
 import 'package:sponzey_file_sharing/infrastructure/discovery/discovery_transport.dart';
@@ -11,7 +13,12 @@ import 'package:sponzey_file_sharing/infrastructure/network/dart_io_network_inte
 
 class RawUdpDiscoveryTransport
     implements DiscoveryTransport, DiscoveryTransportDiagnostics {
-  RawUdpDiscoveryTransport({required AppLogger logger}) : _logger = logger;
+  RawUdpDiscoveryTransport({
+    required AppLogger logger,
+    NetworkInterfaceInventory? networkInterfaceInventory,
+  }) : _logger = logger,
+       _networkInterfaceInventory =
+           networkInterfaceInventory ?? const DartIoNetworkInterfaceInventory();
 
   static final InternetAddress _broadcastAddress = InternetAddress(
     '255.255.255.255',
@@ -21,6 +28,7 @@ class RawUdpDiscoveryTransport
   );
 
   final AppLogger _logger;
+  final NetworkInterfaceInventory _networkInterfaceInventory;
   final StreamController<DiscoveryDatagram> _packetsController =
       StreamController<DiscoveryDatagram>.broadcast();
 
@@ -36,6 +44,9 @@ class RawUdpDiscoveryTransport
   int _lastBroadcastSuccessCount = 0;
   int _lastBroadcastFailureCount = 0;
   List<String> _lastBroadcastAttemptPreview = const [];
+  List<String> _discoveryTargetSkipPreview = const [];
+  String? _lastReceiveDecisionCode;
+  int _malformedPacketCount = 0;
 
   @override
   Stream<DiscoveryDatagram> get packets => _packetsController.stream;
@@ -61,6 +72,9 @@ class RawUdpDiscoveryTransport
       lastBroadcastSuccessCount: _lastBroadcastSuccessCount,
       lastBroadcastFailureCount: _lastBroadcastFailureCount,
       lastBroadcastAttemptPreview: _lastBroadcastAttemptPreview,
+      discoveryTargetSkipPreview: _discoveryTargetSkipPreview,
+      lastReceiveDecisionCode: _lastReceiveDecisionCode,
+      malformedPacketCount: _malformedPacketCount,
     );
   }
 
@@ -78,10 +92,15 @@ class RawUdpDiscoveryTransport
     final preferredInterfaceIds = preferredInterfaces
         .map((interface) => interface.id.stableId)
         .toSet();
-    _broadcastTargets = _buildBroadcastTargets(
+    final targetPlan = _buildBroadcastTargetPlan(
       interfaces: preferredInterfaces,
       port: port,
     );
+    _broadcastTargets = targetPlan.targets;
+    _discoveryTargetSkipPreview = targetPlan.skipped
+        .take(32)
+        .map((decision) => decision.label)
+        .toList(growable: false);
     _logger.info(
       AppLogCategory.discovery,
       'Discovery transport start requested. preferredPort=$port '
@@ -109,6 +128,13 @@ class RawUdpDiscoveryTransport
         AppLogCategory.discovery,
         'Discovery broadcast target plan count=${_broadcastTargets.length} '
         'targets=${_targetPreview(_broadcastTargets, limit: 32).join(' | ')}',
+      );
+    }
+    if (_discoveryTargetSkipPreview.isNotEmpty) {
+      _logger.info(
+        AppLogCategory.discovery,
+        'Discovery broadcast target skip plan '
+        '${_discoveryTargetSkipPreview.join(' | ')}',
       );
     }
 
@@ -370,6 +396,7 @@ class RawUdpDiscoveryTransport
       );
       try {
         final packet = DiscoveryPacket.decode(current.data);
+        _lastReceiveDecisionCode = DiscoveryReceiveDecisionCode.accepted.name;
         _logger.info(
           AppLogCategory.discovery,
           'Discovery datagram decoded from '
@@ -392,6 +419,8 @@ class RawUdpDiscoveryTransport
           error: error,
           stackTrace: stackTrace,
         );
+        _malformedPacketCount += 1;
+        _lastReceiveDecisionCode = DiscoveryReceiveDecisionCode.malformed.name;
       }
     }
   }
@@ -467,18 +496,18 @@ class RawUdpDiscoveryTransport
   }
 
   Future<_DiscoveryInterfaceScan> _resolveInterfaceScan() async {
-    final snapshots = await const DartIoNetworkInterfaceInventory().scan();
+    final snapshots = await _networkInterfaceInventory.scan();
     return _DiscoveryInterfaceScan(
       all: snapshots,
       selected: selectPreferredInterfaces(snapshots),
     );
   }
 
-  List<DiscoveryTarget> _buildBroadcastTargets({
+  DiscoveryTargetPlan _buildBroadcastTargetPlan({
     required List<NetworkInterfaceSnapshot> interfaces,
     required int port,
   }) {
-    return const DiscoveryTargetBuilder().build(
+    return const DiscoveryTargetBuilder().buildPlan(
       interfaces: interfaces,
       port: port,
     );
@@ -731,18 +760,30 @@ class RawUdpDiscoveryTransport
     Error.throwWithStackTrace(lastError!, lastStackTrace!);
   }
 
-  static List<_DiscoverySocketBindOptions> _bindOptionsForCurrentPlatform() {
-    if (Platform.isWindows) {
-      return const [
-        _DiscoverySocketBindOptions(reuseAddress: false, reusePort: false),
-        _DiscoverySocketBindOptions(reuseAddress: true, reusePort: false),
-      ];
+  static List<DiscoverySocketBindOptions> bindOptionsFor({
+    required DiscoverySocketPlatform platform,
+  }) {
+    switch (platform) {
+      case DiscoverySocketPlatform.windows:
+        return const [
+          DiscoverySocketBindOptions(reuseAddress: false, reusePort: false),
+          DiscoverySocketBindOptions(reuseAddress: true, reusePort: false),
+        ];
+      case DiscoverySocketPlatform.posix:
+        return const [
+          DiscoverySocketBindOptions(reuseAddress: true, reusePort: true),
+          DiscoverySocketBindOptions(reuseAddress: true, reusePort: false),
+          DiscoverySocketBindOptions(reuseAddress: false, reusePort: false),
+        ];
     }
-    return const [
-      _DiscoverySocketBindOptions(reuseAddress: true, reusePort: true),
-      _DiscoverySocketBindOptions(reuseAddress: true, reusePort: false),
-      _DiscoverySocketBindOptions(reuseAddress: false, reusePort: false),
-    ];
+  }
+
+  static List<DiscoverySocketBindOptions> _bindOptionsForCurrentPlatform() {
+    return bindOptionsFor(
+      platform: Platform.isWindows
+          ? DiscoverySocketPlatform.windows
+          : DiscoverySocketPlatform.posix,
+    );
   }
 
   bool _isAddressInUse(Object error) {
@@ -913,12 +954,25 @@ class _DiscoveryInterfaceScan {
   final List<NetworkInterfaceSnapshot> selected;
 }
 
-class _DiscoverySocketBindOptions {
-  const _DiscoverySocketBindOptions({
+enum DiscoverySocketPlatform { windows, posix }
+
+class DiscoverySocketBindOptions {
+  const DiscoverySocketBindOptions({
     required this.reuseAddress,
     required this.reusePort,
   });
 
   final bool reuseAddress;
   final bool reusePort;
+
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        other is DiscoverySocketBindOptions &&
+            other.reuseAddress == reuseAddress &&
+            other.reusePort == reusePort;
+  }
+
+  @override
+  int get hashCode => Object.hash(reuseAddress, reusePort);
 }

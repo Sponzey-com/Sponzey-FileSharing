@@ -11,6 +11,8 @@ import 'package:sponzey_file_sharing/application/network/peer_path_registry.dart
 import 'package:sponzey_file_sharing/application/auth/peer_auth_controller.dart';
 import 'package:sponzey_file_sharing/core/logger/app_logger.dart';
 import 'package:sponzey_file_sharing/core/logger/console_app_logger.dart';
+import 'package:sponzey_file_sharing/core/message_bus/app_event.dart';
+import 'package:sponzey_file_sharing/core/message_bus/message_bus.dart';
 import 'package:sponzey_file_sharing/core/network/udp_port_config.dart';
 import 'package:sponzey_file_sharing/domain/entities/peer_auth_session.dart';
 import 'package:sponzey_file_sharing/domain/entities/peer_node.dart';
@@ -389,6 +391,208 @@ void main() {
     },
   );
 
+  test(
+    'incoming connect request selects the observed route path for authentication',
+    () async {
+      final peer = _peerNode(
+        clock.value,
+        port: 40222,
+      ).copyWith(address: '192.168.1.200');
+      final candidate = PeerRouteCandidate.create(
+        peerId: peer.id,
+        remoteAddress: peer.address,
+        remotePort: peer.port,
+        localInterfaceId: const NetworkInterfaceId(name: 'en0', index: 4),
+        localAddress: '192.168.1.10',
+        discoveredBy: RouteCandidateDiscoverySource.broadcast,
+        seenAt: clock.value,
+        localInterfaceTypeHint: InterfaceTypeHint.ethernet,
+      );
+      final harness = await _createNode(
+        clock: clock,
+        loginUserId: 'team',
+        loginPassword: 'shared-secret',
+        localDeviceId: 'device-a',
+        authPort: 40001,
+        candidateStore: [candidate],
+      );
+      addTearDown(harness.dispose);
+
+      harness.transport.emit(
+        AuthPacket(
+          type: AuthPacketType.connectRequest,
+          protocolVersion: '1.0',
+          sessionId: 'session-incoming-path-selection',
+          fromUserId: peer.userId,
+          fromDeviceId: peer.deviceId,
+          fromInstanceId: peer.instanceId,
+          fromDisplayName: peer.displayName,
+          sentAtEpochMs: clock.value.millisecondsSinceEpoch,
+        ),
+        address: InternetAddress(peer.address),
+        port: peer.port,
+      );
+      await _flush();
+
+      final selectedPath = harness.container
+          .read(peerPathRegistryProvider)
+          .selectedForPeer(peer.id);
+      expect(selectedPath, isNotNull);
+      expect(selectedPath!.candidate.candidateId, candidate.candidateId);
+      expect(selectedPath.status, PeerPathStatus.authenticating);
+    },
+  );
+
+  test(
+    'duplicate incoming connect request reuses the in-progress challenge',
+    () async {
+      final harness = await _createNode(
+        clock: clock,
+        loginUserId: 'team',
+        loginPassword: 'shared-secret',
+        localDeviceId: 'device-a',
+        authPort: 40001,
+      );
+      addTearDown(harness.dispose);
+
+      final packet = AuthPacket(
+        type: AuthPacketType.connectRequest,
+        protocolVersion: '1.0',
+        sessionId: 'session-duplicate-connect',
+        fromUserId: 'team',
+        fromDeviceId: 'device-b',
+        fromDisplayName: 'team',
+        sentAtEpochMs: clock.value.millisecondsSinceEpoch,
+      );
+      harness.transport.emit(
+        packet,
+        address: InternetAddress('127.0.0.1'),
+        port: 40222,
+      );
+      await _flush();
+      harness.transport.emit(
+        packet,
+        address: InternetAddress('127.0.0.1'),
+        port: 40222,
+      );
+      await _flush();
+
+      expect(harness.transport.sentPackets, hasLength(2));
+      expect(
+        harness.transport.sentPackets.first.packet.type,
+        AuthPacketType.authChallenge,
+      );
+      expect(
+        harness.transport.sentPackets.last.packet.type,
+        AuthPacketType.authChallenge,
+      );
+      expect(
+        harness.transport.sentPackets.last.packet.nonce,
+        harness.transport.sentPackets.first.packet.nonce,
+      );
+      expect(
+        harness.container
+            .read(peerAuthSessionByPeerIdProvider('team@device-b'))
+            ?.sessionId,
+        'session-duplicate-connect',
+      );
+    },
+  );
+
+  test(
+    'duplicate incoming connect request publishes one peer link event',
+    () async {
+      final bus = InMemoryMessageBus();
+      final events = <PeerLinkAppEvent>[];
+      final subscription = bus.eventsOfType<PeerLinkAppEvent>().listen(
+        events.add,
+      );
+      addTearDown(subscription.cancel);
+      addTearDown(bus.dispose);
+      final harness = await _createNode(
+        clock: clock,
+        loginUserId: 'team',
+        loginPassword: 'shared-secret',
+        localDeviceId: 'device-a',
+        authPort: 40001,
+        messageBus: bus,
+      );
+      addTearDown(harness.dispose);
+
+      final packet = AuthPacket(
+        type: AuthPacketType.connectRequest,
+        protocolVersion: '1.0',
+        sessionId: 'session-duplicate-event',
+        fromUserId: 'team',
+        fromDeviceId: 'device-b',
+        fromDisplayName: 'team',
+        sentAtEpochMs: clock.value.millisecondsSinceEpoch,
+      );
+      harness.transport.emit(
+        packet,
+        address: InternetAddress('127.0.0.1'),
+        port: 40222,
+      );
+      await _flush();
+      harness.transport.emit(
+        packet,
+        address: InternetAddress('127.0.0.1'),
+        port: 40222,
+      );
+      await _flush();
+
+      expect(
+        events
+            .where((event) => event.eventType == 'peerLinkchallengeIssued')
+            .length,
+        1,
+      );
+    },
+  );
+
+  test(
+    'authenticated peer ignores duplicate connect request without downgrading',
+    () async {
+      final harness = await _createNode(
+        clock: clock,
+        loginUserId: 'team',
+        loginPassword: 'shared-secret',
+        localDeviceId: 'device-a',
+        authPort: 40001,
+      );
+      addTearDown(harness.dispose);
+      final authenticatedPeer = await _authenticatePeerOnRoute(
+        harness,
+        clock,
+        address: '10.211.55.3',
+        port: 56951,
+      );
+
+      harness.transport.emit(
+        AuthPacket(
+          type: AuthPacketType.connectRequest,
+          protocolVersion: '1.0',
+          sessionId: 'late-duplicate-connect',
+          fromUserId: authenticatedPeer.userId,
+          fromDeviceId: authenticatedPeer.deviceId,
+          fromInstanceId: authenticatedPeer.instanceId,
+          fromDisplayName: authenticatedPeer.displayName,
+          sentAtEpochMs: clock.value.millisecondsSinceEpoch,
+        ),
+        address: InternetAddress('10.211.55.3'),
+        port: 56951,
+      );
+      await _flush();
+
+      final session = harness.container.read(
+        peerAuthSessionByPeerIdProvider(authenticatedPeer.id),
+      );
+      expect(session?.status, PeerAuthStatus.authenticated);
+      expect(session?.sessionId, isNot('late-duplicate-connect'));
+      expect(harness.transport.sentPackets, hasLength(1));
+    },
+  );
+
   test('auth reject marks the selected path failed', () async {
     final peer = _peerNode(clock.value, port: 40002);
     final candidate = PeerRouteCandidate.create(
@@ -440,6 +644,77 @@ void main() {
         .selectedForPeer(peer.id)!;
     expect(path.status, PeerPathStatus.failed);
     expect(path.failureReasonCode, 'jwtInvalid');
+  });
+
+  test('late auth reject cannot downgrade an authenticated session', () async {
+    final peer = _peerNode(clock.value, port: 40002);
+    final candidate = PeerRouteCandidate.create(
+      peerId: peer.id,
+      remoteAddress: peer.address,
+      remotePort: peer.port,
+      localInterfaceId: const NetworkInterfaceId(name: 'en0', index: 4),
+      localAddress: '127.0.0.1',
+      discoveredBy: RouteCandidateDiscoverySource.broadcast,
+      seenAt: clock.value,
+      localInterfaceTypeHint: InterfaceTypeHint.ethernet,
+    );
+    final selectedPath = PeerConnectionPath.fromCandidate(
+      candidate: candidate,
+      selectedAt: clock.value,
+      selectionReason: PeerPathSelectionReason.sameSubnet,
+    );
+    final harness = await _createNode(
+      clock: clock,
+      loginUserId: 'team',
+      loginPassword: 'shared-secret',
+      localDeviceId: 'device-a',
+      authPort: 40001,
+    );
+    addTearDown(harness.dispose);
+
+    await harness.controller.startHandshake(peer, selectedPath: selectedPath);
+    await _flush();
+    final request = harness.transport.sentPackets.single.packet;
+    harness.transport.emit(
+      AuthPacket(
+        type: AuthPacketType.authAccept,
+        protocolVersion: '1.0',
+        sessionId: request.sessionId,
+        fromUserId: peer.userId,
+        fromDeviceId: peer.deviceId,
+        fromDisplayName: peer.displayName,
+        sentAtEpochMs: clock.value.millisecondsSinceEpoch,
+      ),
+      address: InternetAddress(peer.address),
+      port: peer.port,
+    );
+    await _flush();
+
+    harness.transport.emit(
+      AuthPacket(
+        type: AuthPacketType.authReject,
+        protocolVersion: '1.0',
+        sessionId: request.sessionId,
+        fromUserId: peer.userId,
+        fromDeviceId: peer.deviceId,
+        fromDisplayName: peer.displayName,
+        rejectCode: 'lateFailure',
+        rejectMessage: 'lateFailure',
+        sentAtEpochMs: clock.value.millisecondsSinceEpoch,
+      ),
+      address: InternetAddress(peer.address),
+      port: peer.port,
+    );
+    await _flush();
+
+    final session = harness.container.read(
+      peerAuthSessionByPeerIdProvider(peer.id),
+    );
+    final path = harness.container
+        .read(peerPathRegistryProvider)
+        .selectedForPeer(peer.id);
+    expect(session?.status, PeerAuthStatus.authenticated);
+    expect(path?.status, PeerPathStatus.active);
   });
 
   test('direct startHandshake skips already authenticated peer', () async {
@@ -712,6 +987,7 @@ Future<_NodeHarness> _createNode({
   List<PeerRouteCandidate> candidateStore = const [],
   PeerPathRegistry? pathRegistry,
   ControlTransportBindException? sendException,
+  MessageBus? messageBus,
 }) async {
   final database = AppDatabase.forTesting(NativeDatabase.memory());
   final transport = _InspectableControlTransport(
@@ -748,6 +1024,7 @@ Future<_NodeHarness> _createNode({
       localDeviceIdentityServiceProvider.overrideWithValue(
         _FakeLocalDeviceIdentityService(localDeviceId),
       ),
+      if (messageBus != null) messageBusProvider.overrideWithValue(messageBus),
       authNowProvider.overrideWithValue(() => clock.value),
       peerRouteCandidateStoreProvider.overrideWith((ref) => candidateStore),
       peerPathRegistryProvider.overrideWithValue(

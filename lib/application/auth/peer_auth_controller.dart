@@ -9,13 +9,16 @@ import 'package:sponzey_file_sharing/core/logger/app_log_category.dart';
 import 'package:sponzey_file_sharing/core/logger/app_logger.dart';
 import 'package:sponzey_file_sharing/core/message_bus/app_event.dart';
 import 'package:sponzey_file_sharing/core/message_bus/message_bus.dart';
+import 'package:sponzey_file_sharing/core/state_machine/state_machine.dart';
 import 'package:sponzey_file_sharing/application/discovery/peer_route_candidate_projection.dart';
+import 'package:sponzey_file_sharing/application/network/network_diagnostics_provider.dart';
 import 'package:sponzey_file_sharing/application/network/peer_path_registry.dart';
 import 'package:sponzey_file_sharing/domain/entities/peer_auth_session.dart';
 import 'package:sponzey_file_sharing/domain/entities/peer_node.dart';
 import 'package:sponzey_file_sharing/domain/entities/user_account.dart';
 import 'package:sponzey_file_sharing/domain/network/network_interface_models.dart';
 import 'package:sponzey_file_sharing/domain/network/peer_connection_path.dart';
+import 'package:sponzey_file_sharing/domain/network/peer_route_candidate.dart';
 import 'package:sponzey_file_sharing/infrastructure/auth/auth_packet.dart';
 import 'package:sponzey_file_sharing/infrastructure/auth/jwt_token_service.dart';
 import 'package:sponzey_file_sharing/infrastructure/auth/shared_verifier_service.dart';
@@ -70,6 +73,8 @@ class PeerAuthController extends Notifier<PeerAuthState> {
   bool _didInitialize = false;
   bool _isStarting = false;
   final Random _random = Random.secure();
+  final PeerAuthSessionStateMachine _authStateMachine =
+      const PeerAuthSessionStateMachine();
   StreamSubscription<ControlDatagram>? _packetSubscription;
   LocalDeviceIdentity? _localIdentity;
   final Map<String, _HandshakeContext> _contexts = {};
@@ -164,18 +169,22 @@ class PeerAuthController extends Notifier<PeerAuthState> {
       () => _onHandshakeTimeout(sessionId),
     );
 
+    final initialSession = PeerAuthSession(
+      sessionId: sessionId,
+      peerId: peer.id,
+      peerUserId: peer.userId,
+      peerDisplayName: peer.displayName,
+      peerAddress: peer.address,
+      peerPort: peer.port,
+      status: PeerAuthStatus.idle,
+      updatedAt: _now(),
+    );
     _upsertSession(
       peer.id,
-      PeerAuthSession(
-        sessionId: sessionId,
-        peerId: peer.id,
-        peerUserId: peer.userId,
-        peerDisplayName: peer.displayName,
-        peerAddress: peer.address,
-        peerPort: peer.port,
-        status: PeerAuthStatus.connecting,
+      _transitionAuthSession(
+        initialSession,
+        PeerAuthEvent.connectStarted,
         message: '상대 피어와 경로를 협상하는 중입니다.',
-        updatedAt: _now(),
       ),
     );
 
@@ -474,14 +483,62 @@ class PeerAuthController extends Notifier<PeerAuthState> {
       return;
     }
 
+    if (_isPacketFromLocalIdentity(packet, localIdentity)) {
+      ref
+          .read(appLoggerProvider)
+          .debug(
+            AppLogCategory.auth,
+            'Ignored self connect request session=${_safeSession(packet.sessionId)}',
+          );
+      return;
+    }
+
+    final peerId = _peerIdFromPacket(packet);
+    final existingSession = state.sessions[peerId];
+    if (existingSession?.isAuthenticated == true) {
+      ref
+          .read(appLoggerProvider)
+          .debug(
+            AppLogCategory.auth,
+            'Ignored duplicate connect request for authenticated peer $peerId '
+            'session=${_safeSession(packet.sessionId)}',
+          );
+      return;
+    }
+
+    final duplicateContext = _contexts[packet.sessionId];
+    if (duplicateContext != null) {
+      await _sendChallenge(duplicateContext, address: datagram.address);
+      return;
+    }
+
+    final inProgressForPeer = _inProgressContextForPeer(peerId);
+    if (inProgressForPeer != null) {
+      ref
+          .read(appLoggerProvider)
+          .debug(
+            AppLogCategory.auth,
+            'Ignored parallel connect request for $peerId '
+            'current=${_safeSession(inProgressForPeer.sessionId)} '
+            'incoming=${_safeSession(packet.sessionId)}',
+          );
+      return;
+    }
+
+    final selectedPath = _selectObservedPathForIncomingHandshake(
+      peerId: peerId,
+      datagram: datagram,
+    );
     final context = _HandshakeContext(
       sessionId: packet.sessionId,
-      peerId: _peerIdFromPacket(packet),
+      peerId: peerId,
       peerUserId: packet.fromUserId,
       peerDisplayName: packet.fromDisplayName ?? packet.fromUserId,
       peerAddress: datagram.address.address,
       peerPort: datagram.port,
       initiatedByMe: false,
+      selectedPathId: selectedPath?.pathId,
+      selectedCandidateId: selectedPath?.candidate.candidateId,
       selectedLocalEndpoint: datagram.localEndpoint,
       nonce: _randomHex(16),
     );
@@ -493,35 +550,23 @@ class PeerAuthController extends Notifier<PeerAuthState> {
     );
     _upsertSession(
       context.peerId,
-      PeerAuthSession(
-        sessionId: packet.sessionId,
-        peerId: context.peerId,
-        peerUserId: packet.fromUserId,
-        peerDisplayName: context.peerDisplayName,
-        peerAddress: datagram.address.address,
-        peerPort: datagram.port,
-        status: PeerAuthStatus.challengeIssued,
+      _transitionAuthSession(
+        PeerAuthSession(
+          sessionId: packet.sessionId,
+          peerId: context.peerId,
+          peerUserId: packet.fromUserId,
+          peerDisplayName: context.peerDisplayName,
+          peerAddress: datagram.address.address,
+          peerPort: datagram.port,
+          status: PeerAuthStatus.idle,
+          updatedAt: _now(),
+        ),
+        PeerAuthEvent.challengeIssued,
         message: '인증 challenge를 발급했습니다.',
-        updatedAt: _now(),
       ),
     );
 
-    await _send(
-      AuthPacket(
-        type: AuthPacketType.authChallenge,
-        protocolVersion: ref.read(appConfigProvider).protocolVersion,
-        sessionId: packet.sessionId,
-        fromUserId: user.userId,
-        fromDeviceId: localIdentity.deviceId,
-        fromInstanceId: localIdentity.instanceId,
-        fromDisplayName: user.displayName,
-        nonce: context.nonce,
-        sentAtEpochMs: _now().millisecondsSinceEpoch,
-      ),
-      address: datagram.address,
-      port: datagram.port,
-      localEndpoint: context.selectedLocalEndpoint,
-    );
+    await _sendChallenge(context, address: datagram.address);
   }
 
   Future<void> _onAuthChallenge(
@@ -577,12 +622,12 @@ class PeerAuthController extends Notifier<PeerAuthState> {
           );
       _upsertSession(
         context.peerId,
-        _requireSession(context.peerId).copyWith(
-          status: PeerAuthStatus.tokenSent,
+        _transitionAuthSession(
+          _requireSession(context.peerId),
+          PeerAuthEvent.tokenSent,
           peerAddress: datagram.address.address,
           peerPort: datagram.port,
           message: '인증 token을 전송했습니다.',
-          updatedAt: now,
         ),
       );
       await _send(
@@ -626,6 +671,17 @@ class PeerAuthController extends Notifier<PeerAuthState> {
         context.nonce == null) {
       return;
     }
+
+    _upsertSession(
+      context.peerId,
+      _transitionAuthSession(
+        _requireSession(context.peerId),
+        PeerAuthEvent.tokenVerificationStarted,
+        peerAddress: datagram.address.address,
+        peerPort: datagram.port,
+        message: '인증 token을 검증하는 중입니다.',
+      ),
+    );
 
     try {
       final verifier = ref
@@ -723,10 +779,10 @@ class PeerAuthController extends Notifier<PeerAuthState> {
     );
     _upsertSession(
       context.peerId,
-      _requireSession(context.peerId).copyWith(
-        status: PeerAuthStatus.rejected,
+      _transitionAuthSession(
+        _requireSession(context.peerId),
+        PeerAuthEvent.authRejected,
         message: packet.rejectMessage ?? '상대가 인증을 거절했습니다.',
-        updatedAt: _now(),
       ),
     );
   }
@@ -747,9 +803,142 @@ class PeerAuthController extends Notifier<PeerAuthState> {
         );
   }
 
+  Future<void> _sendChallenge(
+    _HandshakeContext context, {
+    required InternetAddress address,
+  }) async {
+    final user = _currentUser();
+    final localIdentity = _localIdentity;
+    final nonce = context.nonce;
+    if (user == null || localIdentity == null || nonce == null) {
+      return;
+    }
+    await _send(
+      AuthPacket(
+        type: AuthPacketType.authChallenge,
+        protocolVersion: ref.read(appConfigProvider).protocolVersion,
+        sessionId: context.sessionId,
+        fromUserId: user.userId,
+        fromDeviceId: localIdentity.deviceId,
+        fromInstanceId: localIdentity.instanceId,
+        fromDisplayName: user.displayName,
+        nonce: nonce,
+        sentAtEpochMs: _now().millisecondsSinceEpoch,
+      ),
+      address: address,
+      port: context.peerPort,
+      localEndpoint: context.selectedLocalEndpoint,
+    );
+  }
+
   String _peerIdFromPacket(AuthPacket packet) {
     final instanceId = packet.fromInstanceId;
     return '${packet.fromUserId}@${instanceId == null || instanceId.isEmpty ? packet.fromDeviceId : instanceId}';
+  }
+
+  bool _isPacketFromLocalIdentity(
+    AuthPacket packet,
+    LocalDeviceIdentity localIdentity,
+  ) {
+    final packetInstanceId = packet.fromInstanceId;
+    if (packetInstanceId != null && packetInstanceId.isNotEmpty) {
+      return packetInstanceId == localIdentity.instanceId;
+    }
+    return packet.fromDeviceId == localIdentity.deviceId;
+  }
+
+  _HandshakeContext? _inProgressContextForPeer(String peerId) {
+    for (final context in _contexts.values) {
+      if (context.peerId == peerId) {
+        return context;
+      }
+    }
+    return null;
+  }
+
+  PeerConnectionPath? _selectObservedPathForIncomingHandshake({
+    required String peerId,
+    required ControlDatagram datagram,
+  }) {
+    final path = _pathFromObservedCandidate(peerId: peerId, datagram: datagram);
+    if (path == null) {
+      return null;
+    }
+    _selectPathForAuth(path);
+    return ref.read(peerPathRegistryProvider).selectedForPeer(peerId);
+  }
+
+  PeerConnectionPath? _pathFromObservedCandidate({
+    required String peerId,
+    required ControlDatagram datagram,
+  }) {
+    final candidates = ref
+        .read(peerRouteCandidateStoreProvider)
+        .where((candidate) => candidate.peerId == peerId)
+        .toList(growable: false);
+    final observed = candidates
+        .where(
+          (candidate) =>
+              candidate.remoteAddress == datagram.address.address &&
+              candidate.remotePort == datagram.port,
+        )
+        .toList(growable: false);
+    final localEndpoint = datagram.localEndpoint;
+    final localMatched =
+        localEndpoint == null || localEndpoint.localAddress == '0.0.0.0'
+        ? observed
+        : observed
+              .where(
+                (candidate) =>
+                    candidate.localAddress == localEndpoint.localAddress,
+              )
+              .toList(growable: false);
+    final selectable = localMatched.isNotEmpty ? localMatched : observed;
+    final candidate = selectable.isNotEmpty
+        ? PeerPathSelectionPolicy()
+              .select(candidates: selectable, selectedAt: _now())
+              ?.path
+              .candidate
+        : _upsertObservedControlCandidate(peerId: peerId, datagram: datagram);
+    if (candidate == null) {
+      return null;
+    }
+    return PeerPathSelectionPolicy()
+        .select(candidates: [candidate], selectedAt: _now())
+        ?.path;
+  }
+
+  PeerRouteCandidate _upsertObservedControlCandidate({
+    required String peerId,
+    required ControlDatagram datagram,
+  }) {
+    final endpoint = datagram.localEndpoint;
+    final localAddress = endpoint?.localAddress ?? '0.0.0.0';
+    final interfaceId =
+        endpoint?.interfaceId ??
+        const NetworkInterfaceId(
+          name: 'observed-control',
+          index: -2,
+          stableId: 'observed-control',
+        );
+    final bindMode = endpoint?.bindMode ?? UdpInterfaceBindMode.any;
+    final candidate = PeerRouteCandidate.create(
+      peerId: peerId,
+      remoteAddress: datagram.address.address,
+      remotePort: datagram.port,
+      localInterfaceId: interfaceId,
+      localAddress: localAddress,
+      discoveredBy: RouteCandidateDiscoverySource.unicastProbe,
+      seenAt: _now(),
+      status: RouteCandidateStatus.reachable,
+      localInterfaceTypeHint: localAddress.startsWith('127.')
+          ? InterfaceTypeHint.loopback
+          : InterfaceTypeHint.unknown,
+      bindMode: bindMode,
+    );
+    return ref
+        .read(peerRouteCandidateProjectionProvider.notifier)
+        .upsertCandidate(candidate);
   }
 
   Future<void> _rejectHandshake(
@@ -763,10 +952,10 @@ class PeerAuthController extends Notifier<PeerAuthState> {
     _cancelTimeout(context.sessionId);
     _upsertSession(
       context.peerId,
-      _requireSession(context.peerId).copyWith(
-        status: PeerAuthStatus.rejected,
+      _transitionAuthSession(
+        _requireSession(context.peerId),
+        PeerAuthEvent.authRejected,
         message: message,
-        updatedAt: _now(),
       ),
     );
     final user = _currentUser();
@@ -810,11 +999,11 @@ class PeerAuthController extends Notifier<PeerAuthState> {
     _cancelTimeout(session.sessionId);
     _upsertSession(
       peerId,
-      session.copyWith(
+      _transitionAuthSession(
+        session,
+        PeerAuthEvent.authSucceeded,
         peerAddress: peerAddress,
         peerPort: peerPort,
-        status: PeerAuthStatus.authenticated,
-        updatedAt: _now(),
         message: message,
         clearMessage: message == null,
       ),
@@ -831,10 +1020,10 @@ class PeerAuthController extends Notifier<PeerAuthState> {
     _failSelectedPath(context, reasonCode: 'handshakeTimeout');
     _upsertSession(
       context.peerId,
-      _requireSession(context.peerId).copyWith(
-        status: PeerAuthStatus.failed,
+      _transitionAuthSession(
+        _requireSession(context.peerId),
+        PeerAuthEvent.authFailed,
         message: '피어 핸드셰이크 응답 시간이 초과되었습니다.',
-        updatedAt: _now(),
       ),
     );
   }
@@ -903,10 +1092,16 @@ class PeerAuthController extends Notifier<PeerAuthState> {
   }
 
   void _upsertSession(String peerId, PeerAuthSession nextSession) {
+    final previous = state.sessions[peerId];
     state = state.copyWith(
       sessions: {...state.sessions, peerId: nextSession},
       clearError: true,
     );
+    if (previous?.sessionId == nextSession.sessionId &&
+        previous?.status == nextSession.status &&
+        previous?.message == nextSession.message) {
+      return;
+    }
     ref
         .read(messageBusProvider)
         .publish(
@@ -932,6 +1127,35 @@ class PeerAuthController extends Notifier<PeerAuthState> {
                 : null,
           ),
         );
+  }
+
+  PeerAuthSession _transitionAuthSession(
+    PeerAuthSession session,
+    PeerAuthEvent event, {
+    String? peerAddress,
+    int? peerPort,
+    String? message,
+    bool clearMessage = false,
+  }) {
+    final result = _authStateMachine.transition(session, event);
+    if (result.disposition == TransitionDisposition.warning) {
+      ref
+          .read(appLoggerProvider)
+          .debug(
+            AppLogCategory.auth,
+            'Peer auth transition warning peer=${session.peerId} '
+            'session=${_safeSession(session.sessionId)} '
+            'event=${event.name} status=${session.status.name} '
+            'code=${result.issue?.code ?? '-'}',
+          );
+    }
+    return result.state.copyWith(
+      peerAddress: peerAddress,
+      peerPort: peerPort,
+      updatedAt: _now(),
+      message: message,
+      clearMessage: clearMessage,
+    );
   }
 
   bool _sameSessionMap(
@@ -984,6 +1208,10 @@ class PeerAuthController extends Notifier<PeerAuthState> {
   int _epochSec(DateTime value) => value.millisecondsSinceEpoch ~/ 1000;
 
   String _eventId(String prefix) => '$prefix-${_now().microsecondsSinceEpoch}';
+
+  String _safeSession(String sessionId) {
+    return sessionId.length <= 8 ? sessionId : sessionId.substring(0, 8);
+  }
 
   bool _canAuthenticate() {
     final authState = ref.read(authControllerProvider);

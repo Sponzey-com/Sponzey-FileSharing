@@ -1,15 +1,18 @@
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
+import 'package:sponzey_file_sharing/domain/transfer/data_transfer_tuning_policy.dart';
 import 'package:sponzey_file_sharing/infrastructure/transfer_data/data_frame.dart';
 
 class DataFrameCodec {
   const DataFrameCodec({this.authenticator});
 
   static const int version = 1;
-  static const int safeUdpPayloadBytes = 1472;
-  static const int defaultAuthTagBytes = 16;
-  static const int fixedHeaderBytes = 72;
+  static const int safeUdpPayloadBytes =
+      DataTransferTuningPolicy.safeUdpPayloadBytes;
+  static const int defaultAuthTagBytes =
+      DataTransferTuningPolicy.defaultAuthTagBytes;
+  static const int fixedHeaderBytes = DataTransferTuningPolicy.fixedHeaderBytes;
   static const List<int> magic = [0x53, 0x5a, 0x44, 0x46]; // SZDF
 
   final DataFrameAuthenticator? authenticator;
@@ -19,9 +22,11 @@ class DataFrameCodec {
     int ackBitmapWords = 0,
     int authTagBytes = defaultAuthTagBytes,
   }) {
-    final headerBytes = fixedHeaderBytes + ackBitmapWords * 4;
-    final payloadBytes = safeDatagramBytes - headerBytes - authTagBytes;
-    return payloadBytes < 0 ? 0 : payloadBytes;
+    return DataTransferTuningPolicy.maxPayloadBytesFor(
+      safeDatagramBytes: safeDatagramBytes,
+      ackBitmapWords: ackBitmapWords,
+      authTagBytes: authTagBytes,
+    );
   }
 
   Uint8List encode(DataFrame frame) {

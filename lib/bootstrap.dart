@@ -27,7 +27,9 @@ Future<void> bootstrap({required AppConfig config}) async {
   logger.info(
     AppLogCategory.system,
     'App bootstrap configured app=${config.appName} '
+    'appVersion=${config.appVersion} '
     'environment=${config.environment.name} '
+    'platform=${Platform.operatingSystem} '
     'protocol=${config.protocolVersion} '
     'discoveryPort=${config.discoveryPort} '
     'controlPort=${config.controlPort} '

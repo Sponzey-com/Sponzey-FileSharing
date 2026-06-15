@@ -50,6 +50,7 @@ void main() {
 
     await tester.enterText(find.byType(TextFormField).at(0), 'admin');
     await tester.enterText(find.byType(TextFormField).at(1), 'secret');
+    await tester.pump();
     await tester.tap(find.widgetWithText(ElevatedButton, '로그인'));
     await tester.pumpAndSettle();
 

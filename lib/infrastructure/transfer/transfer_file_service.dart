@@ -304,19 +304,31 @@ class LocalTransferFileService implements TransferFileService {
     required String destinationDirectory,
     required String fileName,
   }) async {
-    final directory = Directory(destinationDirectory);
-    if (!await directory.exists()) {
-      await directory.create(recursive: true);
-    }
+    String? targetPath;
+    try {
+      final directory = Directory(destinationDirectory);
+      if (!await directory.exists()) {
+        await directory.create(recursive: true);
+      }
 
-    final targetPath = await _uniqueDestinationPath(
-      destinationDirectory: directory.path,
-      fileName: p.basename(fileName),
-    );
-    final sourceFile = File(tempFilePath);
-    await sourceFile.rename(targetPath);
-    await _cleanupParentDirectory(tempFilePath);
-    return targetPath;
+      targetPath = await _uniqueDestinationPath(
+        destinationDirectory: directory.path,
+        fileName: p.basename(fileName),
+      );
+      final sourceFile = File(tempFilePath);
+      await sourceFile.rename(targetPath);
+      await _cleanupParentDirectory(tempFilePath);
+      return targetPath;
+    } catch (_) {
+      await _cleanupFailedFinalize(
+        tempFilePath: tempFilePath,
+        targetPath: targetPath,
+      );
+      throw const AppException(
+        code: 'incoming_finalize_failed',
+        message: '수신 파일을 최종 저장 경로로 이동하지 못했습니다. 저장 경로 권한을 확인해 주세요.',
+      );
+    }
   }
 
   @override
@@ -379,6 +391,24 @@ class LocalTransferFileService implements TransferFileService {
     final parent = Directory(p.dirname(tempFilePath));
     if (await parent.exists()) {
       await parent.delete(recursive: true);
+    }
+  }
+
+  Future<void> _cleanupFailedFinalize({
+    required String tempFilePath,
+    required String? targetPath,
+  }) async {
+    try {
+      if (targetPath != null && targetPath != tempFilePath) {
+        final targetFile = File(targetPath);
+        if (await targetFile.exists()) {
+          await targetFile.delete();
+        }
+      }
+      await _cleanupParentDirectory(tempFilePath);
+    } catch (_) {
+      // Finalization already failed. Cleanup is best-effort so callers receive
+      // the original storage failure code instead of a secondary cleanup error.
     }
   }
 }

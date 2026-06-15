@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sponzey_file_sharing/app/theme/app_spacing.dart';
 import 'package:sponzey_file_sharing/application/transfer/transfer_overview_provider.dart';
 import 'package:sponzey_file_sharing/domain/entities/transfer_job.dart';
+import 'package:sponzey_file_sharing/domain/transfer/transfer_failure_policy.dart';
 import 'package:sponzey_file_sharing/presentation/shared/page_header.dart';
 import 'package:sponzey_file_sharing/presentation/shared/sponzey_card.dart';
 import 'package:sponzey_file_sharing/presentation/shared/sponzey_scroll_cue.dart';
@@ -82,11 +83,16 @@ class _HistoryTile extends StatelessWidget {
     final direction = job.direction == TransferDirection.outgoing
         ? 'To'
         : 'From';
+    final failureDecision = const TransferFailurePolicy().classify(job);
     final subtitle = [
       '$direction ${job.peerDisplayName}',
       _formatTime(job.updatedAt),
       if (job.destinationPath != null) job.destinationPath!,
       if (job.message != null) job.message!,
+      if (job.isTerminal &&
+          job.status != TransferJobStatus.completed &&
+          failureDecision.userMessage != job.message)
+        failureDecision.userMessage,
     ].join(' • ');
 
     return ListTile(

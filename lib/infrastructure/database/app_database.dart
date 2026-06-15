@@ -94,14 +94,107 @@ class AllowedPeers extends Table {
   DateTimeColumn get updatedAt => dateTime().named('updated_at')();
 }
 
-@DriftDatabase(tables: [Users, Settings, Peers, AllowedPeers])
+class TransferHistoryJobs extends Table {
+  @override
+  String get tableName => 'transfer_jobs';
+
+  TextColumn get id => text()();
+
+  TextColumn get transferId => text().named('transfer_id')();
+
+  TextColumn get direction => text()();
+
+  TextColumn get peerId => text().named('peer_id')();
+
+  TextColumn get peerDisplayName => text().named('peer_display_name')();
+
+  TextColumn get status => text()();
+
+  TextColumn get failureCategory =>
+      text().named('failure_category').nullable()();
+
+  TextColumn get failureCode => text().named('failure_code').nullable()();
+
+  TextColumn get message => text().nullable()();
+
+  IntColumn get fileCount =>
+      integer().named('file_count').withDefault(const Constant(1))();
+
+  IntColumn get totalBytes => integer().named('total_bytes')();
+
+  IntColumn get bytesTransferred => integer().named('bytes_transferred')();
+
+  IntColumn get totalChunks => integer().named('total_chunks')();
+
+  IntColumn get completedChunks => integer().named('completed_chunks')();
+
+  IntColumn get retryCount =>
+      integer().named('retry_count').withDefault(const Constant(0))();
+
+  RealColumn get lossRate =>
+      real().named('loss_rate').withDefault(const Constant(0))();
+
+  RealColumn get throughputBytesPerSec =>
+      real().named('throughput_bytes_per_sec').withDefault(const Constant(0))();
+
+  DateTimeColumn get createdAt => dateTime().named('created_at')();
+
+  DateTimeColumn get updatedAt => dateTime().named('updated_at')();
+
+  @override
+  Set<Column<Object>>? get primaryKey => {id};
+}
+
+class TransferHistoryFiles extends Table {
+  @override
+  String get tableName => 'transfer_files';
+
+  TextColumn get id => text()();
+
+  TextColumn get jobId => text().named('job_id')();
+
+  TextColumn get transferId => text().named('transfer_id')();
+
+  TextColumn get fileName => text().named('file_name')();
+
+  IntColumn get fileSize => integer().named('file_size')();
+
+  TextColumn get localPath => text().named('local_path').nullable()();
+
+  TextColumn get destinationPath =>
+      text().named('destination_path').nullable()();
+
+  TextColumn get sha256 => text().nullable()();
+
+  TextColumn get status => text()();
+
+  TextColumn get message => text().nullable()();
+
+  DateTimeColumn get createdAt => dateTime().named('created_at')();
+
+  DateTimeColumn get updatedAt => dateTime().named('updated_at')();
+
+  @override
+  Set<Column<Object>>? get primaryKey => {id};
+}
+
+@DriftDatabase(
+  tables: [
+    Users,
+    Settings,
+    Peers,
+    AllowedPeers,
+    TransferHistoryJobs,
+    TransferHistoryFiles,
+  ],
+)
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -112,6 +205,10 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 3) {
         await m.createTable(allowedPeers);
+      }
+      if (from < 4) {
+        await m.createTable(transferHistoryJobs);
+        await m.createTable(transferHistoryFiles);
       }
     },
   );
@@ -168,6 +265,22 @@ class AppDatabase extends _$AppDatabase {
     return (select(
       allowedPeers,
     )..orderBy([(tbl) => OrderingTerm.asc(tbl.peerUserId)])).get();
+  }
+
+  Future<List<TransferHistoryJob>> getTransferHistoryJobs({int limit = 100}) {
+    return (select(transferHistoryJobs)
+          ..orderBy([(tbl) => OrderingTerm.desc(tbl.updatedAt)])
+          ..limit(limit))
+        .get();
+  }
+
+  Future<List<TransferHistoryFile>> getTransferHistoryFilesForJob(
+    String jobId,
+  ) {
+    return (select(transferHistoryFiles)
+          ..where((tbl) => tbl.jobId.equals(jobId))
+          ..orderBy([(tbl) => OrderingTerm.asc(tbl.createdAt)]))
+        .get();
   }
 }
 

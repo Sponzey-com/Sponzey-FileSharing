@@ -6,13 +6,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sponzey_file_sharing/app/app_config.dart';
 import 'package:sponzey_file_sharing/application/auth/auth_controller.dart';
 import 'package:sponzey_file_sharing/application/auth/peer_auth_controller.dart';
+import 'package:sponzey_file_sharing/application/discovery/discovery_startup_failure_message.dart';
 import 'package:sponzey_file_sharing/application/discovery/peer_route_candidate_projection.dart';
 import 'package:sponzey_file_sharing/application/discovery/discovery_sorting.dart';
 import 'package:sponzey_file_sharing/application/network/peer_connection_coordinator.dart';
+import 'package:sponzey_file_sharing/application/network/peer_path_registry.dart';
 import 'package:sponzey_file_sharing/core/message_bus/app_event.dart';
 import 'package:sponzey_file_sharing/core/message_bus/message_bus.dart';
 import 'package:sponzey_file_sharing/core/logger/app_log_category.dart';
 import 'package:sponzey_file_sharing/core/logger/app_logger.dart';
+import 'package:sponzey_file_sharing/domain/discovery/discovery_receive_decision.dart';
 import 'package:sponzey_file_sharing/domain/entities/peer_node.dart';
 import 'package:sponzey_file_sharing/domain/entities/user_account.dart';
 import 'package:sponzey_file_sharing/domain/network/connectable_interface_policy.dart';
@@ -43,6 +46,7 @@ class DiscoveryState {
     this.localRegistryEntryCount = 0,
     this.lastPacketAt,
     this.lastDecision,
+    this.lastDecisionCode,
     this.discoveryTransportMode,
     this.discoveryPreferredPort,
     this.discoveryReceivePort,
@@ -54,6 +58,9 @@ class DiscoveryState {
     this.discoveryBroadcastSuccessCount = 0,
     this.discoveryBroadcastFailureCount = 0,
     this.discoveryBroadcastAttemptPreview = const [],
+    this.discoveryTargetSkipPreview = const [],
+    this.discoveryLastReceiveDecisionCode,
+    this.discoveryMalformedPacketCount = 0,
     this.discoveryTransportError,
   }) : currentDiscoveryGroupTagPreview =
            currentDiscoveryGroupTagPreview ?? currentPairingProofPreview;
@@ -70,6 +77,7 @@ class DiscoveryState {
       localRegistryEntryCount = 0,
       lastPacketAt = null,
       lastDecision = null,
+      lastDecisionCode = null,
       discoveryTransportMode = null,
       discoveryPreferredPort = null,
       discoveryReceivePort = null,
@@ -81,6 +89,9 @@ class DiscoveryState {
       discoveryBroadcastSuccessCount = 0,
       discoveryBroadcastFailureCount = 0,
       discoveryBroadcastAttemptPreview = const [],
+      discoveryTargetSkipPreview = const [],
+      discoveryLastReceiveDecisionCode = null,
+      discoveryMalformedPacketCount = 0,
       discoveryTransportError = null;
 
   final List<PeerNode> peers;
@@ -98,6 +109,7 @@ class DiscoveryState {
   final int localRegistryEntryCount;
   final DateTime? lastPacketAt;
   final String? lastDecision;
+  final String? lastDecisionCode;
   final String? discoveryTransportMode;
   final int? discoveryPreferredPort;
   final int? discoveryReceivePort;
@@ -109,6 +121,9 @@ class DiscoveryState {
   final int discoveryBroadcastSuccessCount;
   final int discoveryBroadcastFailureCount;
   final List<String> discoveryBroadcastAttemptPreview;
+  final List<String> discoveryTargetSkipPreview;
+  final String? discoveryLastReceiveDecisionCode;
+  final int discoveryMalformedPacketCount;
   final String? discoveryTransportError;
 
   DiscoveryState copyWith({
@@ -125,6 +140,7 @@ class DiscoveryState {
     int? localRegistryEntryCount,
     DateTime? lastPacketAt,
     String? lastDecision,
+    String? lastDecisionCode,
     String? discoveryTransportMode,
     int? discoveryPreferredPort,
     int? discoveryReceivePort,
@@ -136,6 +152,9 @@ class DiscoveryState {
     int? discoveryBroadcastSuccessCount,
     int? discoveryBroadcastFailureCount,
     List<String>? discoveryBroadcastAttemptPreview,
+    List<String>? discoveryTargetSkipPreview,
+    String? discoveryLastReceiveDecisionCode,
+    int? discoveryMalformedPacketCount,
     String? discoveryTransportError,
     bool clearError = false,
     bool clearLastDecision = false,
@@ -159,6 +178,9 @@ class DiscoveryState {
       lastDecision: clearLastDecision
           ? null
           : lastDecision ?? this.lastDecision,
+      lastDecisionCode: clearLastDecision
+          ? null
+          : lastDecisionCode ?? this.lastDecisionCode,
       discoveryTransportMode:
           discoveryTransportMode ?? this.discoveryTransportMode,
       discoveryPreferredPort:
@@ -181,6 +203,13 @@ class DiscoveryState {
       discoveryBroadcastAttemptPreview:
           discoveryBroadcastAttemptPreview ??
           this.discoveryBroadcastAttemptPreview,
+      discoveryTargetSkipPreview:
+          discoveryTargetSkipPreview ?? this.discoveryTargetSkipPreview,
+      discoveryLastReceiveDecisionCode:
+          discoveryLastReceiveDecisionCode ??
+          this.discoveryLastReceiveDecisionCode,
+      discoveryMalformedPacketCount:
+          discoveryMalformedPacketCount ?? this.discoveryMalformedPacketCount,
       discoveryTransportError: clearDiscoveryTransportError
           ? null
           : discoveryTransportError ?? this.discoveryTransportError,
@@ -432,6 +461,15 @@ class DiscoveryController extends Notifier<DiscoveryState> {
         'Discovery engine started on UDP ${config.discoveryPort}',
       );
     } catch (error, stackTrace) {
+      final config = ref.read(appConfigProvider);
+      final errorMessage = discoveryStartupFailureMessage(
+        stage: initStage,
+        error: error,
+        discoveryPort: config.discoveryPort,
+        controlPort: config.controlPort,
+        dataPortRangeStart: config.dataPortRange.start,
+        dataPortRangeEnd: config.dataPortRange.end,
+      );
       logger.error(
         AppLogCategory.discovery,
         'Failed to initialize discovery engine at stage $initStage',
@@ -444,9 +482,11 @@ class DiscoveryController extends Notifier<DiscoveryState> {
         isRunning: false,
         currentPairingUserId: currentPairingUserId,
         currentDiscoveryGroupTagPreview: currentDiscoveryGroupTagPreview,
-        errorMessage:
-            '디스커버리 엔진을 시작하지 못했습니다. [$initStage] ${error.runtimeType}: $error',
-        lastDecision: 'init failed at $initStage: ${error.runtimeType}: $error',
+        errorMessage: errorMessage,
+        lastDecision: discoveryStartupFailureDecision(
+          stage: initStage,
+          error: error,
+        ),
       );
     } finally {
       _isStarting = false;
@@ -458,11 +498,23 @@ class DiscoveryController extends Notifier<DiscoveryState> {
     final packet = datagram.packet;
     final localIdentity = _localIdentity;
     if (localIdentity == null) {
+      final decision = DiscoveryReceiveDecision(
+        code: DiscoveryReceiveDecisionCode.localIdentityMissing,
+        remoteAddress: datagram.address.address,
+        remotePort: datagram.port,
+        reason: 'local identity not loaded',
+      );
       logger.warning(
         AppLogCategory.discovery,
         'Discovery packet ignored because local identity is not loaded. '
         'source=${datagram.address.address}:${datagram.port} '
-        'packet=${_packetSummary(packet)}',
+        'packet=${_packetSummary(packet)} decision=${decision.summary}',
+      );
+      state = state.copyWith(
+        receivedPacketCount: state.receivedPacketCount + 1,
+        lastPacketAt: _now(),
+        lastDecision: decision.summary,
+        lastDecisionCode: decision.code.name,
       );
       return;
     }
@@ -475,34 +527,49 @@ class DiscoveryController extends Notifier<DiscoveryState> {
     );
 
     if (packet.instanceId == localIdentity.instanceId) {
+      final decision = DiscoveryReceiveDecision(
+        code: DiscoveryReceiveDecisionCode.ignoredSelf,
+        remoteAddress: datagram.address.address,
+        remotePort: datagram.port,
+        peerId: '${packet.userId}@${packet.instanceId}',
+        reason: 'same instance id',
+      );
       logger.info(
         AppLogCategory.discovery,
         'Discovery packet ignored as self packet. '
         'source=${datagram.address.address}:${datagram.port} '
-        'packet=${_packetSummary(packet)}',
+        'packet=${_packetSummary(packet)} decision=${decision.summary}',
       );
       state = state.copyWith(
         receivedPacketCount: state.receivedPacketCount + 1,
         lastPacketAt: _now(),
-        lastDecision:
-            'self packet ignored: ${packet.instanceId}/${packet.deviceId}',
+        lastDecision: decision.summary,
+        lastDecisionCode: decision.code.name,
       );
       return;
     }
     if (!_matchesCurrentPairingGroup(packet)) {
+      final decision = DiscoveryReceiveDecision(
+        code: DiscoveryReceiveDecisionCode.groupMismatch,
+        remoteAddress: datagram.address.address,
+        remotePort: datagram.port,
+        peerId: '${packet.userId}@${packet.instanceId}',
+        reason: 'pairing group mismatch',
+      );
       logger.info(
         AppLogCategory.discovery,
         'Discovery packet ignored by group/user filter. '
         'source=${datagram.address.address}:${datagram.port} '
         'packetUser=${packet.userId} localUser=${_currentUser()?.userId ?? '-'} '
         'packetGroup=${_discoveryGroupTagPreview(packet.discoveryGroupTag) ?? '-'} '
-        'localGroup=${_discoveryGroupTagPreview(_currentDiscoveryGroupTag()) ?? '-'}',
+        'localGroup=${_discoveryGroupTagPreview(_currentDiscoveryGroupTag()) ?? '-'} '
+        'decision=${decision.summary}',
       );
       state = state.copyWith(
         receivedPacketCount: state.receivedPacketCount + 1,
         lastPacketAt: _now(),
-        lastDecision:
-            'ignored packet: ${packet.userId}@${packet.deviceId} pairing mismatch',
+        lastDecision: decision.summary,
+        lastDecisionCode: decision.code.name,
       );
       return;
     }
@@ -521,12 +588,19 @@ class DiscoveryController extends Notifier<DiscoveryState> {
       return;
     }
     final nextPeers = _mergePeer(state.peers, peer);
+    final decision = DiscoveryReceiveDecision(
+      code: DiscoveryReceiveDecisionCode.accepted,
+      remoteAddress: datagram.address.address,
+      remotePort: datagram.port,
+      peerId: peer.id,
+    );
     state = state.copyWith(
       peers: nextPeers,
       clearError: true,
       receivedPacketCount: state.receivedPacketCount + 1,
       lastPacketAt: receivedAt,
-      lastDecision: 'accepted peer: ${peer.id} ${peer.address}:${peer.port}',
+      lastDecision: decision.summary,
+      lastDecisionCode: decision.code.name,
     );
     if (routeCandidates.isNotEmpty) {
       logger.info(
@@ -659,6 +733,11 @@ class DiscoveryController extends Notifier<DiscoveryState> {
       discoveryBroadcastAttemptPreview: snapshot.lastBroadcastAttemptPreview
           .take(12)
           .toList(),
+      discoveryTargetSkipPreview: snapshot.discoveryTargetSkipPreview
+          .take(12)
+          .toList(),
+      discoveryLastReceiveDecisionCode: snapshot.lastReceiveDecisionCode,
+      discoveryMalformedPacketCount: snapshot.malformedPacketCount,
       discoveryTransportError: snapshot.lastError,
       clearDiscoveryTransportError: snapshot.lastError == null,
     );
@@ -894,6 +973,21 @@ class DiscoveryController extends Notifier<DiscoveryState> {
         correlationId: candidate.peerId,
         reasonCode: 'ttlExceeded',
       );
+      final leaseExpired = ref
+          .read(peerPathRegistryMutationsProvider)
+          .expireLeaseForCandidate(
+            candidate: candidate,
+            reasonCode: 'routeCandidateExpired',
+          );
+      if (leaseExpired) {
+        ref
+            .read(appLoggerProvider)
+            .info(
+              AppLogCategory.discovery,
+              'Active route lease downgraded after candidate expired '
+              'peer=${candidate.peerId} candidate=${candidate.candidateId}',
+            );
+      }
     }
   }
 

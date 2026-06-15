@@ -10,6 +10,7 @@ import 'package:sponzey_file_sharing/application/network/peer_connection_summary
 import 'package:sponzey_file_sharing/application/transfer/transfer_controller.dart';
 import 'package:sponzey_file_sharing/core/logger/app_logger.dart';
 import 'package:sponzey_file_sharing/domain/entities/peer_node.dart';
+import 'package:sponzey_file_sharing/presentation/diagnostics/diagnostics_export_panel.dart';
 import 'package:sponzey_file_sharing/presentation/transfers/transfers_screen.dart';
 import 'package:sponzey_file_sharing/presentation/shared/page_header.dart';
 import 'package:sponzey_file_sharing/presentation/shared/sponzey_card.dart';
@@ -160,7 +161,7 @@ class _PeersScreenState extends ConsumerState<PeersScreen> {
                           maxCrossAxisExtent: constraints.maxWidth < 720
                               ? 720
                               : 560,
-                          mainAxisExtent: 260,
+                          mainAxisExtent: 280,
                           mainAxisSpacing: AppSpacing.lg,
                           crossAxisSpacing: AppSpacing.lg,
                         ),
@@ -254,6 +255,20 @@ class _DiscoveryDiagnosticsCard extends StatelessWidget {
                     : state.discoveryBroadcastAttemptPreview.join(', '),
               ),
               _DiagnosticsLine(
+                label: 'Target Skips',
+                value: state.discoveryTargetSkipPreview.isEmpty
+                    ? '-'
+                    : state.discoveryTargetSkipPreview.join(', '),
+              ),
+              _DiagnosticsLine(
+                label: 'RX Decision',
+                value: state.discoveryLastReceiveDecisionCode ?? '-',
+              ),
+              _DiagnosticsLine(
+                label: 'Malformed RX',
+                value: '${state.discoveryMalformedPacketCount}',
+              ),
+              _DiagnosticsLine(
                 label: 'Transport Error',
                 value: state.discoveryTransportError ?? '-',
               ),
@@ -286,6 +301,11 @@ class _DiscoveryDiagnosticsCard extends StatelessWidget {
                 label: 'Last Decision',
                 value: state.lastDecision ?? '-',
               ),
+              _DiagnosticsLine(
+                label: 'Last Decision Code',
+                value: state.lastDecisionCode ?? '-',
+              ),
+              const DiagnosticsExportPanel(),
             ],
           ),
         );

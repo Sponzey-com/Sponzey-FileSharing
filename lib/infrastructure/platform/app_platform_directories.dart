@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+enum AppDesktopPlatform { macos, windows, linux, other }
+
 final class AppPlatformDirectories {
   static const appFolderName = 'Sponzey FileSharing';
 
@@ -18,45 +20,77 @@ final class AppPlatformDirectories {
   }
 
   static String _applicationSupportPath() {
-    if (Platform.isWindows) {
-      final base =
-          Platform.environment['APPDATA'] ??
-          Platform.environment['USERPROFILE'] ??
-          Directory.current.path;
-      return p.join(base, appFolderName);
-    }
-
-    if (Platform.isMacOS) {
-      final home = Platform.environment['HOME'] ?? Directory.current.path;
-      return p.join(home, 'Library', 'Application Support', appFolderName);
-    }
-
-    final dataHome = Platform.environment['XDG_DATA_HOME'];
-    if (dataHome != null && dataHome.isNotEmpty) {
-      return p.join(dataHome, appFolderName);
-    }
-
-    final home = Platform.environment['HOME'] ?? Directory.current.path;
-    return p.join(home, '.local', 'share', appFolderName);
+    return applicationSupportPathFor(
+      platform: _currentPlatform,
+      environment: Platform.environment,
+      currentDirectory: Directory.current.path,
+    );
   }
 
   static String _defaultReceivePath() {
-    if (Platform.isWindows) {
-      final userProfile =
-          Platform.environment['USERPROFILE'] ?? Directory.current.path;
-      final downloads = p.join(userProfile, 'Downloads', appFolderName);
-      if (Directory(p.join(userProfile, 'Downloads')).existsSync()) {
-        return downloads;
-      }
-      return p.join(userProfile, 'Documents', appFolderName);
+    return defaultReceivePathFor(
+      platform: _currentPlatform,
+      environment: Platform.environment,
+      currentDirectory: Directory.current.path,
+    );
+  }
+
+  static String applicationSupportPathFor({
+    required AppDesktopPlatform platform,
+    required Map<String, String> environment,
+    required String currentDirectory,
+  }) {
+    final context = _pathContextFor(platform);
+    if (platform == AppDesktopPlatform.windows) {
+      final base =
+          environment['APPDATA'] ??
+          environment['USERPROFILE'] ??
+          currentDirectory;
+      return context.join(base, appFolderName);
     }
 
-    final home = Platform.environment['HOME'] ?? Directory.current.path;
-    final downloads = p.join(home, 'Downloads', appFolderName);
-    if (Directory(p.join(home, 'Downloads')).existsSync()) {
-      return downloads;
+    if (platform == AppDesktopPlatform.macos) {
+      final home = environment['HOME'] ?? currentDirectory;
+      return context.join(
+        home,
+        'Library',
+        'Application Support',
+        appFolderName,
+      );
     }
-    return p.join(home, 'Documents', appFolderName);
+
+    final dataHome = environment['XDG_DATA_HOME'];
+    if (dataHome != null && dataHome.isNotEmpty) {
+      return context.join(dataHome, appFolderName);
+    }
+
+    final home = environment['HOME'] ?? currentDirectory;
+    return context.join(home, '.local', 'share', appFolderName);
+  }
+
+  static String defaultReceivePathFor({
+    required AppDesktopPlatform platform,
+    required Map<String, String> environment,
+    required String currentDirectory,
+  }) {
+    final context = _pathContextFor(platform);
+    if (platform == AppDesktopPlatform.windows) {
+      final userProfile = environment['USERPROFILE'] ?? currentDirectory;
+      return context.join(userProfile, 'Downloads', appFolderName);
+    }
+
+    final home = environment['HOME'] ?? currentDirectory;
+    if (platform == AppDesktopPlatform.linux) {
+      final xdgDownloads = environment['XDG_DOWNLOAD_DIR'];
+      if (xdgDownloads != null && xdgDownloads.trim().isNotEmpty) {
+        return context.join(
+          _expandHome(xdgDownloads.trim(), home),
+          appFolderName,
+        );
+      }
+    }
+
+    return context.join(home, 'Downloads', appFolderName);
   }
 
   static bool looksLikeLegacySandboxReceivePath(String rawPath) {
@@ -76,5 +110,41 @@ final class AppPlatformDirectories {
         parts.length >= 2 &&
         parts[parts.length - 2] == 'Downloads' &&
         parts.last == appFolderName;
+  }
+
+  static AppDesktopPlatform get _currentPlatform {
+    if (Platform.isWindows) {
+      return AppDesktopPlatform.windows;
+    }
+    if (Platform.isMacOS) {
+      return AppDesktopPlatform.macos;
+    }
+    if (Platform.isLinux) {
+      return AppDesktopPlatform.linux;
+    }
+    return AppDesktopPlatform.other;
+  }
+
+  static p.Context _pathContextFor(AppDesktopPlatform platform) {
+    if (platform == AppDesktopPlatform.windows) {
+      return p.Context(style: p.Style.windows);
+    }
+    return p.Context(style: p.Style.posix);
+  }
+
+  static String _expandHome(String rawPath, String home) {
+    if (rawPath == r'$HOME') {
+      return home;
+    }
+    if (rawPath.startsWith(r'$HOME/')) {
+      return p.posix.join(home, rawPath.substring(r'$HOME/'.length));
+    }
+    if (rawPath == '~') {
+      return home;
+    }
+    if (rawPath.startsWith('~/')) {
+      return p.posix.join(home, rawPath.substring(2));
+    }
+    return rawPath;
   }
 }

@@ -123,8 +123,19 @@ class PeerPathDiagnostics {
     if (hasDegradedPath) {
       return '다른 네트워크 경로로 재시도 중';
     }
-    if (activePath != null) {
+    final active = activePath;
+    if (active?.status == PeerPathStatus.active) {
       return '연결 경로 정상';
+    }
+    if (active?.status == PeerPathStatus.failoverRequested) {
+      return '다른 네트워크 경로를 확인하는 중';
+    }
+    if (active?.status == PeerPathStatus.degraded) {
+      return '연결 경로 품질 저하';
+    }
+    if (active?.status == PeerPathStatus.failed ||
+        active?.status == PeerPathStatus.probeFailed) {
+      return '연결 경로 실패';
     }
     if (candidates.isNotEmpty) {
       return '연결 경로 확인 중';

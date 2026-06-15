@@ -17,6 +17,8 @@ import 'package:sponzey_file_sharing/domain/entities/peer_auth_session.dart';
 import 'package:sponzey_file_sharing/domain/entities/peer_node.dart';
 import 'package:sponzey_file_sharing/domain/network/network_interface_inventory.dart';
 import 'package:sponzey_file_sharing/domain/network/network_interface_models.dart';
+import 'package:sponzey_file_sharing/domain/network/peer_connection_path.dart';
+import 'package:sponzey_file_sharing/domain/network/peer_route_candidate.dart';
 import 'package:sponzey_file_sharing/infrastructure/auth/auth_packet.dart';
 import 'package:sponzey_file_sharing/infrastructure/auth/shared_verifier_service.dart';
 import 'package:sponzey_file_sharing/infrastructure/control/control_transport.dart';
@@ -476,7 +478,9 @@ void main() {
     );
     await _flush();
 
-    expect(container.read(discoveryControllerProvider).peers, isEmpty);
+    final state = container.read(discoveryControllerProvider);
+    expect(state.peers, isEmpty);
+    expect(state.lastDecisionCode, 'groupMismatch');
   });
 
   test(
@@ -618,7 +622,9 @@ void main() {
     );
     await _flush();
 
-    expect(container.read(discoveryControllerProvider).peers, isEmpty);
+    final state = container.read(discoveryControllerProvider);
+    expect(state.peers, isEmpty);
+    expect(state.lastDecisionCode, 'ignoredSelf');
   });
 
   test('accepts a different runtime instance on the same device id', () async {
@@ -1106,6 +1112,82 @@ void main() {
         events.map((event) => event.eventType),
         contains('PeerRouteCandidateExpired'),
       );
+    },
+  );
+
+  test(
+    'expired active route lease is downgraded without removing peer identity',
+    () async {
+      final container = _createContainer(
+        database: database,
+        transport: transport,
+        clock: clock,
+        interfaceSnapshots: [
+          _interfaceSnapshot(
+            name: 'en0',
+            index: 1,
+            typeHint: InterfaceTypeHint.ethernet,
+            address: '10.20.30.5',
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      container.read(authControllerProvider);
+      await _flush();
+      await container
+          .read(authControllerProvider.notifier)
+          .signIn(userId: 'team', password: 'secret');
+
+      container.read(discoveryControllerProvider);
+      await _flush();
+
+      transport.emit(
+        DiscoveryPacket(
+          type: DiscoveryPacketType.discoverAck,
+          protocolVersion: '1.0',
+          userId: 'team',
+          discoveryGroupTag: _discoveryGroupTag('team', 'secret'),
+          instanceId: 'peer-instance',
+          displayName: 'Peer Node',
+          deviceId: 'peer-device',
+          deviceName: 'Ethernet Peer',
+          osType: 'linux',
+          controlPort: 46000,
+          port: 38400,
+          receiveAvailable: true,
+          sentAtEpochMs: clock.value.millisecondsSinceEpoch,
+        ),
+        address: InternetAddress('10.20.30.40'),
+      );
+      await _flush();
+
+      expect(container.read(discoveryControllerProvider).peers, hasLength(1));
+      expect(
+        container
+            .read(peerPathDiagnosticsProvider('team@peer-instance'))
+            .activePath
+            ?.status,
+        PeerPathStatus.active,
+      );
+
+      clock.advance(const Duration(seconds: 31));
+      await container
+          .read(discoveryControllerProvider.notifier)
+          .refreshPresence();
+
+      final state = container.read(discoveryControllerProvider);
+      expect(state.peers, hasLength(1));
+      expect(state.peers.single.id, 'team@peer-instance');
+      final diagnostics = container.read(
+        peerPathDiagnosticsProvider('team@peer-instance'),
+      );
+      expect(
+        diagnostics.candidates.single.status,
+        RouteCandidateStatus.expired,
+      );
+      expect(diagnostics.activePath?.status, isNot(PeerPathStatus.active));
+      expect(diagnostics.productSummary, isNot('연결 경로 정상'));
     },
   );
 

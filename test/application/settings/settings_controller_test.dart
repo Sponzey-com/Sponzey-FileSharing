@@ -146,17 +146,50 @@ void main() {
     expect(state.isSaving, isFalse);
     expect(state.errorMessage, '기본 저장 경로는 폴더여야 합니다.');
   });
+
+  test('save repository failure keeps controller alive', () async {
+    final tempDirectory = await Directory.systemTemp.createTemp(
+      'settings-controller-save-fails',
+    );
+    addTearDown(() => tempDirectory.delete(recursive: true));
+
+    final container = _createContainer(
+      database: database,
+      defaultReceivePath: '${tempDirectory.path}/downloads',
+      settingsRepository: _ThrowingSaveSettingsRepository(database),
+    );
+    addTearDown(container.dispose);
+
+    container.read(settingsControllerProvider);
+    await _flush();
+
+    await container
+        .read(settingsControllerProvider.notifier)
+        .save(
+          AppSettings.initial().copyWith(
+            defaultSavePath: '${tempDirectory.path}/next-downloads',
+          ),
+        );
+
+    final state = container.read(settingsControllerProvider);
+    expect(state.isSaving, isFalse);
+    expect(state.errorMessage, '설정을 저장하지 못했습니다.');
+    expect(state.settings, isA<AppSettings>());
+  });
 }
 
 ProviderContainer _createContainer({
   required AppDatabase database,
   String? defaultReceivePath,
   AppStoragePathProvider? storagePathProvider,
+  SettingsRepository? settingsRepository,
 }) {
   assert(defaultReceivePath != null || storagePathProvider != null);
   return ProviderContainer(
     overrides: [
       appDatabaseProvider.overrideWithValue(database),
+      if (settingsRepository != null)
+        settingsRepositoryProvider.overrideWithValue(settingsRepository),
       appStoragePathProvider.overrideWithValue(
         storagePathProvider ?? _FakeStoragePathProvider(defaultReceivePath!),
       ),
@@ -187,5 +220,14 @@ class _ThrowingStoragePathProvider implements AppStoragePathProvider {
   @override
   Future<String> getDefaultReceivePath() {
     throw StateError('default receive path is unavailable for test');
+  }
+}
+
+class _ThrowingSaveSettingsRepository extends SettingsRepository {
+  const _ThrowingSaveSettingsRepository(super.database);
+
+  @override
+  Future<AppSettings> save(AppSettings settings) {
+    throw StateError('settings save failed for test');
   }
 }

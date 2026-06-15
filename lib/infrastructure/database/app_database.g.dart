@@ -2272,6 +2272,1800 @@ class AllowedPeersCompanion extends UpdateCompanion<AllowedPeer> {
   }
 }
 
+class $TransferHistoryJobsTable extends TransferHistoryJobs
+    with TableInfo<$TransferHistoryJobsTable, TransferHistoryJob> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $TransferHistoryJobsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _transferIdMeta = const VerificationMeta(
+    'transferId',
+  );
+  @override
+  late final GeneratedColumn<String> transferId = GeneratedColumn<String>(
+    'transfer_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _directionMeta = const VerificationMeta(
+    'direction',
+  );
+  @override
+  late final GeneratedColumn<String> direction = GeneratedColumn<String>(
+    'direction',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _peerIdMeta = const VerificationMeta('peerId');
+  @override
+  late final GeneratedColumn<String> peerId = GeneratedColumn<String>(
+    'peer_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _peerDisplayNameMeta = const VerificationMeta(
+    'peerDisplayName',
+  );
+  @override
+  late final GeneratedColumn<String> peerDisplayName = GeneratedColumn<String>(
+    'peer_display_name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _statusMeta = const VerificationMeta('status');
+  @override
+  late final GeneratedColumn<String> status = GeneratedColumn<String>(
+    'status',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _failureCategoryMeta = const VerificationMeta(
+    'failureCategory',
+  );
+  @override
+  late final GeneratedColumn<String> failureCategory = GeneratedColumn<String>(
+    'failure_category',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _failureCodeMeta = const VerificationMeta(
+    'failureCode',
+  );
+  @override
+  late final GeneratedColumn<String> failureCode = GeneratedColumn<String>(
+    'failure_code',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _messageMeta = const VerificationMeta(
+    'message',
+  );
+  @override
+  late final GeneratedColumn<String> message = GeneratedColumn<String>(
+    'message',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _fileCountMeta = const VerificationMeta(
+    'fileCount',
+  );
+  @override
+  late final GeneratedColumn<int> fileCount = GeneratedColumn<int>(
+    'file_count',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(1),
+  );
+  static const VerificationMeta _totalBytesMeta = const VerificationMeta(
+    'totalBytes',
+  );
+  @override
+  late final GeneratedColumn<int> totalBytes = GeneratedColumn<int>(
+    'total_bytes',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _bytesTransferredMeta = const VerificationMeta(
+    'bytesTransferred',
+  );
+  @override
+  late final GeneratedColumn<int> bytesTransferred = GeneratedColumn<int>(
+    'bytes_transferred',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _totalChunksMeta = const VerificationMeta(
+    'totalChunks',
+  );
+  @override
+  late final GeneratedColumn<int> totalChunks = GeneratedColumn<int>(
+    'total_chunks',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _completedChunksMeta = const VerificationMeta(
+    'completedChunks',
+  );
+  @override
+  late final GeneratedColumn<int> completedChunks = GeneratedColumn<int>(
+    'completed_chunks',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _retryCountMeta = const VerificationMeta(
+    'retryCount',
+  );
+  @override
+  late final GeneratedColumn<int> retryCount = GeneratedColumn<int>(
+    'retry_count',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _lossRateMeta = const VerificationMeta(
+    'lossRate',
+  );
+  @override
+  late final GeneratedColumn<double> lossRate = GeneratedColumn<double>(
+    'loss_rate',
+    aliasedName,
+    false,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _throughputBytesPerSecMeta =
+      const VerificationMeta('throughputBytesPerSec');
+  @override
+  late final GeneratedColumn<double> throughputBytesPerSec =
+      GeneratedColumn<double>(
+        'throughput_bytes_per_sec',
+        aliasedName,
+        false,
+        type: DriftSqlType.double,
+        requiredDuringInsert: false,
+        defaultValue: const Constant(0),
+      );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    transferId,
+    direction,
+    peerId,
+    peerDisplayName,
+    status,
+    failureCategory,
+    failureCode,
+    message,
+    fileCount,
+    totalBytes,
+    bytesTransferred,
+    totalChunks,
+    completedChunks,
+    retryCount,
+    lossRate,
+    throughputBytesPerSec,
+    createdAt,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'transfer_jobs';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<TransferHistoryJob> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('transfer_id')) {
+      context.handle(
+        _transferIdMeta,
+        transferId.isAcceptableOrUnknown(data['transfer_id']!, _transferIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_transferIdMeta);
+    }
+    if (data.containsKey('direction')) {
+      context.handle(
+        _directionMeta,
+        direction.isAcceptableOrUnknown(data['direction']!, _directionMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_directionMeta);
+    }
+    if (data.containsKey('peer_id')) {
+      context.handle(
+        _peerIdMeta,
+        peerId.isAcceptableOrUnknown(data['peer_id']!, _peerIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_peerIdMeta);
+    }
+    if (data.containsKey('peer_display_name')) {
+      context.handle(
+        _peerDisplayNameMeta,
+        peerDisplayName.isAcceptableOrUnknown(
+          data['peer_display_name']!,
+          _peerDisplayNameMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_peerDisplayNameMeta);
+    }
+    if (data.containsKey('status')) {
+      context.handle(
+        _statusMeta,
+        status.isAcceptableOrUnknown(data['status']!, _statusMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_statusMeta);
+    }
+    if (data.containsKey('failure_category')) {
+      context.handle(
+        _failureCategoryMeta,
+        failureCategory.isAcceptableOrUnknown(
+          data['failure_category']!,
+          _failureCategoryMeta,
+        ),
+      );
+    }
+    if (data.containsKey('failure_code')) {
+      context.handle(
+        _failureCodeMeta,
+        failureCode.isAcceptableOrUnknown(
+          data['failure_code']!,
+          _failureCodeMeta,
+        ),
+      );
+    }
+    if (data.containsKey('message')) {
+      context.handle(
+        _messageMeta,
+        message.isAcceptableOrUnknown(data['message']!, _messageMeta),
+      );
+    }
+    if (data.containsKey('file_count')) {
+      context.handle(
+        _fileCountMeta,
+        fileCount.isAcceptableOrUnknown(data['file_count']!, _fileCountMeta),
+      );
+    }
+    if (data.containsKey('total_bytes')) {
+      context.handle(
+        _totalBytesMeta,
+        totalBytes.isAcceptableOrUnknown(data['total_bytes']!, _totalBytesMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_totalBytesMeta);
+    }
+    if (data.containsKey('bytes_transferred')) {
+      context.handle(
+        _bytesTransferredMeta,
+        bytesTransferred.isAcceptableOrUnknown(
+          data['bytes_transferred']!,
+          _bytesTransferredMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_bytesTransferredMeta);
+    }
+    if (data.containsKey('total_chunks')) {
+      context.handle(
+        _totalChunksMeta,
+        totalChunks.isAcceptableOrUnknown(
+          data['total_chunks']!,
+          _totalChunksMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_totalChunksMeta);
+    }
+    if (data.containsKey('completed_chunks')) {
+      context.handle(
+        _completedChunksMeta,
+        completedChunks.isAcceptableOrUnknown(
+          data['completed_chunks']!,
+          _completedChunksMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_completedChunksMeta);
+    }
+    if (data.containsKey('retry_count')) {
+      context.handle(
+        _retryCountMeta,
+        retryCount.isAcceptableOrUnknown(data['retry_count']!, _retryCountMeta),
+      );
+    }
+    if (data.containsKey('loss_rate')) {
+      context.handle(
+        _lossRateMeta,
+        lossRate.isAcceptableOrUnknown(data['loss_rate']!, _lossRateMeta),
+      );
+    }
+    if (data.containsKey('throughput_bytes_per_sec')) {
+      context.handle(
+        _throughputBytesPerSecMeta,
+        throughputBytesPerSec.isAcceptableOrUnknown(
+          data['throughput_bytes_per_sec']!,
+          _throughputBytesPerSecMeta,
+        ),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  TransferHistoryJob map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return TransferHistoryJob(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      transferId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}transfer_id'],
+      )!,
+      direction: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}direction'],
+      )!,
+      peerId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}peer_id'],
+      )!,
+      peerDisplayName: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}peer_display_name'],
+      )!,
+      status: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}status'],
+      )!,
+      failureCategory: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}failure_category'],
+      ),
+      failureCode: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}failure_code'],
+      ),
+      message: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}message'],
+      ),
+      fileCount: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}file_count'],
+      )!,
+      totalBytes: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}total_bytes'],
+      )!,
+      bytesTransferred: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}bytes_transferred'],
+      )!,
+      totalChunks: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}total_chunks'],
+      )!,
+      completedChunks: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}completed_chunks'],
+      )!,
+      retryCount: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}retry_count'],
+      )!,
+      lossRate: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}loss_rate'],
+      )!,
+      throughputBytesPerSec: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}throughput_bytes_per_sec'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $TransferHistoryJobsTable createAlias(String alias) {
+    return $TransferHistoryJobsTable(attachedDatabase, alias);
+  }
+}
+
+class TransferHistoryJob extends DataClass
+    implements Insertable<TransferHistoryJob> {
+  final String id;
+  final String transferId;
+  final String direction;
+  final String peerId;
+  final String peerDisplayName;
+  final String status;
+  final String? failureCategory;
+  final String? failureCode;
+  final String? message;
+  final int fileCount;
+  final int totalBytes;
+  final int bytesTransferred;
+  final int totalChunks;
+  final int completedChunks;
+  final int retryCount;
+  final double lossRate;
+  final double throughputBytesPerSec;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  const TransferHistoryJob({
+    required this.id,
+    required this.transferId,
+    required this.direction,
+    required this.peerId,
+    required this.peerDisplayName,
+    required this.status,
+    this.failureCategory,
+    this.failureCode,
+    this.message,
+    required this.fileCount,
+    required this.totalBytes,
+    required this.bytesTransferred,
+    required this.totalChunks,
+    required this.completedChunks,
+    required this.retryCount,
+    required this.lossRate,
+    required this.throughputBytesPerSec,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['transfer_id'] = Variable<String>(transferId);
+    map['direction'] = Variable<String>(direction);
+    map['peer_id'] = Variable<String>(peerId);
+    map['peer_display_name'] = Variable<String>(peerDisplayName);
+    map['status'] = Variable<String>(status);
+    if (!nullToAbsent || failureCategory != null) {
+      map['failure_category'] = Variable<String>(failureCategory);
+    }
+    if (!nullToAbsent || failureCode != null) {
+      map['failure_code'] = Variable<String>(failureCode);
+    }
+    if (!nullToAbsent || message != null) {
+      map['message'] = Variable<String>(message);
+    }
+    map['file_count'] = Variable<int>(fileCount);
+    map['total_bytes'] = Variable<int>(totalBytes);
+    map['bytes_transferred'] = Variable<int>(bytesTransferred);
+    map['total_chunks'] = Variable<int>(totalChunks);
+    map['completed_chunks'] = Variable<int>(completedChunks);
+    map['retry_count'] = Variable<int>(retryCount);
+    map['loss_rate'] = Variable<double>(lossRate);
+    map['throughput_bytes_per_sec'] = Variable<double>(throughputBytesPerSec);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    return map;
+  }
+
+  TransferHistoryJobsCompanion toCompanion(bool nullToAbsent) {
+    return TransferHistoryJobsCompanion(
+      id: Value(id),
+      transferId: Value(transferId),
+      direction: Value(direction),
+      peerId: Value(peerId),
+      peerDisplayName: Value(peerDisplayName),
+      status: Value(status),
+      failureCategory: failureCategory == null && nullToAbsent
+          ? const Value.absent()
+          : Value(failureCategory),
+      failureCode: failureCode == null && nullToAbsent
+          ? const Value.absent()
+          : Value(failureCode),
+      message: message == null && nullToAbsent
+          ? const Value.absent()
+          : Value(message),
+      fileCount: Value(fileCount),
+      totalBytes: Value(totalBytes),
+      bytesTransferred: Value(bytesTransferred),
+      totalChunks: Value(totalChunks),
+      completedChunks: Value(completedChunks),
+      retryCount: Value(retryCount),
+      lossRate: Value(lossRate),
+      throughputBytesPerSec: Value(throughputBytesPerSec),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory TransferHistoryJob.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return TransferHistoryJob(
+      id: serializer.fromJson<String>(json['id']),
+      transferId: serializer.fromJson<String>(json['transferId']),
+      direction: serializer.fromJson<String>(json['direction']),
+      peerId: serializer.fromJson<String>(json['peerId']),
+      peerDisplayName: serializer.fromJson<String>(json['peerDisplayName']),
+      status: serializer.fromJson<String>(json['status']),
+      failureCategory: serializer.fromJson<String?>(json['failureCategory']),
+      failureCode: serializer.fromJson<String?>(json['failureCode']),
+      message: serializer.fromJson<String?>(json['message']),
+      fileCount: serializer.fromJson<int>(json['fileCount']),
+      totalBytes: serializer.fromJson<int>(json['totalBytes']),
+      bytesTransferred: serializer.fromJson<int>(json['bytesTransferred']),
+      totalChunks: serializer.fromJson<int>(json['totalChunks']),
+      completedChunks: serializer.fromJson<int>(json['completedChunks']),
+      retryCount: serializer.fromJson<int>(json['retryCount']),
+      lossRate: serializer.fromJson<double>(json['lossRate']),
+      throughputBytesPerSec: serializer.fromJson<double>(
+        json['throughputBytesPerSec'],
+      ),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'transferId': serializer.toJson<String>(transferId),
+      'direction': serializer.toJson<String>(direction),
+      'peerId': serializer.toJson<String>(peerId),
+      'peerDisplayName': serializer.toJson<String>(peerDisplayName),
+      'status': serializer.toJson<String>(status),
+      'failureCategory': serializer.toJson<String?>(failureCategory),
+      'failureCode': serializer.toJson<String?>(failureCode),
+      'message': serializer.toJson<String?>(message),
+      'fileCount': serializer.toJson<int>(fileCount),
+      'totalBytes': serializer.toJson<int>(totalBytes),
+      'bytesTransferred': serializer.toJson<int>(bytesTransferred),
+      'totalChunks': serializer.toJson<int>(totalChunks),
+      'completedChunks': serializer.toJson<int>(completedChunks),
+      'retryCount': serializer.toJson<int>(retryCount),
+      'lossRate': serializer.toJson<double>(lossRate),
+      'throughputBytesPerSec': serializer.toJson<double>(throughputBytesPerSec),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  TransferHistoryJob copyWith({
+    String? id,
+    String? transferId,
+    String? direction,
+    String? peerId,
+    String? peerDisplayName,
+    String? status,
+    Value<String?> failureCategory = const Value.absent(),
+    Value<String?> failureCode = const Value.absent(),
+    Value<String?> message = const Value.absent(),
+    int? fileCount,
+    int? totalBytes,
+    int? bytesTransferred,
+    int? totalChunks,
+    int? completedChunks,
+    int? retryCount,
+    double? lossRate,
+    double? throughputBytesPerSec,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) => TransferHistoryJob(
+    id: id ?? this.id,
+    transferId: transferId ?? this.transferId,
+    direction: direction ?? this.direction,
+    peerId: peerId ?? this.peerId,
+    peerDisplayName: peerDisplayName ?? this.peerDisplayName,
+    status: status ?? this.status,
+    failureCategory: failureCategory.present
+        ? failureCategory.value
+        : this.failureCategory,
+    failureCode: failureCode.present ? failureCode.value : this.failureCode,
+    message: message.present ? message.value : this.message,
+    fileCount: fileCount ?? this.fileCount,
+    totalBytes: totalBytes ?? this.totalBytes,
+    bytesTransferred: bytesTransferred ?? this.bytesTransferred,
+    totalChunks: totalChunks ?? this.totalChunks,
+    completedChunks: completedChunks ?? this.completedChunks,
+    retryCount: retryCount ?? this.retryCount,
+    lossRate: lossRate ?? this.lossRate,
+    throughputBytesPerSec: throughputBytesPerSec ?? this.throughputBytesPerSec,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  TransferHistoryJob copyWithCompanion(TransferHistoryJobsCompanion data) {
+    return TransferHistoryJob(
+      id: data.id.present ? data.id.value : this.id,
+      transferId: data.transferId.present
+          ? data.transferId.value
+          : this.transferId,
+      direction: data.direction.present ? data.direction.value : this.direction,
+      peerId: data.peerId.present ? data.peerId.value : this.peerId,
+      peerDisplayName: data.peerDisplayName.present
+          ? data.peerDisplayName.value
+          : this.peerDisplayName,
+      status: data.status.present ? data.status.value : this.status,
+      failureCategory: data.failureCategory.present
+          ? data.failureCategory.value
+          : this.failureCategory,
+      failureCode: data.failureCode.present
+          ? data.failureCode.value
+          : this.failureCode,
+      message: data.message.present ? data.message.value : this.message,
+      fileCount: data.fileCount.present ? data.fileCount.value : this.fileCount,
+      totalBytes: data.totalBytes.present
+          ? data.totalBytes.value
+          : this.totalBytes,
+      bytesTransferred: data.bytesTransferred.present
+          ? data.bytesTransferred.value
+          : this.bytesTransferred,
+      totalChunks: data.totalChunks.present
+          ? data.totalChunks.value
+          : this.totalChunks,
+      completedChunks: data.completedChunks.present
+          ? data.completedChunks.value
+          : this.completedChunks,
+      retryCount: data.retryCount.present
+          ? data.retryCount.value
+          : this.retryCount,
+      lossRate: data.lossRate.present ? data.lossRate.value : this.lossRate,
+      throughputBytesPerSec: data.throughputBytesPerSec.present
+          ? data.throughputBytesPerSec.value
+          : this.throughputBytesPerSec,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('TransferHistoryJob(')
+          ..write('id: $id, ')
+          ..write('transferId: $transferId, ')
+          ..write('direction: $direction, ')
+          ..write('peerId: $peerId, ')
+          ..write('peerDisplayName: $peerDisplayName, ')
+          ..write('status: $status, ')
+          ..write('failureCategory: $failureCategory, ')
+          ..write('failureCode: $failureCode, ')
+          ..write('message: $message, ')
+          ..write('fileCount: $fileCount, ')
+          ..write('totalBytes: $totalBytes, ')
+          ..write('bytesTransferred: $bytesTransferred, ')
+          ..write('totalChunks: $totalChunks, ')
+          ..write('completedChunks: $completedChunks, ')
+          ..write('retryCount: $retryCount, ')
+          ..write('lossRate: $lossRate, ')
+          ..write('throughputBytesPerSec: $throughputBytesPerSec, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    transferId,
+    direction,
+    peerId,
+    peerDisplayName,
+    status,
+    failureCategory,
+    failureCode,
+    message,
+    fileCount,
+    totalBytes,
+    bytesTransferred,
+    totalChunks,
+    completedChunks,
+    retryCount,
+    lossRate,
+    throughputBytesPerSec,
+    createdAt,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is TransferHistoryJob &&
+          other.id == this.id &&
+          other.transferId == this.transferId &&
+          other.direction == this.direction &&
+          other.peerId == this.peerId &&
+          other.peerDisplayName == this.peerDisplayName &&
+          other.status == this.status &&
+          other.failureCategory == this.failureCategory &&
+          other.failureCode == this.failureCode &&
+          other.message == this.message &&
+          other.fileCount == this.fileCount &&
+          other.totalBytes == this.totalBytes &&
+          other.bytesTransferred == this.bytesTransferred &&
+          other.totalChunks == this.totalChunks &&
+          other.completedChunks == this.completedChunks &&
+          other.retryCount == this.retryCount &&
+          other.lossRate == this.lossRate &&
+          other.throughputBytesPerSec == this.throughputBytesPerSec &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class TransferHistoryJobsCompanion extends UpdateCompanion<TransferHistoryJob> {
+  final Value<String> id;
+  final Value<String> transferId;
+  final Value<String> direction;
+  final Value<String> peerId;
+  final Value<String> peerDisplayName;
+  final Value<String> status;
+  final Value<String?> failureCategory;
+  final Value<String?> failureCode;
+  final Value<String?> message;
+  final Value<int> fileCount;
+  final Value<int> totalBytes;
+  final Value<int> bytesTransferred;
+  final Value<int> totalChunks;
+  final Value<int> completedChunks;
+  final Value<int> retryCount;
+  final Value<double> lossRate;
+  final Value<double> throughputBytesPerSec;
+  final Value<DateTime> createdAt;
+  final Value<DateTime> updatedAt;
+  final Value<int> rowid;
+  const TransferHistoryJobsCompanion({
+    this.id = const Value.absent(),
+    this.transferId = const Value.absent(),
+    this.direction = const Value.absent(),
+    this.peerId = const Value.absent(),
+    this.peerDisplayName = const Value.absent(),
+    this.status = const Value.absent(),
+    this.failureCategory = const Value.absent(),
+    this.failureCode = const Value.absent(),
+    this.message = const Value.absent(),
+    this.fileCount = const Value.absent(),
+    this.totalBytes = const Value.absent(),
+    this.bytesTransferred = const Value.absent(),
+    this.totalChunks = const Value.absent(),
+    this.completedChunks = const Value.absent(),
+    this.retryCount = const Value.absent(),
+    this.lossRate = const Value.absent(),
+    this.throughputBytesPerSec = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  TransferHistoryJobsCompanion.insert({
+    required String id,
+    required String transferId,
+    required String direction,
+    required String peerId,
+    required String peerDisplayName,
+    required String status,
+    this.failureCategory = const Value.absent(),
+    this.failureCode = const Value.absent(),
+    this.message = const Value.absent(),
+    this.fileCount = const Value.absent(),
+    required int totalBytes,
+    required int bytesTransferred,
+    required int totalChunks,
+    required int completedChunks,
+    this.retryCount = const Value.absent(),
+    this.lossRate = const Value.absent(),
+    this.throughputBytesPerSec = const Value.absent(),
+    required DateTime createdAt,
+    required DateTime updatedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       transferId = Value(transferId),
+       direction = Value(direction),
+       peerId = Value(peerId),
+       peerDisplayName = Value(peerDisplayName),
+       status = Value(status),
+       totalBytes = Value(totalBytes),
+       bytesTransferred = Value(bytesTransferred),
+       totalChunks = Value(totalChunks),
+       completedChunks = Value(completedChunks),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<TransferHistoryJob> custom({
+    Expression<String>? id,
+    Expression<String>? transferId,
+    Expression<String>? direction,
+    Expression<String>? peerId,
+    Expression<String>? peerDisplayName,
+    Expression<String>? status,
+    Expression<String>? failureCategory,
+    Expression<String>? failureCode,
+    Expression<String>? message,
+    Expression<int>? fileCount,
+    Expression<int>? totalBytes,
+    Expression<int>? bytesTransferred,
+    Expression<int>? totalChunks,
+    Expression<int>? completedChunks,
+    Expression<int>? retryCount,
+    Expression<double>? lossRate,
+    Expression<double>? throughputBytesPerSec,
+    Expression<DateTime>? createdAt,
+    Expression<DateTime>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (transferId != null) 'transfer_id': transferId,
+      if (direction != null) 'direction': direction,
+      if (peerId != null) 'peer_id': peerId,
+      if (peerDisplayName != null) 'peer_display_name': peerDisplayName,
+      if (status != null) 'status': status,
+      if (failureCategory != null) 'failure_category': failureCategory,
+      if (failureCode != null) 'failure_code': failureCode,
+      if (message != null) 'message': message,
+      if (fileCount != null) 'file_count': fileCount,
+      if (totalBytes != null) 'total_bytes': totalBytes,
+      if (bytesTransferred != null) 'bytes_transferred': bytesTransferred,
+      if (totalChunks != null) 'total_chunks': totalChunks,
+      if (completedChunks != null) 'completed_chunks': completedChunks,
+      if (retryCount != null) 'retry_count': retryCount,
+      if (lossRate != null) 'loss_rate': lossRate,
+      if (throughputBytesPerSec != null)
+        'throughput_bytes_per_sec': throughputBytesPerSec,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  TransferHistoryJobsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? transferId,
+    Value<String>? direction,
+    Value<String>? peerId,
+    Value<String>? peerDisplayName,
+    Value<String>? status,
+    Value<String?>? failureCategory,
+    Value<String?>? failureCode,
+    Value<String?>? message,
+    Value<int>? fileCount,
+    Value<int>? totalBytes,
+    Value<int>? bytesTransferred,
+    Value<int>? totalChunks,
+    Value<int>? completedChunks,
+    Value<int>? retryCount,
+    Value<double>? lossRate,
+    Value<double>? throughputBytesPerSec,
+    Value<DateTime>? createdAt,
+    Value<DateTime>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return TransferHistoryJobsCompanion(
+      id: id ?? this.id,
+      transferId: transferId ?? this.transferId,
+      direction: direction ?? this.direction,
+      peerId: peerId ?? this.peerId,
+      peerDisplayName: peerDisplayName ?? this.peerDisplayName,
+      status: status ?? this.status,
+      failureCategory: failureCategory ?? this.failureCategory,
+      failureCode: failureCode ?? this.failureCode,
+      message: message ?? this.message,
+      fileCount: fileCount ?? this.fileCount,
+      totalBytes: totalBytes ?? this.totalBytes,
+      bytesTransferred: bytesTransferred ?? this.bytesTransferred,
+      totalChunks: totalChunks ?? this.totalChunks,
+      completedChunks: completedChunks ?? this.completedChunks,
+      retryCount: retryCount ?? this.retryCount,
+      lossRate: lossRate ?? this.lossRate,
+      throughputBytesPerSec:
+          throughputBytesPerSec ?? this.throughputBytesPerSec,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (transferId.present) {
+      map['transfer_id'] = Variable<String>(transferId.value);
+    }
+    if (direction.present) {
+      map['direction'] = Variable<String>(direction.value);
+    }
+    if (peerId.present) {
+      map['peer_id'] = Variable<String>(peerId.value);
+    }
+    if (peerDisplayName.present) {
+      map['peer_display_name'] = Variable<String>(peerDisplayName.value);
+    }
+    if (status.present) {
+      map['status'] = Variable<String>(status.value);
+    }
+    if (failureCategory.present) {
+      map['failure_category'] = Variable<String>(failureCategory.value);
+    }
+    if (failureCode.present) {
+      map['failure_code'] = Variable<String>(failureCode.value);
+    }
+    if (message.present) {
+      map['message'] = Variable<String>(message.value);
+    }
+    if (fileCount.present) {
+      map['file_count'] = Variable<int>(fileCount.value);
+    }
+    if (totalBytes.present) {
+      map['total_bytes'] = Variable<int>(totalBytes.value);
+    }
+    if (bytesTransferred.present) {
+      map['bytes_transferred'] = Variable<int>(bytesTransferred.value);
+    }
+    if (totalChunks.present) {
+      map['total_chunks'] = Variable<int>(totalChunks.value);
+    }
+    if (completedChunks.present) {
+      map['completed_chunks'] = Variable<int>(completedChunks.value);
+    }
+    if (retryCount.present) {
+      map['retry_count'] = Variable<int>(retryCount.value);
+    }
+    if (lossRate.present) {
+      map['loss_rate'] = Variable<double>(lossRate.value);
+    }
+    if (throughputBytesPerSec.present) {
+      map['throughput_bytes_per_sec'] = Variable<double>(
+        throughputBytesPerSec.value,
+      );
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('TransferHistoryJobsCompanion(')
+          ..write('id: $id, ')
+          ..write('transferId: $transferId, ')
+          ..write('direction: $direction, ')
+          ..write('peerId: $peerId, ')
+          ..write('peerDisplayName: $peerDisplayName, ')
+          ..write('status: $status, ')
+          ..write('failureCategory: $failureCategory, ')
+          ..write('failureCode: $failureCode, ')
+          ..write('message: $message, ')
+          ..write('fileCount: $fileCount, ')
+          ..write('totalBytes: $totalBytes, ')
+          ..write('bytesTransferred: $bytesTransferred, ')
+          ..write('totalChunks: $totalChunks, ')
+          ..write('completedChunks: $completedChunks, ')
+          ..write('retryCount: $retryCount, ')
+          ..write('lossRate: $lossRate, ')
+          ..write('throughputBytesPerSec: $throughputBytesPerSec, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $TransferHistoryFilesTable extends TransferHistoryFiles
+    with TableInfo<$TransferHistoryFilesTable, TransferHistoryFile> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $TransferHistoryFilesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _jobIdMeta = const VerificationMeta('jobId');
+  @override
+  late final GeneratedColumn<String> jobId = GeneratedColumn<String>(
+    'job_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _transferIdMeta = const VerificationMeta(
+    'transferId',
+  );
+  @override
+  late final GeneratedColumn<String> transferId = GeneratedColumn<String>(
+    'transfer_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _fileNameMeta = const VerificationMeta(
+    'fileName',
+  );
+  @override
+  late final GeneratedColumn<String> fileName = GeneratedColumn<String>(
+    'file_name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _fileSizeMeta = const VerificationMeta(
+    'fileSize',
+  );
+  @override
+  late final GeneratedColumn<int> fileSize = GeneratedColumn<int>(
+    'file_size',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _localPathMeta = const VerificationMeta(
+    'localPath',
+  );
+  @override
+  late final GeneratedColumn<String> localPath = GeneratedColumn<String>(
+    'local_path',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _destinationPathMeta = const VerificationMeta(
+    'destinationPath',
+  );
+  @override
+  late final GeneratedColumn<String> destinationPath = GeneratedColumn<String>(
+    'destination_path',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _sha256Meta = const VerificationMeta('sha256');
+  @override
+  late final GeneratedColumn<String> sha256 = GeneratedColumn<String>(
+    'sha256',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _statusMeta = const VerificationMeta('status');
+  @override
+  late final GeneratedColumn<String> status = GeneratedColumn<String>(
+    'status',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _messageMeta = const VerificationMeta(
+    'message',
+  );
+  @override
+  late final GeneratedColumn<String> message = GeneratedColumn<String>(
+    'message',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    jobId,
+    transferId,
+    fileName,
+    fileSize,
+    localPath,
+    destinationPath,
+    sha256,
+    status,
+    message,
+    createdAt,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'transfer_files';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<TransferHistoryFile> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('job_id')) {
+      context.handle(
+        _jobIdMeta,
+        jobId.isAcceptableOrUnknown(data['job_id']!, _jobIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_jobIdMeta);
+    }
+    if (data.containsKey('transfer_id')) {
+      context.handle(
+        _transferIdMeta,
+        transferId.isAcceptableOrUnknown(data['transfer_id']!, _transferIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_transferIdMeta);
+    }
+    if (data.containsKey('file_name')) {
+      context.handle(
+        _fileNameMeta,
+        fileName.isAcceptableOrUnknown(data['file_name']!, _fileNameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_fileNameMeta);
+    }
+    if (data.containsKey('file_size')) {
+      context.handle(
+        _fileSizeMeta,
+        fileSize.isAcceptableOrUnknown(data['file_size']!, _fileSizeMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_fileSizeMeta);
+    }
+    if (data.containsKey('local_path')) {
+      context.handle(
+        _localPathMeta,
+        localPath.isAcceptableOrUnknown(data['local_path']!, _localPathMeta),
+      );
+    }
+    if (data.containsKey('destination_path')) {
+      context.handle(
+        _destinationPathMeta,
+        destinationPath.isAcceptableOrUnknown(
+          data['destination_path']!,
+          _destinationPathMeta,
+        ),
+      );
+    }
+    if (data.containsKey('sha256')) {
+      context.handle(
+        _sha256Meta,
+        sha256.isAcceptableOrUnknown(data['sha256']!, _sha256Meta),
+      );
+    }
+    if (data.containsKey('status')) {
+      context.handle(
+        _statusMeta,
+        status.isAcceptableOrUnknown(data['status']!, _statusMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_statusMeta);
+    }
+    if (data.containsKey('message')) {
+      context.handle(
+        _messageMeta,
+        message.isAcceptableOrUnknown(data['message']!, _messageMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  TransferHistoryFile map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return TransferHistoryFile(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      jobId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}job_id'],
+      )!,
+      transferId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}transfer_id'],
+      )!,
+      fileName: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}file_name'],
+      )!,
+      fileSize: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}file_size'],
+      )!,
+      localPath: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}local_path'],
+      ),
+      destinationPath: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}destination_path'],
+      ),
+      sha256: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}sha256'],
+      ),
+      status: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}status'],
+      )!,
+      message: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}message'],
+      ),
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $TransferHistoryFilesTable createAlias(String alias) {
+    return $TransferHistoryFilesTable(attachedDatabase, alias);
+  }
+}
+
+class TransferHistoryFile extends DataClass
+    implements Insertable<TransferHistoryFile> {
+  final String id;
+  final String jobId;
+  final String transferId;
+  final String fileName;
+  final int fileSize;
+  final String? localPath;
+  final String? destinationPath;
+  final String? sha256;
+  final String status;
+  final String? message;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  const TransferHistoryFile({
+    required this.id,
+    required this.jobId,
+    required this.transferId,
+    required this.fileName,
+    required this.fileSize,
+    this.localPath,
+    this.destinationPath,
+    this.sha256,
+    required this.status,
+    this.message,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['job_id'] = Variable<String>(jobId);
+    map['transfer_id'] = Variable<String>(transferId);
+    map['file_name'] = Variable<String>(fileName);
+    map['file_size'] = Variable<int>(fileSize);
+    if (!nullToAbsent || localPath != null) {
+      map['local_path'] = Variable<String>(localPath);
+    }
+    if (!nullToAbsent || destinationPath != null) {
+      map['destination_path'] = Variable<String>(destinationPath);
+    }
+    if (!nullToAbsent || sha256 != null) {
+      map['sha256'] = Variable<String>(sha256);
+    }
+    map['status'] = Variable<String>(status);
+    if (!nullToAbsent || message != null) {
+      map['message'] = Variable<String>(message);
+    }
+    map['created_at'] = Variable<DateTime>(createdAt);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    return map;
+  }
+
+  TransferHistoryFilesCompanion toCompanion(bool nullToAbsent) {
+    return TransferHistoryFilesCompanion(
+      id: Value(id),
+      jobId: Value(jobId),
+      transferId: Value(transferId),
+      fileName: Value(fileName),
+      fileSize: Value(fileSize),
+      localPath: localPath == null && nullToAbsent
+          ? const Value.absent()
+          : Value(localPath),
+      destinationPath: destinationPath == null && nullToAbsent
+          ? const Value.absent()
+          : Value(destinationPath),
+      sha256: sha256 == null && nullToAbsent
+          ? const Value.absent()
+          : Value(sha256),
+      status: Value(status),
+      message: message == null && nullToAbsent
+          ? const Value.absent()
+          : Value(message),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory TransferHistoryFile.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return TransferHistoryFile(
+      id: serializer.fromJson<String>(json['id']),
+      jobId: serializer.fromJson<String>(json['jobId']),
+      transferId: serializer.fromJson<String>(json['transferId']),
+      fileName: serializer.fromJson<String>(json['fileName']),
+      fileSize: serializer.fromJson<int>(json['fileSize']),
+      localPath: serializer.fromJson<String?>(json['localPath']),
+      destinationPath: serializer.fromJson<String?>(json['destinationPath']),
+      sha256: serializer.fromJson<String?>(json['sha256']),
+      status: serializer.fromJson<String>(json['status']),
+      message: serializer.fromJson<String?>(json['message']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'jobId': serializer.toJson<String>(jobId),
+      'transferId': serializer.toJson<String>(transferId),
+      'fileName': serializer.toJson<String>(fileName),
+      'fileSize': serializer.toJson<int>(fileSize),
+      'localPath': serializer.toJson<String?>(localPath),
+      'destinationPath': serializer.toJson<String?>(destinationPath),
+      'sha256': serializer.toJson<String?>(sha256),
+      'status': serializer.toJson<String>(status),
+      'message': serializer.toJson<String?>(message),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  TransferHistoryFile copyWith({
+    String? id,
+    String? jobId,
+    String? transferId,
+    String? fileName,
+    int? fileSize,
+    Value<String?> localPath = const Value.absent(),
+    Value<String?> destinationPath = const Value.absent(),
+    Value<String?> sha256 = const Value.absent(),
+    String? status,
+    Value<String?> message = const Value.absent(),
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) => TransferHistoryFile(
+    id: id ?? this.id,
+    jobId: jobId ?? this.jobId,
+    transferId: transferId ?? this.transferId,
+    fileName: fileName ?? this.fileName,
+    fileSize: fileSize ?? this.fileSize,
+    localPath: localPath.present ? localPath.value : this.localPath,
+    destinationPath: destinationPath.present
+        ? destinationPath.value
+        : this.destinationPath,
+    sha256: sha256.present ? sha256.value : this.sha256,
+    status: status ?? this.status,
+    message: message.present ? message.value : this.message,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  TransferHistoryFile copyWithCompanion(TransferHistoryFilesCompanion data) {
+    return TransferHistoryFile(
+      id: data.id.present ? data.id.value : this.id,
+      jobId: data.jobId.present ? data.jobId.value : this.jobId,
+      transferId: data.transferId.present
+          ? data.transferId.value
+          : this.transferId,
+      fileName: data.fileName.present ? data.fileName.value : this.fileName,
+      fileSize: data.fileSize.present ? data.fileSize.value : this.fileSize,
+      localPath: data.localPath.present ? data.localPath.value : this.localPath,
+      destinationPath: data.destinationPath.present
+          ? data.destinationPath.value
+          : this.destinationPath,
+      sha256: data.sha256.present ? data.sha256.value : this.sha256,
+      status: data.status.present ? data.status.value : this.status,
+      message: data.message.present ? data.message.value : this.message,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('TransferHistoryFile(')
+          ..write('id: $id, ')
+          ..write('jobId: $jobId, ')
+          ..write('transferId: $transferId, ')
+          ..write('fileName: $fileName, ')
+          ..write('fileSize: $fileSize, ')
+          ..write('localPath: $localPath, ')
+          ..write('destinationPath: $destinationPath, ')
+          ..write('sha256: $sha256, ')
+          ..write('status: $status, ')
+          ..write('message: $message, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    jobId,
+    transferId,
+    fileName,
+    fileSize,
+    localPath,
+    destinationPath,
+    sha256,
+    status,
+    message,
+    createdAt,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is TransferHistoryFile &&
+          other.id == this.id &&
+          other.jobId == this.jobId &&
+          other.transferId == this.transferId &&
+          other.fileName == this.fileName &&
+          other.fileSize == this.fileSize &&
+          other.localPath == this.localPath &&
+          other.destinationPath == this.destinationPath &&
+          other.sha256 == this.sha256 &&
+          other.status == this.status &&
+          other.message == this.message &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class TransferHistoryFilesCompanion
+    extends UpdateCompanion<TransferHistoryFile> {
+  final Value<String> id;
+  final Value<String> jobId;
+  final Value<String> transferId;
+  final Value<String> fileName;
+  final Value<int> fileSize;
+  final Value<String?> localPath;
+  final Value<String?> destinationPath;
+  final Value<String?> sha256;
+  final Value<String> status;
+  final Value<String?> message;
+  final Value<DateTime> createdAt;
+  final Value<DateTime> updatedAt;
+  final Value<int> rowid;
+  const TransferHistoryFilesCompanion({
+    this.id = const Value.absent(),
+    this.jobId = const Value.absent(),
+    this.transferId = const Value.absent(),
+    this.fileName = const Value.absent(),
+    this.fileSize = const Value.absent(),
+    this.localPath = const Value.absent(),
+    this.destinationPath = const Value.absent(),
+    this.sha256 = const Value.absent(),
+    this.status = const Value.absent(),
+    this.message = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  TransferHistoryFilesCompanion.insert({
+    required String id,
+    required String jobId,
+    required String transferId,
+    required String fileName,
+    required int fileSize,
+    this.localPath = const Value.absent(),
+    this.destinationPath = const Value.absent(),
+    this.sha256 = const Value.absent(),
+    required String status,
+    this.message = const Value.absent(),
+    required DateTime createdAt,
+    required DateTime updatedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       jobId = Value(jobId),
+       transferId = Value(transferId),
+       fileName = Value(fileName),
+       fileSize = Value(fileSize),
+       status = Value(status),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<TransferHistoryFile> custom({
+    Expression<String>? id,
+    Expression<String>? jobId,
+    Expression<String>? transferId,
+    Expression<String>? fileName,
+    Expression<int>? fileSize,
+    Expression<String>? localPath,
+    Expression<String>? destinationPath,
+    Expression<String>? sha256,
+    Expression<String>? status,
+    Expression<String>? message,
+    Expression<DateTime>? createdAt,
+    Expression<DateTime>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (jobId != null) 'job_id': jobId,
+      if (transferId != null) 'transfer_id': transferId,
+      if (fileName != null) 'file_name': fileName,
+      if (fileSize != null) 'file_size': fileSize,
+      if (localPath != null) 'local_path': localPath,
+      if (destinationPath != null) 'destination_path': destinationPath,
+      if (sha256 != null) 'sha256': sha256,
+      if (status != null) 'status': status,
+      if (message != null) 'message': message,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  TransferHistoryFilesCompanion copyWith({
+    Value<String>? id,
+    Value<String>? jobId,
+    Value<String>? transferId,
+    Value<String>? fileName,
+    Value<int>? fileSize,
+    Value<String?>? localPath,
+    Value<String?>? destinationPath,
+    Value<String?>? sha256,
+    Value<String>? status,
+    Value<String?>? message,
+    Value<DateTime>? createdAt,
+    Value<DateTime>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return TransferHistoryFilesCompanion(
+      id: id ?? this.id,
+      jobId: jobId ?? this.jobId,
+      transferId: transferId ?? this.transferId,
+      fileName: fileName ?? this.fileName,
+      fileSize: fileSize ?? this.fileSize,
+      localPath: localPath ?? this.localPath,
+      destinationPath: destinationPath ?? this.destinationPath,
+      sha256: sha256 ?? this.sha256,
+      status: status ?? this.status,
+      message: message ?? this.message,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (jobId.present) {
+      map['job_id'] = Variable<String>(jobId.value);
+    }
+    if (transferId.present) {
+      map['transfer_id'] = Variable<String>(transferId.value);
+    }
+    if (fileName.present) {
+      map['file_name'] = Variable<String>(fileName.value);
+    }
+    if (fileSize.present) {
+      map['file_size'] = Variable<int>(fileSize.value);
+    }
+    if (localPath.present) {
+      map['local_path'] = Variable<String>(localPath.value);
+    }
+    if (destinationPath.present) {
+      map['destination_path'] = Variable<String>(destinationPath.value);
+    }
+    if (sha256.present) {
+      map['sha256'] = Variable<String>(sha256.value);
+    }
+    if (status.present) {
+      map['status'] = Variable<String>(status.value);
+    }
+    if (message.present) {
+      map['message'] = Variable<String>(message.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('TransferHistoryFilesCompanion(')
+          ..write('id: $id, ')
+          ..write('jobId: $jobId, ')
+          ..write('transferId: $transferId, ')
+          ..write('fileName: $fileName, ')
+          ..write('fileSize: $fileSize, ')
+          ..write('localPath: $localPath, ')
+          ..write('destinationPath: $destinationPath, ')
+          ..write('sha256: $sha256, ')
+          ..write('status: $status, ')
+          ..write('message: $message, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -2279,6 +4073,10 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $SettingsTable settings = $SettingsTable(this);
   late final $PeersTable peers = $PeersTable(this);
   late final $AllowedPeersTable allowedPeers = $AllowedPeersTable(this);
+  late final $TransferHistoryJobsTable transferHistoryJobs =
+      $TransferHistoryJobsTable(this);
+  late final $TransferHistoryFilesTable transferHistoryFiles =
+      $TransferHistoryFilesTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -2288,6 +4086,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     settings,
     peers,
     allowedPeers,
+    transferHistoryJobs,
+    transferHistoryFiles,
   ];
 }
 
@@ -3387,6 +5187,861 @@ typedef $$AllowedPeersTableProcessedTableManager =
       AllowedPeer,
       PrefetchHooks Function()
     >;
+typedef $$TransferHistoryJobsTableCreateCompanionBuilder =
+    TransferHistoryJobsCompanion Function({
+      required String id,
+      required String transferId,
+      required String direction,
+      required String peerId,
+      required String peerDisplayName,
+      required String status,
+      Value<String?> failureCategory,
+      Value<String?> failureCode,
+      Value<String?> message,
+      Value<int> fileCount,
+      required int totalBytes,
+      required int bytesTransferred,
+      required int totalChunks,
+      required int completedChunks,
+      Value<int> retryCount,
+      Value<double> lossRate,
+      Value<double> throughputBytesPerSec,
+      required DateTime createdAt,
+      required DateTime updatedAt,
+      Value<int> rowid,
+    });
+typedef $$TransferHistoryJobsTableUpdateCompanionBuilder =
+    TransferHistoryJobsCompanion Function({
+      Value<String> id,
+      Value<String> transferId,
+      Value<String> direction,
+      Value<String> peerId,
+      Value<String> peerDisplayName,
+      Value<String> status,
+      Value<String?> failureCategory,
+      Value<String?> failureCode,
+      Value<String?> message,
+      Value<int> fileCount,
+      Value<int> totalBytes,
+      Value<int> bytesTransferred,
+      Value<int> totalChunks,
+      Value<int> completedChunks,
+      Value<int> retryCount,
+      Value<double> lossRate,
+      Value<double> throughputBytesPerSec,
+      Value<DateTime> createdAt,
+      Value<DateTime> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$TransferHistoryJobsTableFilterComposer
+    extends Composer<_$AppDatabase, $TransferHistoryJobsTable> {
+  $$TransferHistoryJobsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get transferId => $composableBuilder(
+    column: $table.transferId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get direction => $composableBuilder(
+    column: $table.direction,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get peerId => $composableBuilder(
+    column: $table.peerId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get peerDisplayName => $composableBuilder(
+    column: $table.peerDisplayName,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get failureCategory => $composableBuilder(
+    column: $table.failureCategory,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get failureCode => $composableBuilder(
+    column: $table.failureCode,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get message => $composableBuilder(
+    column: $table.message,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get fileCount => $composableBuilder(
+    column: $table.fileCount,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get totalBytes => $composableBuilder(
+    column: $table.totalBytes,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get bytesTransferred => $composableBuilder(
+    column: $table.bytesTransferred,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get totalChunks => $composableBuilder(
+    column: $table.totalChunks,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get completedChunks => $composableBuilder(
+    column: $table.completedChunks,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get retryCount => $composableBuilder(
+    column: $table.retryCount,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get lossRate => $composableBuilder(
+    column: $table.lossRate,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get throughputBytesPerSec => $composableBuilder(
+    column: $table.throughputBytesPerSec,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$TransferHistoryJobsTableOrderingComposer
+    extends Composer<_$AppDatabase, $TransferHistoryJobsTable> {
+  $$TransferHistoryJobsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get transferId => $composableBuilder(
+    column: $table.transferId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get direction => $composableBuilder(
+    column: $table.direction,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get peerId => $composableBuilder(
+    column: $table.peerId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get peerDisplayName => $composableBuilder(
+    column: $table.peerDisplayName,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get failureCategory => $composableBuilder(
+    column: $table.failureCategory,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get failureCode => $composableBuilder(
+    column: $table.failureCode,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get message => $composableBuilder(
+    column: $table.message,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get fileCount => $composableBuilder(
+    column: $table.fileCount,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get totalBytes => $composableBuilder(
+    column: $table.totalBytes,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get bytesTransferred => $composableBuilder(
+    column: $table.bytesTransferred,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get totalChunks => $composableBuilder(
+    column: $table.totalChunks,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get completedChunks => $composableBuilder(
+    column: $table.completedChunks,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get retryCount => $composableBuilder(
+    column: $table.retryCount,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get lossRate => $composableBuilder(
+    column: $table.lossRate,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get throughputBytesPerSec => $composableBuilder(
+    column: $table.throughputBytesPerSec,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$TransferHistoryJobsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $TransferHistoryJobsTable> {
+  $$TransferHistoryJobsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get transferId => $composableBuilder(
+    column: $table.transferId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get direction =>
+      $composableBuilder(column: $table.direction, builder: (column) => column);
+
+  GeneratedColumn<String> get peerId =>
+      $composableBuilder(column: $table.peerId, builder: (column) => column);
+
+  GeneratedColumn<String> get peerDisplayName => $composableBuilder(
+    column: $table.peerDisplayName,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get status =>
+      $composableBuilder(column: $table.status, builder: (column) => column);
+
+  GeneratedColumn<String> get failureCategory => $composableBuilder(
+    column: $table.failureCategory,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get failureCode => $composableBuilder(
+    column: $table.failureCode,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get message =>
+      $composableBuilder(column: $table.message, builder: (column) => column);
+
+  GeneratedColumn<int> get fileCount =>
+      $composableBuilder(column: $table.fileCount, builder: (column) => column);
+
+  GeneratedColumn<int> get totalBytes => $composableBuilder(
+    column: $table.totalBytes,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get bytesTransferred => $composableBuilder(
+    column: $table.bytesTransferred,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get totalChunks => $composableBuilder(
+    column: $table.totalChunks,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get completedChunks => $composableBuilder(
+    column: $table.completedChunks,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get retryCount => $composableBuilder(
+    column: $table.retryCount,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<double> get lossRate =>
+      $composableBuilder(column: $table.lossRate, builder: (column) => column);
+
+  GeneratedColumn<double> get throughputBytesPerSec => $composableBuilder(
+    column: $table.throughputBytesPerSec,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$TransferHistoryJobsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $TransferHistoryJobsTable,
+          TransferHistoryJob,
+          $$TransferHistoryJobsTableFilterComposer,
+          $$TransferHistoryJobsTableOrderingComposer,
+          $$TransferHistoryJobsTableAnnotationComposer,
+          $$TransferHistoryJobsTableCreateCompanionBuilder,
+          $$TransferHistoryJobsTableUpdateCompanionBuilder,
+          (
+            TransferHistoryJob,
+            BaseReferences<
+              _$AppDatabase,
+              $TransferHistoryJobsTable,
+              TransferHistoryJob
+            >,
+          ),
+          TransferHistoryJob,
+          PrefetchHooks Function()
+        > {
+  $$TransferHistoryJobsTableTableManager(
+    _$AppDatabase db,
+    $TransferHistoryJobsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$TransferHistoryJobsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$TransferHistoryJobsTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$TransferHistoryJobsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> transferId = const Value.absent(),
+                Value<String> direction = const Value.absent(),
+                Value<String> peerId = const Value.absent(),
+                Value<String> peerDisplayName = const Value.absent(),
+                Value<String> status = const Value.absent(),
+                Value<String?> failureCategory = const Value.absent(),
+                Value<String?> failureCode = const Value.absent(),
+                Value<String?> message = const Value.absent(),
+                Value<int> fileCount = const Value.absent(),
+                Value<int> totalBytes = const Value.absent(),
+                Value<int> bytesTransferred = const Value.absent(),
+                Value<int> totalChunks = const Value.absent(),
+                Value<int> completedChunks = const Value.absent(),
+                Value<int> retryCount = const Value.absent(),
+                Value<double> lossRate = const Value.absent(),
+                Value<double> throughputBytesPerSec = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => TransferHistoryJobsCompanion(
+                id: id,
+                transferId: transferId,
+                direction: direction,
+                peerId: peerId,
+                peerDisplayName: peerDisplayName,
+                status: status,
+                failureCategory: failureCategory,
+                failureCode: failureCode,
+                message: message,
+                fileCount: fileCount,
+                totalBytes: totalBytes,
+                bytesTransferred: bytesTransferred,
+                totalChunks: totalChunks,
+                completedChunks: completedChunks,
+                retryCount: retryCount,
+                lossRate: lossRate,
+                throughputBytesPerSec: throughputBytesPerSec,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String transferId,
+                required String direction,
+                required String peerId,
+                required String peerDisplayName,
+                required String status,
+                Value<String?> failureCategory = const Value.absent(),
+                Value<String?> failureCode = const Value.absent(),
+                Value<String?> message = const Value.absent(),
+                Value<int> fileCount = const Value.absent(),
+                required int totalBytes,
+                required int bytesTransferred,
+                required int totalChunks,
+                required int completedChunks,
+                Value<int> retryCount = const Value.absent(),
+                Value<double> lossRate = const Value.absent(),
+                Value<double> throughputBytesPerSec = const Value.absent(),
+                required DateTime createdAt,
+                required DateTime updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => TransferHistoryJobsCompanion.insert(
+                id: id,
+                transferId: transferId,
+                direction: direction,
+                peerId: peerId,
+                peerDisplayName: peerDisplayName,
+                status: status,
+                failureCategory: failureCategory,
+                failureCode: failureCode,
+                message: message,
+                fileCount: fileCount,
+                totalBytes: totalBytes,
+                bytesTransferred: bytesTransferred,
+                totalChunks: totalChunks,
+                completedChunks: completedChunks,
+                retryCount: retryCount,
+                lossRate: lossRate,
+                throughputBytesPerSec: throughputBytesPerSec,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$TransferHistoryJobsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $TransferHistoryJobsTable,
+      TransferHistoryJob,
+      $$TransferHistoryJobsTableFilterComposer,
+      $$TransferHistoryJobsTableOrderingComposer,
+      $$TransferHistoryJobsTableAnnotationComposer,
+      $$TransferHistoryJobsTableCreateCompanionBuilder,
+      $$TransferHistoryJobsTableUpdateCompanionBuilder,
+      (
+        TransferHistoryJob,
+        BaseReferences<
+          _$AppDatabase,
+          $TransferHistoryJobsTable,
+          TransferHistoryJob
+        >,
+      ),
+      TransferHistoryJob,
+      PrefetchHooks Function()
+    >;
+typedef $$TransferHistoryFilesTableCreateCompanionBuilder =
+    TransferHistoryFilesCompanion Function({
+      required String id,
+      required String jobId,
+      required String transferId,
+      required String fileName,
+      required int fileSize,
+      Value<String?> localPath,
+      Value<String?> destinationPath,
+      Value<String?> sha256,
+      required String status,
+      Value<String?> message,
+      required DateTime createdAt,
+      required DateTime updatedAt,
+      Value<int> rowid,
+    });
+typedef $$TransferHistoryFilesTableUpdateCompanionBuilder =
+    TransferHistoryFilesCompanion Function({
+      Value<String> id,
+      Value<String> jobId,
+      Value<String> transferId,
+      Value<String> fileName,
+      Value<int> fileSize,
+      Value<String?> localPath,
+      Value<String?> destinationPath,
+      Value<String?> sha256,
+      Value<String> status,
+      Value<String?> message,
+      Value<DateTime> createdAt,
+      Value<DateTime> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$TransferHistoryFilesTableFilterComposer
+    extends Composer<_$AppDatabase, $TransferHistoryFilesTable> {
+  $$TransferHistoryFilesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get jobId => $composableBuilder(
+    column: $table.jobId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get transferId => $composableBuilder(
+    column: $table.transferId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get fileName => $composableBuilder(
+    column: $table.fileName,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get fileSize => $composableBuilder(
+    column: $table.fileSize,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get localPath => $composableBuilder(
+    column: $table.localPath,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get destinationPath => $composableBuilder(
+    column: $table.destinationPath,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get sha256 => $composableBuilder(
+    column: $table.sha256,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get message => $composableBuilder(
+    column: $table.message,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$TransferHistoryFilesTableOrderingComposer
+    extends Composer<_$AppDatabase, $TransferHistoryFilesTable> {
+  $$TransferHistoryFilesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get jobId => $composableBuilder(
+    column: $table.jobId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get transferId => $composableBuilder(
+    column: $table.transferId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get fileName => $composableBuilder(
+    column: $table.fileName,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get fileSize => $composableBuilder(
+    column: $table.fileSize,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get localPath => $composableBuilder(
+    column: $table.localPath,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get destinationPath => $composableBuilder(
+    column: $table.destinationPath,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get sha256 => $composableBuilder(
+    column: $table.sha256,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get message => $composableBuilder(
+    column: $table.message,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$TransferHistoryFilesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $TransferHistoryFilesTable> {
+  $$TransferHistoryFilesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get jobId =>
+      $composableBuilder(column: $table.jobId, builder: (column) => column);
+
+  GeneratedColumn<String> get transferId => $composableBuilder(
+    column: $table.transferId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get fileName =>
+      $composableBuilder(column: $table.fileName, builder: (column) => column);
+
+  GeneratedColumn<int> get fileSize =>
+      $composableBuilder(column: $table.fileSize, builder: (column) => column);
+
+  GeneratedColumn<String> get localPath =>
+      $composableBuilder(column: $table.localPath, builder: (column) => column);
+
+  GeneratedColumn<String> get destinationPath => $composableBuilder(
+    column: $table.destinationPath,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get sha256 =>
+      $composableBuilder(column: $table.sha256, builder: (column) => column);
+
+  GeneratedColumn<String> get status =>
+      $composableBuilder(column: $table.status, builder: (column) => column);
+
+  GeneratedColumn<String> get message =>
+      $composableBuilder(column: $table.message, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$TransferHistoryFilesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $TransferHistoryFilesTable,
+          TransferHistoryFile,
+          $$TransferHistoryFilesTableFilterComposer,
+          $$TransferHistoryFilesTableOrderingComposer,
+          $$TransferHistoryFilesTableAnnotationComposer,
+          $$TransferHistoryFilesTableCreateCompanionBuilder,
+          $$TransferHistoryFilesTableUpdateCompanionBuilder,
+          (
+            TransferHistoryFile,
+            BaseReferences<
+              _$AppDatabase,
+              $TransferHistoryFilesTable,
+              TransferHistoryFile
+            >,
+          ),
+          TransferHistoryFile,
+          PrefetchHooks Function()
+        > {
+  $$TransferHistoryFilesTableTableManager(
+    _$AppDatabase db,
+    $TransferHistoryFilesTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$TransferHistoryFilesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$TransferHistoryFilesTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$TransferHistoryFilesTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> jobId = const Value.absent(),
+                Value<String> transferId = const Value.absent(),
+                Value<String> fileName = const Value.absent(),
+                Value<int> fileSize = const Value.absent(),
+                Value<String?> localPath = const Value.absent(),
+                Value<String?> destinationPath = const Value.absent(),
+                Value<String?> sha256 = const Value.absent(),
+                Value<String> status = const Value.absent(),
+                Value<String?> message = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => TransferHistoryFilesCompanion(
+                id: id,
+                jobId: jobId,
+                transferId: transferId,
+                fileName: fileName,
+                fileSize: fileSize,
+                localPath: localPath,
+                destinationPath: destinationPath,
+                sha256: sha256,
+                status: status,
+                message: message,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String jobId,
+                required String transferId,
+                required String fileName,
+                required int fileSize,
+                Value<String?> localPath = const Value.absent(),
+                Value<String?> destinationPath = const Value.absent(),
+                Value<String?> sha256 = const Value.absent(),
+                required String status,
+                Value<String?> message = const Value.absent(),
+                required DateTime createdAt,
+                required DateTime updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => TransferHistoryFilesCompanion.insert(
+                id: id,
+                jobId: jobId,
+                transferId: transferId,
+                fileName: fileName,
+                fileSize: fileSize,
+                localPath: localPath,
+                destinationPath: destinationPath,
+                sha256: sha256,
+                status: status,
+                message: message,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$TransferHistoryFilesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $TransferHistoryFilesTable,
+      TransferHistoryFile,
+      $$TransferHistoryFilesTableFilterComposer,
+      $$TransferHistoryFilesTableOrderingComposer,
+      $$TransferHistoryFilesTableAnnotationComposer,
+      $$TransferHistoryFilesTableCreateCompanionBuilder,
+      $$TransferHistoryFilesTableUpdateCompanionBuilder,
+      (
+        TransferHistoryFile,
+        BaseReferences<
+          _$AppDatabase,
+          $TransferHistoryFilesTable,
+          TransferHistoryFile
+        >,
+      ),
+      TransferHistoryFile,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -3399,4 +6054,8 @@ class $AppDatabaseManager {
       $$PeersTableTableManager(_db, _db.peers);
   $$AllowedPeersTableTableManager get allowedPeers =>
       $$AllowedPeersTableTableManager(_db, _db.allowedPeers);
+  $$TransferHistoryJobsTableTableManager get transferHistoryJobs =>
+      $$TransferHistoryJobsTableTableManager(_db, _db.transferHistoryJobs);
+  $$TransferHistoryFilesTableTableManager get transferHistoryFiles =>
+      $$TransferHistoryFilesTableTableManager(_db, _db.transferHistoryFiles);
 }

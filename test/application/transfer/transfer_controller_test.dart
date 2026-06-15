@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,8 +9,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sponzey_file_sharing/app/app_config.dart';
 import 'package:sponzey_file_sharing/application/auth/auth_controller.dart';
 import 'package:sponzey_file_sharing/application/auth/peer_auth_controller.dart';
+import 'package:sponzey_file_sharing/application/network/peer_path_registry.dart';
 import 'package:sponzey_file_sharing/application/transfer/transfer_controller.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_history_repository.dart';
 import 'package:sponzey_file_sharing/application/transfer/transfer_overview_provider.dart';
+import 'package:sponzey_file_sharing/core/errors/app_exception.dart';
 import 'package:sponzey_file_sharing/core/logger/app_log_category.dart';
 import 'package:sponzey_file_sharing/core/logger/app_logger.dart';
 import 'package:sponzey_file_sharing/core/logger/console_app_logger.dart';
@@ -18,6 +22,8 @@ import 'package:sponzey_file_sharing/domain/entities/app_settings.dart';
 import 'package:sponzey_file_sharing/domain/entities/peer_node.dart';
 import 'package:sponzey_file_sharing/domain/entities/transfer_job.dart';
 import 'package:sponzey_file_sharing/domain/network/network_interface_models.dart';
+import 'package:sponzey_file_sharing/domain/network/peer_connection_path.dart';
+import 'package:sponzey_file_sharing/domain/network/peer_route_candidate.dart';
 import 'package:sponzey_file_sharing/infrastructure/auth/auth_packet.dart';
 import 'package:sponzey_file_sharing/infrastructure/auth/auth_transport.dart';
 import 'package:sponzey_file_sharing/infrastructure/control/control_transport.dart';
@@ -26,6 +32,8 @@ import 'package:sponzey_file_sharing/infrastructure/platform/app_secure_storage.
 import 'package:sponzey_file_sharing/infrastructure/platform/app_storage_path_provider.dart';
 import 'package:sponzey_file_sharing/infrastructure/platform/local_device_identity_service.dart';
 import 'package:sponzey_file_sharing/infrastructure/repositories/settings_repository.dart';
+import 'package:sponzey_file_sharing/infrastructure/repositories/transfer_history_repository.dart';
+import 'package:sponzey_file_sharing/infrastructure/transfer/transfer_file_service.dart';
 import 'package:sponzey_file_sharing/infrastructure/transfer_data/data_frame_codec.dart';
 import 'package:sponzey_file_sharing/infrastructure/transfer_data/data_frame.dart';
 import 'package:sponzey_file_sharing/infrastructure/transfer_data/data_packet.dart';
@@ -102,6 +110,11 @@ void main() {
 
       expect(aliceJob.status, TransferJobStatus.completed);
       expect(bobJob.status, TransferJobStatus.completed);
+      expect(aliceJob.routeSnapshot?.routeLeaseId, isNotNull);
+      expect(aliceJob.routeSnapshot?.controlRemoteAddress, '127.0.0.1');
+      expect(aliceJob.routeSnapshot?.dataRemoteAddress, '127.0.0.1');
+      expect(bobJob.routeSnapshot?.routeLeaseId, isNotNull);
+      expect(bobJob.routeSnapshot?.dataLocalAddress, isNotNull);
       expect(bobJob.destinationPath, isNotNull);
       expect(
         await File(bobJob.destinationPath!).readAsString(),
@@ -120,6 +133,369 @@ void main() {
       expect(
         [...senderTraces, ...receiverTraces].map((trace) => trace.endpoint),
         everyElement(isNot(contains(sourceFile.path))),
+      );
+
+      final aliceHistory = await _waitForHistory(alice.container, 1);
+      final bobHistory = await _waitForHistory(bob.container, 1);
+      expect(aliceHistory.single.job.status, TransferJobStatus.completed);
+      expect(bobHistory.single.job.status, TransferJobStatus.completed);
+      expect(aliceHistory.single.files.single.fileName, 'source.txt');
+      expect(bobHistory.single.files.single.fileName, 'source.txt');
+    },
+  );
+
+  test(
+    'uses active route remote address instead of stale session loopback target',
+    () async {
+      String? transferInitTargetAddress;
+      final network = _LinkedFakeAuthNetwork(
+        interceptor:
+            ({
+              required packet,
+              required address,
+              required sourcePort,
+              required targetPort,
+              required deliver,
+            }) async {
+              if (packet.type == AuthPacketType.transferInit &&
+                  sourcePort == 41201 &&
+                  targetPort == 41202) {
+                transferInitTargetAddress = address.address;
+              }
+              deliver(packet, address: address, port: sourcePort);
+            },
+      );
+      final alice = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41201,
+        receivePath: '${workspaceDirectory.path}/alice-route-target',
+      );
+      final bob = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-b',
+        authPort: 41202,
+        receivePath: '${workspaceDirectory.path}/bob-route-target',
+      );
+      addTearDown(alice.dispose);
+      addTearDown(bob.dispose);
+
+      await _prepareAuthenticatedPair(
+        alice: alice,
+        bob: bob,
+        bobReceivePath: '${workspaceDirectory.path}/bob-route-target',
+        bobPort: 41202,
+        alicePort: 41201,
+        clock: clock,
+      );
+      alice.container
+          .read(peerPathRegistryMutationsProvider)
+          .select(
+            _testActivePath(
+              peerId: 'team@instance-device-b',
+              localAddress: '10.211.55.2',
+              remoteAddress: '10.211.55.3',
+              remotePort: 41202,
+            ),
+          );
+
+      final sourceFile = File(
+        '${workspaceDirectory.path}/alice-route-target/source.txt',
+      );
+      await sourceFile.parent.create(recursive: true);
+      await sourceFile.writeAsString('route target must not use loopback');
+
+      await alice.transferController.sendFile(
+        peerId: 'team@instance-device-b',
+        filePath: sourceFile.path,
+      );
+
+      expect(transferInitTargetAddress, '10.211.55.3');
+      final aliceJob = await _waitForTerminalTransfer(alice.container);
+      expect(aliceJob.routeSnapshot?.controlRemoteAddress, '10.211.55.3');
+      expect(aliceJob.routeSnapshot?.dataRemoteAddress, '10.211.55.3');
+    },
+  );
+
+  test(
+    'fails before data chunks when data bind local address differs from route lease',
+    () async {
+      final controlNetwork = _LinkedFakeAuthNetwork();
+      final dataNetwork = _LinkedFakeDataNetwork();
+      final aliceDataTransport = dataNetwork.attach();
+      final bobDataTransport = dataNetwork.attach();
+      final alice = await _createNode(
+        network: controlNetwork,
+        dataTransport: aliceDataTransport,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41211,
+        receivePath: '${workspaceDirectory.path}/alice-bind-mismatch',
+      );
+      final bob = await _createNode(
+        network: controlNetwork,
+        dataTransport: bobDataTransport,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-b',
+        authPort: 41212,
+        receivePath: '${workspaceDirectory.path}/bob-bind-mismatch',
+      );
+      addTearDown(alice.dispose);
+      addTearDown(bob.dispose);
+
+      await _prepareAuthenticatedPair(
+        alice: alice,
+        bob: bob,
+        bobReceivePath: '${workspaceDirectory.path}/bob-bind-mismatch',
+        bobPort: 41212,
+        alicePort: 41211,
+        clock: clock,
+      );
+      aliceDataTransport.endpoint = const UdpInterfaceEndpoint(
+        role: UdpPortRole.data,
+        localAddress: '10.211.55.2',
+        port: 43000,
+        bindMode: UdpInterfaceBindMode.specificAddress,
+      );
+
+      final sourceFile = File(
+        '${workspaceDirectory.path}/alice-bind-mismatch/source.txt',
+      );
+      await sourceFile.parent.create(recursive: true);
+      await sourceFile.writeAsString('data chunks must not start');
+
+      await alice.transferController.sendFile(
+        peerId: 'team@instance-device-b',
+        filePath: sourceFile.path,
+      );
+
+      final aliceJob = await _waitForTerminalTransfer(alice.container);
+      expect(aliceJob.status, TransferJobStatus.failed);
+      expect(aliceJob.message, contains('Data socket local address'));
+      expect(
+        dataNetwork.sentFrames.where(
+          (frame) => frame.type == DataFrameType.dataChunk,
+        ),
+        isEmpty,
+      );
+    },
+  );
+
+  test('fails before data chunks when route lease expires', () async {
+    late _TransferHarness alice;
+    final dataNetwork = _LinkedFakeDataNetwork();
+    final network = _LinkedFakeAuthNetwork(
+      interceptor:
+          ({
+            required packet,
+            required address,
+            required sourcePort,
+            required targetPort,
+            required deliver,
+          }) async {
+            if (packet.type == AuthPacketType.transferInitAck &&
+                sourcePort == 41222 &&
+                targetPort == 41221) {
+              alice.container
+                  .read(peerPathRegistryMutationsProvider)
+                  .markFailed(
+                    peerId: 'team@instance-device-b',
+                    reasonCode: 'testRouteExpired',
+                  );
+            }
+            deliver(packet, address: address, port: sourcePort);
+          },
+    );
+    alice = await _createNode(
+      network: network,
+      dataTransport: dataNetwork.attach(),
+      clock: clock,
+      loginUserId: _sharedUserId,
+      loginPassword: _sharedPassword,
+      localDeviceId: 'device-a',
+      authPort: 41221,
+      receivePath: '${workspaceDirectory.path}/alice-lease-expired',
+    );
+    final bob = await _createNode(
+      network: network,
+      dataTransport: dataNetwork.attach(),
+      clock: clock,
+      loginUserId: _sharedUserId,
+      loginPassword: _sharedPassword,
+      localDeviceId: 'device-b',
+      authPort: 41222,
+      receivePath: '${workspaceDirectory.path}/bob-lease-expired',
+    );
+    addTearDown(alice.dispose);
+    addTearDown(bob.dispose);
+
+    await _prepareAuthenticatedPair(
+      alice: alice,
+      bob: bob,
+      bobReceivePath: '${workspaceDirectory.path}/bob-lease-expired',
+      bobPort: 41222,
+      alicePort: 41221,
+      clock: clock,
+    );
+
+    final sourceFile = File(
+      '${workspaceDirectory.path}/alice-lease-expired/source.txt',
+    );
+    await sourceFile.parent.create(recursive: true);
+    await sourceFile.writeAsString('route lease expires before chunks');
+
+    await alice.transferController.sendFile(
+      peerId: 'team@instance-device-b',
+      filePath: sourceFile.path,
+    );
+
+    final aliceJob = await _waitForTerminalTransfer(alice.container);
+    expect(aliceJob.status, TransferJobStatus.failed);
+    expect(aliceJob.message, contains('연결 경로가 만료'));
+    expect(
+      dataNetwork.sentFrames.where(
+        (frame) => frame.type == DataFrameType.dataChunk,
+      ),
+      isEmpty,
+    );
+  });
+
+  test(
+    'receiver temp draft failure rejects transfer init before data starts',
+    () async {
+      final controlNetwork = _LinkedFakeAuthNetwork();
+      final dataNetwork = _LinkedFakeDataNetwork();
+      final alice = await _createNode(
+        network: controlNetwork,
+        dataTransport: dataNetwork.attach(),
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41231,
+        receivePath: '${workspaceDirectory.path}/alice-draft-fail',
+      );
+      final bob = await _createNode(
+        network: controlNetwork,
+        dataTransport: dataNetwork.attach(),
+        transferFileService: _DraftFailingTransferFileService(),
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-b',
+        authPort: 41232,
+        receivePath: '${workspaceDirectory.path}/bob-draft-fail',
+      );
+      addTearDown(alice.dispose);
+      addTearDown(bob.dispose);
+
+      await _prepareAuthenticatedPair(
+        alice: alice,
+        bob: bob,
+        bobReceivePath: '${workspaceDirectory.path}/bob-draft-fail',
+        bobPort: 41232,
+        alicePort: 41231,
+        clock: clock,
+      );
+
+      final sourceFile = File(
+        '${workspaceDirectory.path}/alice-draft-fail/source.txt',
+      );
+      await sourceFile.parent.create(recursive: true);
+      await sourceFile.writeAsString('receiver cannot prepare temp file');
+
+      await alice.transferController.sendFile(
+        peerId: 'team@instance-device-b',
+        filePath: sourceFile.path,
+      );
+
+      final aliceJob = await _waitForTerminalTransfer(alice.container);
+      expect(aliceJob.status, TransferJobStatus.rejected);
+      expect(aliceJob.message, contains('수신 임시 파일'));
+      expect(
+        dataNetwork.sentFrames
+            .where(
+              (frame) =>
+                  frame.type == DataFrameType.dataStart ||
+                  frame.type == DataFrameType.dataChunk,
+            )
+            .toList(growable: false),
+        isEmpty,
+      );
+      expect(bob.container.read(transferJobsProvider), isEmpty);
+    },
+  );
+
+  test(
+    'receiver finalize failure reports failure to sender and cleans draft',
+    () async {
+      final controlNetwork = _LinkedFakeAuthNetwork();
+      final dataNetwork = _LinkedFakeDataNetwork();
+      final failingFileService = _FinalizeFailingTransferFileService();
+      final alice = await _createNode(
+        network: controlNetwork,
+        dataTransport: dataNetwork.attach(),
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41241,
+        receivePath: '${workspaceDirectory.path}/alice-finalize-fail',
+      );
+      final bob = await _createNode(
+        network: controlNetwork,
+        dataTransport: dataNetwork.attach(),
+        transferFileService: failingFileService,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-b',
+        authPort: 41242,
+        receivePath: '${workspaceDirectory.path}/bob-finalize-fail',
+      );
+      addTearDown(alice.dispose);
+      addTearDown(bob.dispose);
+
+      await _prepareAuthenticatedPair(
+        alice: alice,
+        bob: bob,
+        bobReceivePath: '${workspaceDirectory.path}/bob-finalize-fail',
+        bobPort: 41242,
+        alicePort: 41241,
+        clock: clock,
+      );
+
+      final sourceFile = File(
+        '${workspaceDirectory.path}/alice-finalize-fail/source.txt',
+      );
+      await sourceFile.parent.create(recursive: true);
+      await sourceFile.writeAsString('receiver cannot finalize file');
+
+      await alice.transferController.sendFile(
+        peerId: 'team@instance-device-b',
+        filePath: sourceFile.path,
+      );
+
+      final aliceJob = await _waitForTerminalTransfer(alice.container);
+      final bobJob = await _waitForTerminalTransfer(bob.container);
+      expect(aliceJob.status, TransferJobStatus.failed);
+      expect(aliceJob.message, contains('수신 파일을 완료하지 못했습니다'));
+      expect(bobJob.status, TransferJobStatus.failed);
+      expect(failingFileService.discardedDraftPaths, isNotEmpty);
+      expect(failingFileService.lastTempFilePath, isNotNull);
+      expect(
+        await File(failingFileService.lastTempFilePath!).exists(),
+        isFalse,
       );
     },
   );
@@ -520,6 +896,168 @@ void main() {
     expect(ackFrameCount, lessThan(chunkFrameCount));
   });
 
+  test(
+    'digest mismatch fails sender and receiver after corrupted Data frame',
+    () async {
+      var corrupted = false;
+      final controlNetwork = _LinkedFakeAuthNetwork();
+      final dataNetwork = _LinkedFakeDataNetwork(
+        interceptor:
+            ({
+              required frame,
+              required address,
+              required sourcePort,
+              required targetPort,
+              required deliver,
+            }) async {
+              if (!corrupted &&
+                  frame.type == DataFrameType.dataChunk &&
+                  frame.chunkIndex == 1) {
+                corrupted = true;
+                final corruptedPayload = Uint8List.fromList(frame.payload);
+                corruptedPayload[0] ^= 0xff;
+                deliver(
+                  frame.copyWith(payload: corruptedPayload),
+                  address: address,
+                  port: sourcePort,
+                );
+                return;
+              }
+              deliver(frame, address: address, port: sourcePort);
+            },
+      );
+      final alice = await _createNode(
+        network: controlNetwork,
+        dataTransport: dataNetwork.attach(),
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41061,
+        receivePath: '${workspaceDirectory.path}/alice-digest-mismatch',
+      );
+      final bob = await _createNode(
+        network: controlNetwork,
+        dataTransport: dataNetwork.attach(),
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-b',
+        authPort: 41062,
+        receivePath: '${workspaceDirectory.path}/bob-digest-mismatch',
+      );
+      addTearDown(alice.dispose);
+      addTearDown(bob.dispose);
+
+      await _prepareAuthenticatedPair(
+        alice: alice,
+        bob: bob,
+        bobReceivePath: '${workspaceDirectory.path}/bob-digest-mismatch',
+        bobPort: 41062,
+        alicePort: 41061,
+        clock: clock,
+      );
+
+      final sourceFile = File(
+        '${workspaceDirectory.path}/alice-digest-mismatch/source.bin',
+      );
+      await sourceFile.parent.create(recursive: true);
+      await sourceFile.writeAsBytes(
+        List<int>.filled(const DataFrameCodec().maxPayloadBytes() * 3, 11),
+      );
+
+      await alice.transferController.sendFile(
+        peerId: 'team@instance-device-b',
+        filePath: sourceFile.path,
+      );
+
+      final aliceJob = await _waitForTerminalTransfer(alice.container);
+      final bobJob = await _waitForTerminalTransfer(bob.container);
+
+      expect(corrupted, isTrue);
+      expect(aliceJob.status, TransferJobStatus.failed);
+      expect(bobJob.status, TransferJobStatus.failed);
+      expect(aliceJob.message, contains('파일 해시'));
+      expect(bobJob.message, contains('파일 해시'));
+    },
+  );
+
+  test(
+    'does not emit packet-level product logs for Data channel chunks',
+    () async {
+      final logger = _MemoryAppLogger(minimumLevel: AppLogLevel.debug);
+      final controlNetwork = _LinkedFakeAuthNetwork();
+      final dataNetwork = _LinkedFakeDataNetwork();
+      final alice = await _createNode(
+        network: controlNetwork,
+        dataTransport: dataNetwork.attach(),
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41071,
+        receivePath: '${workspaceDirectory.path}/alice-product-log',
+        logger: logger,
+      );
+      final bob = await _createNode(
+        network: controlNetwork,
+        dataTransport: dataNetwork.attach(),
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-b',
+        authPort: 41072,
+        receivePath: '${workspaceDirectory.path}/bob-product-log',
+        logger: logger,
+      );
+      addTearDown(alice.dispose);
+      addTearDown(bob.dispose);
+
+      await _prepareAuthenticatedPair(
+        alice: alice,
+        bob: bob,
+        bobReceivePath: '${workspaceDirectory.path}/bob-product-log',
+        bobPort: 41072,
+        alicePort: 41071,
+        clock: clock,
+      );
+
+      final sourceFile = File(
+        '${workspaceDirectory.path}/alice-product-log/source.bin',
+      );
+      await sourceFile.parent.create(recursive: true);
+      await sourceFile.writeAsBytes(
+        List<int>.filled(const DataFrameCodec().maxPayloadBytes() * 32, 5),
+      );
+
+      await alice.transferController.sendFile(
+        peerId: 'team@instance-device-b',
+        filePath: sourceFile.path,
+      );
+
+      final aliceJob = await _waitForTerminalTransfer(alice.container);
+      final bobJob = await _waitForTerminalTransfer(bob.container);
+      final productDataLogs = logger.entries.where(
+        (entry) =>
+            entry.category == AppLogCategory.transferData &&
+            entry.level != AppLogLevel.debug,
+      );
+      final messages = logger.entries.map((entry) => entry.message).join('\n');
+
+      expect(aliceJob.status, TransferJobStatus.completed);
+      expect(bobJob.status, TransferJobStatus.completed);
+      expect(
+        dataNetwork.sentFrames.where(
+          (frame) => frame.type == DataFrameType.dataChunk,
+        ),
+        hasLength(greaterThanOrEqualTo(32)),
+      );
+      expect(productDataLogs, isEmpty);
+      expect(messages, isNot(contains(sourceFile.path)));
+      expect(messages, isNot(contains('payload')));
+    },
+  );
+
   test('sends multiple files to one authenticated peer', () async {
     final network = _LinkedFakeAuthNetwork();
     final alice = await _createNode(
@@ -648,6 +1186,10 @@ void main() {
       await _flush();
       await alice.peerAuthController.startHandshake(
         _peerForDevice(clock.value, deviceId: 'device-c', port: 41113),
+        selectedPath: _testDiscoveredPath(
+          peerId: 'team@instance-device-c',
+          remotePort: 41113,
+        ),
       );
       for (var i = 0; i < 100; i += 1) {
         final aliceCarolSession = alice.container.read(
@@ -1234,6 +1776,51 @@ PeerNode _peerForDevice(
   );
 }
 
+PeerConnectionPath _testDiscoveredPath({
+  required String peerId,
+  required int remotePort,
+  String localAddress = '127.0.0.1',
+  String remoteAddress = '127.0.0.1',
+}) {
+  final candidate = PeerRouteCandidate.create(
+    peerId: peerId,
+    remoteAddress: remoteAddress,
+    remotePort: remotePort,
+    localInterfaceId: NetworkInterfaceId(
+      name: 'test-${localAddress.replaceAll('.', '-')}',
+      index: -1,
+      stableId: 'test-${localAddress.replaceAll('.', '-')}',
+    ),
+    localAddress: localAddress,
+    discoveredBy: RouteCandidateDiscoverySource.localRegistry,
+    seenAt: DateTime(2026, 4, 9, 12),
+    status: RouteCandidateStatus.reachable,
+    localInterfaceTypeHint: localAddress.startsWith('127.')
+        ? InterfaceTypeHint.loopback
+        : InterfaceTypeHint.ethernet,
+    bindMode: UdpInterfaceBindMode.any,
+  );
+  return PeerConnectionPath.fromCandidate(
+    candidate: candidate,
+    selectedAt: DateTime(2026, 4, 9, 12),
+    selectionReason: PeerPathSelectionReason.previousSuccess,
+  );
+}
+
+PeerConnectionPath _testActivePath({
+  required String peerId,
+  required int remotePort,
+  String localAddress = '127.0.0.1',
+  String remoteAddress = '127.0.0.1',
+}) {
+  return _testDiscoveredPath(
+    peerId: peerId,
+    remotePort: remotePort,
+    localAddress: localAddress,
+    remoteAddress: remoteAddress,
+  ).copyWith(status: PeerPathStatus.active);
+}
+
 Future<_TransferHarness> _createNode({
   required _LinkedFakeAuthNetwork network,
   required _MutableClock clock,
@@ -1244,6 +1831,7 @@ Future<_TransferHarness> _createNode({
   required String receivePath,
   AppLogger? logger,
   DataTransport? dataTransport,
+  TransferFileService? transferFileService,
   AppStoragePathProvider? storagePathProvider,
   bool useSwitchableSettingsRepository = false,
 }) async {
@@ -1286,6 +1874,8 @@ Future<_TransferHarness> _createNode({
         AuthControlTransportAdapter(authTransport: transport),
       ),
       dataTransportProvider.overrideWithValue(resolvedDataTransport),
+      if (transferFileService != null)
+        transferFileServiceProvider.overrideWithValue(transferFileService),
       localDeviceIdentityServiceProvider.overrideWithValue(
         _FakeLocalDeviceIdentityService(localDeviceId),
       ),
@@ -1318,6 +1908,7 @@ Future<void> _prepareAuthenticatedPair({
   required String bobReceivePath,
   required int bobPort,
   required _MutableClock clock,
+  int alicePort = 41001,
 }) async {
   await bob.container
       .read(settingsRepositoryProvider)
@@ -1334,6 +1925,7 @@ Future<void> _prepareAuthenticatedPair({
     bob: bob,
     clock: clock.value,
     bobPort: bobPort,
+    alicePort: alicePort,
   );
 }
 
@@ -1366,6 +1958,10 @@ Future<void> _handshakePair({
   await _flush();
   await alice.peerAuthController.startHandshake(
     _peerForBob(clock, port: bobPort),
+    selectedPath: _testDiscoveredPath(
+      peerId: 'team@instance-device-b',
+      remotePort: bobPort,
+    ),
   );
 
   for (var i = 0; i < 100; i += 1) {
@@ -1418,6 +2014,24 @@ Future<List<TransferJob>> _waitForTerminalTransferCount(
   fail(
     'Expected $expectedCount terminal transfer jobs. '
     'Current jobs: ${jobs.map((job) => '${job.statusLabel}:${job.message}').join(' | ')}',
+  );
+}
+
+Future<List<TransferHistorySnapshot>> _waitForHistory(
+  ProviderContainer container,
+  int expectedCount,
+) async {
+  final repository = container.read(transferHistoryRepositoryProvider);
+  for (var i = 0; i < 100; i += 1) {
+    final history = await repository.loadRecentHistory();
+    if (history.length >= expectedCount) {
+      return history;
+    }
+    await _flush();
+  }
+  final history = await repository.loadRecentHistory();
+  fail(
+    'Expected $expectedCount persisted history rows, got ${history.length}.',
   );
 }
 
@@ -1503,6 +2117,52 @@ class _SwitchableSettingsRepository extends SettingsRepository {
   }
 }
 
+class _DraftFailingTransferFileService extends LocalTransferFileService {
+  @override
+  Future<IncomingTransferDraft> createIncomingDraft({
+    required String transferId,
+    required String fileName,
+  }) {
+    throw const AppException(
+      code: 'incoming_draft_prepare_failed',
+      message: '수신 임시 파일을 준비하지 못했습니다. 테스트 저장소 권한 오류입니다.',
+    );
+  }
+}
+
+class _FinalizeFailingTransferFileService extends LocalTransferFileService {
+  String? lastTempFilePath;
+  final List<String> discardedDraftPaths = [];
+
+  @override
+  Future<IncomingTransferDraft> createIncomingDraft({
+    required String transferId,
+    required String fileName,
+  }) async {
+    final draft = await super.createIncomingDraft(
+      transferId: transferId,
+      fileName: fileName,
+    );
+    lastTempFilePath = draft.tempFilePath;
+    return draft;
+  }
+
+  @override
+  Future<String> finalizeIncomingFile({
+    required String tempFilePath,
+    required String destinationDirectory,
+    required String fileName,
+  }) {
+    throw const FileSystemException('test finalize failure');
+  }
+
+  @override
+  Future<void> discardDraft(String tempFilePath) {
+    discardedDraftPaths.add(tempFilePath);
+    return super.discardDraft(tempFilePath);
+  }
+}
+
 class _MutableClock {
   _MutableClock(this.value);
 
@@ -1577,6 +2237,20 @@ typedef _PacketInterceptor =
       required int targetPort,
       required void Function(
         AuthPacket packet, {
+        required InternetAddress address,
+        required int port,
+      })
+      deliver,
+    });
+
+typedef _DataFrameInterceptor =
+    Future<void> Function({
+      required DataFrame frame,
+      required InternetAddress address,
+      required int sourcePort,
+      required int targetPort,
+      required void Function(
+        DataFrame frame, {
         required InternetAddress address,
         required int port,
       })
@@ -1662,6 +2336,9 @@ class _FakeAuthTransport implements AuthTransport {
 }
 
 class _LinkedFakeDataNetwork {
+  _LinkedFakeDataNetwork({this.interceptor});
+
+  final _DataFrameInterceptor? interceptor;
   final Map<int, _FakeDataTransport> _transportsByPort = {};
   final List<DataFrame> sentFrames = [];
 
@@ -1690,11 +2367,23 @@ class _LinkedFakeDataNetwork {
     sentFrames.add(frame);
     final target = _transportsByPort[port];
     if (target != null) {
-      target.emitFrame(
-        frame,
-        address: address,
-        port: source.endpoint?.port ?? 0,
-      );
+      if (interceptor != null) {
+        await interceptor!(
+          frame: frame,
+          address: address,
+          sourcePort: source.endpoint?.port ?? 0,
+          targetPort: port,
+          deliver: (deliveredFrame, {required address, required port}) {
+            target.emitFrame(deliveredFrame, address: address, port: port);
+          },
+        );
+      } else {
+        target.emitFrame(
+          frame,
+          address: address,
+          port: source.endpoint?.port ?? 0,
+        );
+      }
     }
     final bytesRequested = const DataFrameCodec().encode(frame).length;
     return DataSendResult(

@@ -8,6 +8,10 @@ class AppConfig {
   const AppConfig({
     required this.environment,
     required this.appName,
+    this.appVersion = const String.fromEnvironment(
+      'SPONZEY_APP_VERSION',
+      defaultValue: 'development',
+    ),
     required this.protocolVersion,
     required this.discoveryPort,
     int? controlPort,
@@ -44,6 +48,7 @@ class AppConfig {
 
   final AppEnvironment environment;
   final String appName;
+  final String appVersion;
   final String protocolVersion;
   final int discoveryPort;
   final int controlPort;

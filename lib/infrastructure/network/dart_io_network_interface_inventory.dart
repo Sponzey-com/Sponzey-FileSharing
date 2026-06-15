@@ -90,7 +90,7 @@ class DartIoNetworkInterfaceInventory implements NetworkInterfaceInventory {
     if (name.contains('bridge') || name.startsWith('br')) {
       return InterfaceTypeHint.bridge;
     }
-    if (_isVirtualMachineBridgeInterfaceName(name)) {
+    if (_isGenericVirtualBridgeInterfaceName(name)) {
       return InterfaceTypeHint.bridge;
     }
     if (name.contains('wlan') ||
@@ -115,15 +115,7 @@ class DartIoNetworkInterfaceInventory implements NetworkInterfaceInventory {
         name.startsWith('cali');
   }
 
-  static bool _isVirtualMachineBridgeInterfaceName(String name) {
-    return name.contains('parallels') ||
-        name.startsWith('vnic') ||
-        name.startsWith('vmenet') ||
-        name.contains('virtualbox') ||
-        name.contains('vmnet') ||
-        name.contains('vboxnet') ||
-        name.contains('hyper-v') ||
-        name.startsWith('vethernet') ||
-        name.startsWith('virbr');
+  static bool _isGenericVirtualBridgeInterfaceName(String name) {
+    return name.startsWith('vethernet');
   }
 }

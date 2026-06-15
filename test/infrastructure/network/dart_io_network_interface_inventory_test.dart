@@ -11,14 +11,7 @@ void main() {
       'bridge100': InterfaceTypeHint.bridge,
       'br0': InterfaceTypeHint.bridge,
       'Thunderbolt Bridge': InterfaceTypeHint.bridge,
-      'vnic0': InterfaceTypeHint.bridge,
-      'vmenet0': InterfaceTypeHint.bridge,
-      'vmnet8': InterfaceTypeHint.bridge,
-      'vboxnet0': InterfaceTypeHint.bridge,
-      'VirtualBox Host-Only Ethernet Adapter': InterfaceTypeHint.bridge,
-      'Hyper-V Virtual Ethernet Adapter': InterfaceTypeHint.bridge,
       'vEthernet (Default Switch)': InterfaceTypeHint.bridge,
-      'Parallels Shared Networking Adapter': InterfaceTypeHint.bridge,
       'docker0': InterfaceTypeHint.virtual,
       'br-123456': InterfaceTypeHint.virtual,
       'veth1234': InterfaceTypeHint.virtual,
@@ -36,6 +29,25 @@ void main() {
         DartIoNetworkInterfaceInventory.classifyInterfaceName(entry.key),
         entry.value,
         reason: entry.key,
+      );
+    }
+  });
+
+  test('does not require VM vendor names for discovery classification', () {
+    final vendorNames = [
+      'Parallels Shared Networking Adapter',
+      'VirtualBox Host-Only Adapter',
+      'Hyper-V Virtual Adapter',
+      'vmnet8',
+      'vboxnet0',
+      'vnic0',
+    ];
+
+    for (final name in vendorNames) {
+      expect(
+        DartIoNetworkInterfaceInventory.classifyInterfaceName(name),
+        InterfaceTypeHint.unknown,
+        reason: name,
       );
     }
   });

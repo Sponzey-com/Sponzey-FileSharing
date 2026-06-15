@@ -2,6 +2,18 @@ import 'package:sponzey_file_sharing/domain/network/network_interface_models.dar
 
 enum DiscoveryTargetType { limitedBroadcast, directedBroadcast, multicast }
 
+enum DiscoveryTargetSkipReason {
+  interfaceDown,
+  loopbackReservedForLocalRegistry,
+  unsupportedInterfaceType,
+  noBroadcastIpv4,
+  unsupportedAddressFamily,
+  loopbackAddress,
+  linkLocalAddress,
+  malformedBroadcastAddress,
+  multicastUnsupported,
+}
+
 class DiscoveryTarget {
   const DiscoveryTarget({
     required this.interfaceId,
@@ -36,6 +48,32 @@ class DiscoveryTarget {
   int get hashCode {
     return Object.hash(interfaceId, localAddress, address, port, type);
   }
+}
+
+class DiscoveryTargetDecision {
+  const DiscoveryTargetDecision({
+    required this.interfaceId,
+    required this.reason,
+    this.localAddress,
+  });
+
+  final NetworkInterfaceId interfaceId;
+  final DiscoveryTargetSkipReason reason;
+  final String? localAddress;
+
+  String get label {
+    final address = localAddress == null ? '' : ' address=$localAddress';
+    return '${interfaceId.stableId} skipped=${reason.name}$address';
+  }
+}
+
+class DiscoveryTargetPlan {
+  const DiscoveryTargetPlan({required this.targets, required this.skipped});
+
+  final List<DiscoveryTarget> targets;
+  final List<DiscoveryTargetDecision> skipped;
+
+  bool get hasSelectedInterface => targets.isNotEmpty;
 }
 
 class Ipv4SubnetCalculator {
@@ -146,12 +184,77 @@ class DiscoveryTargetBuilder {
     required Iterable<NetworkInterfaceSnapshot> interfaces,
     required int port,
   }) {
+    return buildPlan(interfaces: interfaces, port: port).targets;
+  }
+
+  DiscoveryTargetPlan buildPlan({
+    required Iterable<NetworkInterfaceSnapshot> interfaces,
+    required int port,
+  }) {
     final targets = <String, DiscoveryTarget>{};
+    final skipped = <DiscoveryTargetDecision>[];
     for (final interface in interfaces) {
-      if (!interface.isUp || interface.isLoopback) {
+      if (!interface.isUp) {
+        skipped.add(
+          DiscoveryTargetDecision(
+            interfaceId: interface.id,
+            reason: DiscoveryTargetSkipReason.interfaceDown,
+          ),
+        );
         continue;
       }
-      for (final address in interface.activeIpv4Addresses) {
+      if (interface.isLoopback ||
+          interface.typeHint == InterfaceTypeHint.loopback) {
+        skipped.add(
+          DiscoveryTargetDecision(
+            interfaceId: interface.id,
+            reason: DiscoveryTargetSkipReason.loopbackReservedForLocalRegistry,
+          ),
+        );
+        continue;
+      }
+      if (!_isSupportedInterfaceType(interface.typeHint)) {
+        skipped.add(
+          DiscoveryTargetDecision(
+            interfaceId: interface.id,
+            reason: DiscoveryTargetSkipReason.unsupportedInterfaceType,
+          ),
+        );
+        continue;
+      }
+
+      var targetCountBefore = targets.length;
+      for (final address in interface.addresses) {
+        if (!address.isIpv4) {
+          skipped.add(
+            DiscoveryTargetDecision(
+              interfaceId: interface.id,
+              localAddress: address.address,
+              reason: DiscoveryTargetSkipReason.unsupportedAddressFamily,
+            ),
+          );
+          continue;
+        }
+        if (address.isLoopback) {
+          skipped.add(
+            DiscoveryTargetDecision(
+              interfaceId: interface.id,
+              localAddress: address.address,
+              reason: DiscoveryTargetSkipReason.loopbackAddress,
+            ),
+          );
+          continue;
+        }
+        if (address.isLinkLocal) {
+          skipped.add(
+            DiscoveryTargetDecision(
+              interfaceId: interface.id,
+              localAddress: address.address,
+              reason: DiscoveryTargetSkipReason.linkLocalAddress,
+            ),
+          );
+          continue;
+        }
         _add(
           targets,
           DiscoveryTarget(
@@ -163,7 +266,20 @@ class DiscoveryTargetBuilder {
           ),
         );
 
-        final directed = subnetCalculator.broadcastAddress(
+        final explicitBroadcast = address.broadcastAddress;
+        var directed = explicitBroadcast == null
+            ? null
+            : _validDirectedBroadcastOrNull(explicitBroadcast);
+        if (explicitBroadcast != null && directed == null) {
+          skipped.add(
+            DiscoveryTargetDecision(
+              interfaceId: interface.id,
+              localAddress: address.address,
+              reason: DiscoveryTargetSkipReason.malformedBroadcastAddress,
+            ),
+          );
+        }
+        directed ??= subnetCalculator.broadcastAddress(
           address: address.address,
           prefixLength: address.prefixLength,
           netmask: address.netmask,
@@ -193,11 +309,31 @@ class DiscoveryTargetBuilder {
               type: DiscoveryTargetType.multicast,
             ),
           );
+        } else {
+          skipped.add(
+            DiscoveryTargetDecision(
+              interfaceId: interface.id,
+              localAddress: address.address,
+              reason: DiscoveryTargetSkipReason.multicastUnsupported,
+            ),
+          );
         }
       }
+      if (targets.length == targetCountBefore) {
+        skipped.add(
+          DiscoveryTargetDecision(
+            interfaceId: interface.id,
+            reason: DiscoveryTargetSkipReason.noBroadcastIpv4,
+          ),
+        );
+      }
     }
-    return targets.values.toList(growable: false)
+    final targetList = targets.values.toList(growable: false)
       ..sort((a, b) => a.dedupeKey.compareTo(b.dedupeKey));
+    return DiscoveryTargetPlan(
+      targets: targetList,
+      skipped: List.unmodifiable(skipped),
+    );
   }
 
   static void _add(
@@ -205,5 +341,29 @@ class DiscoveryTargetBuilder {
     DiscoveryTarget target,
   ) {
     targets[target.dedupeKey] = target;
+  }
+
+  static bool _isSupportedInterfaceType(InterfaceTypeHint typeHint) {
+    switch (typeHint) {
+      case InterfaceTypeHint.loopback:
+      case InterfaceTypeHint.vpn:
+      case InterfaceTypeHint.virtual:
+        return false;
+      case InterfaceTypeHint.ethernet:
+      case InterfaceTypeHint.wifi:
+      case InterfaceTypeHint.bridge:
+      case InterfaceTypeHint.unknown:
+        return true;
+    }
+  }
+
+  static String? _validDirectedBroadcastOrNull(String value) {
+    final octets = Ipv4SubnetCalculator._parseIpv4(value);
+    if (octets == null ||
+        Ipv4SubnetCalculator._isLoopback(octets) ||
+        Ipv4SubnetCalculator._isLinkLocal(octets)) {
+      return null;
+    }
+    return value == '255.255.255.255' ? null : value;
   }
 }

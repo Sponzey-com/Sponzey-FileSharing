@@ -53,6 +53,75 @@ void main() {
   });
 
   group('DiscoveryTargetBuilder', () {
+    test('returns target plan with explicit skip reasons', () {
+      final plan = const DiscoveryTargetBuilder().buildPlan(
+        interfaces: [
+          _snapshot(
+            name: 'en0',
+            index: 1,
+            address: InterfaceAddress.ipv4(address: '192.168.10.23'),
+          ),
+          _snapshot(
+            name: 'lo0',
+            index: 2,
+            address: InterfaceAddress.ipv4(address: '127.0.0.1'),
+            typeHint: InterfaceTypeHint.loopback,
+            isLoopback: true,
+          ),
+          _snapshot(
+            name: 'en1',
+            index: 3,
+            address: InterfaceAddress.ipv4(address: '169.254.10.20'),
+          ),
+          _snapshot(
+            name: 'utun4',
+            index: 4,
+            address: InterfaceAddress.ipv4(address: '10.8.0.2'),
+            typeHint: InterfaceTypeHint.vpn,
+          ),
+          _snapshot(
+            name: 'en2',
+            index: 5,
+            address: InterfaceAddress.ipv6(address: 'fe80::1'),
+          ),
+        ],
+        port: 38400,
+      );
+
+      expect(plan.targets, isNotEmpty);
+      expect(
+        plan.skipped.map((decision) => decision.reason),
+        containsAll([
+          DiscoveryTargetSkipReason.loopbackReservedForLocalRegistry,
+          DiscoveryTargetSkipReason.linkLocalAddress,
+          DiscoveryTargetSkipReason.unsupportedInterfaceType,
+          DiscoveryTargetSkipReason.unsupportedAddressFamily,
+        ]),
+      );
+      expect(plan.hasSelectedInterface, isTrue);
+    });
+
+    test('does not create loopback targets by default', () {
+      final plan = const DiscoveryTargetBuilder().buildPlan(
+        interfaces: [
+          _snapshot(
+            name: 'lo0',
+            index: 1,
+            address: InterfaceAddress.ipv4(address: '127.0.0.1'),
+            typeHint: InterfaceTypeHint.loopback,
+            isLoopback: true,
+          ),
+        ],
+        port: 38400,
+      );
+
+      expect(plan.targets, isEmpty);
+      expect(
+        plan.skipped.single.reason,
+        DiscoveryTargetSkipReason.loopbackReservedForLocalRegistry,
+      );
+    });
+
     test('builds per-interface limited, directed, and multicast targets', () {
       final targets = const DiscoveryTargetBuilder().build(
         interfaces: [
@@ -148,15 +217,18 @@ NetworkInterfaceSnapshot _snapshot({
   required String name,
   required int index,
   required InterfaceAddress address,
+  InterfaceTypeHint typeHint = InterfaceTypeHint.ethernet,
+  bool isUp = true,
   bool supportsMulticast = true,
+  bool isLoopback = false,
 }) {
   return NetworkInterfaceSnapshot(
     id: NetworkInterfaceId(name: name, index: index),
     name: name,
-    typeHint: InterfaceTypeHint.ethernet,
-    isUp: true,
+    typeHint: typeHint,
+    isUp: isUp,
     supportsMulticast: supportsMulticast,
-    isLoopback: false,
+    isLoopback: isLoopback,
     addresses: [address],
     capturedAt: DateTime.utc(2026),
   );

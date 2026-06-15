@@ -1,3 +1,5 @@
+import 'package:sponzey_file_sharing/domain/transfer/transfer_route_snapshot.dart';
+
 enum TransferDirection { outgoing, incoming }
 
 enum TransferJobStatus {
@@ -9,6 +11,7 @@ enum TransferJobStatus {
   completed,
   rejected,
   failed,
+  cancelled,
 }
 
 class TransferJob {
@@ -35,6 +38,7 @@ class TransferJob {
     this.localFilePath,
     this.destinationPath,
     this.message,
+    this.routeSnapshot,
   });
 
   final String id;
@@ -59,6 +63,7 @@ class TransferJob {
   final String? localFilePath;
   final String? destinationPath;
   final String? message;
+  final TransferRouteSnapshot? routeSnapshot;
 
   double get progress {
     if (fileSize <= 0) {
@@ -104,13 +109,16 @@ class TransferJob {
         return '거절됨';
       case TransferJobStatus.failed:
         return '실패';
+      case TransferJobStatus.cancelled:
+        return '취소됨';
     }
   }
 
   bool get isTerminal {
     return status == TransferJobStatus.completed ||
         status == TransferJobStatus.rejected ||
-        status == TransferJobStatus.failed;
+        status == TransferJobStatus.failed ||
+        status == TransferJobStatus.cancelled;
   }
 
   TransferJob copyWith({
@@ -136,9 +144,11 @@ class TransferJob {
     String? localFilePath,
     String? destinationPath,
     String? message,
+    TransferRouteSnapshot? routeSnapshot,
     bool clearLocalFilePath = false,
     bool clearDestinationPath = false,
     bool clearMessage = false,
+    bool clearRouteSnapshot = false,
   }) {
     return TransferJob(
       id: id ?? this.id,
@@ -168,6 +178,9 @@ class TransferJob {
           ? null
           : destinationPath ?? this.destinationPath,
       message: clearMessage ? null : message ?? this.message,
+      routeSnapshot: clearRouteSnapshot
+          ? null
+          : routeSnapshot ?? this.routeSnapshot,
     );
   }
 }

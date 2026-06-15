@@ -48,4 +48,21 @@ void main() {
     expect(result.state.failureCount, 1);
     expect(result.state.status, TransferQueueStatus.failed);
   });
+
+  test('cancel request transitions through state machine effect', () {
+    final result = machine.transition(
+      const TransferQueueSnapshot(
+        status: TransferQueueStatus.running,
+        authenticatedPeerCount: 2,
+        childSessionCount: 2,
+      ),
+      TransferQueueEvent.cancelRequested,
+    );
+
+    expect(result.state.status, TransferQueueStatus.cancelled);
+    expect(
+      result.effects.map((effect) => effect.name),
+      contains('cancelChildTransferSessions'),
+    );
+  });
 }

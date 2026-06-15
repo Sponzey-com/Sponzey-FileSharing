@@ -23,10 +23,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _loginPasswordController = TextEditingController();
   final _loginUserIdFocusNode = FocusNode(debugLabel: 'loginUserId');
   final _loginPasswordFocusNode = FocusNode(debugLabel: 'loginPassword');
+  bool _canSubmit = false;
 
   @override
   void initState() {
     super.initState();
+    _loginUserIdController.addListener(_updateCanSubmit);
+    _loginPasswordController.addListener(_updateCanSubmit);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
@@ -38,11 +41,25 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   @override
   void dispose() {
     _scrollController.dispose();
+    _loginUserIdController.removeListener(_updateCanSubmit);
+    _loginPasswordController.removeListener(_updateCanSubmit);
     _loginUserIdController.dispose();
     _loginPasswordController.dispose();
     _loginUserIdFocusNode.dispose();
     _loginPasswordFocusNode.dispose();
     super.dispose();
+  }
+
+  void _updateCanSubmit() {
+    final nextCanSubmit =
+        _loginUserIdController.text.trim().isNotEmpty &&
+        _loginPasswordController.text.isNotEmpty;
+    if (nextCanSubmit == _canSubmit) {
+      return;
+    }
+    setState(() {
+      _canSubmit = nextCanSubmit;
+    });
   }
 
   @override
@@ -77,6 +94,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 isBusy:
                     authState.isBusy ||
                     authState.status == AuthStatus.initializing,
+                canSubmit: _canSubmit,
                 onSubmit: _signIn,
               ),
               if (authState.status == AuthStatus.initializing) ...[
@@ -235,6 +253,7 @@ class _LoginForm extends StatelessWidget {
     required this.userIdFocusNode,
     required this.passwordFocusNode,
     required this.isBusy,
+    required this.canSubmit,
     required this.onSubmit,
   });
 
@@ -243,6 +262,7 @@ class _LoginForm extends StatelessWidget {
   final FocusNode userIdFocusNode;
   final FocusNode passwordFocusNode;
   final bool isBusy;
+  final bool canSubmit;
   final Future<void> Function() onSubmit;
 
   @override
@@ -251,6 +271,7 @@ class _LoginForm extends StatelessWidget {
       child: Column(
         children: [
           TextFormField(
+            key: const ValueKey('login-user-id-field'),
             controller: userIdController,
             focusNode: userIdFocusNode,
             enabled: !isBusy,
@@ -267,6 +288,7 @@ class _LoginForm extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.md),
           TextFormField(
+            key: const ValueKey('login-password-field'),
             controller: passwordController,
             focusNode: passwordFocusNode,
             enabled: !isBusy,
@@ -290,7 +312,8 @@ class _LoginForm extends StatelessWidget {
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
-              onPressed: isBusy ? null : onSubmit,
+              key: const ValueKey('login-submit-button'),
+              onPressed: isBusy || !canSubmit ? null : onSubmit,
               icon: const Icon(Icons.login_rounded),
               label: const Text('로그인'),
             ),

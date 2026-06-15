@@ -43,11 +43,14 @@ File transfer is allowed only to authenticated peers. The planned reference auth
 
 The authentication flow follows these rules:
 
+- Do not require sign-up or local account creation in the current app scope.
+- Keep passwords, password-derived JWTs, and session keys in memory only.
 - Never store plaintext passwords.
 - Never transmit sensitive data before authentication.
 - Use short expiration, nonce, and `jti` in tokens.
 - Create transfer jobs only within authenticated sessions.
-- Apply access control based on allowed users and device policies.
+- Automatically authenticate, connect, and receive between peers using the same ID/password group.
+- Treat allowed-user lists, manual receive approval, and persisted credential verifiers as future extensions, not the current default path.
 
 ### UDP-Based File Transfer
 
@@ -78,7 +81,7 @@ Receivers automatically accept files from authenticated peers and save them to t
 - Flutter Desktop app
 - Local network node discovery
 - UDP-based control and data transfer
-- Local account creation and login
+- Runtime ID/password session without sign-up
 - Authenticated peer connection
 - Single-file and multi-file transfer
 - 1:1 and 1:N transfer structure
@@ -105,9 +108,9 @@ Receivers automatically accept files from authenticated peers and save them to t
 - Riverpod
 - Drift / SQLite
 - UDP socket based local network communication
-- Local secure storage
-- Argon2id based password hashing
-- JWT based authentication tokens
+- Runtime-only password-derived JWT authentication
+- In-memory credential and session-key lifecycle
+- Platform path and permission handling
 
 Check [pubspec.yaml](pubspec.yaml) for exact dependencies.
 
@@ -197,6 +200,89 @@ flutter run -d linux
 ```
 
 Actual platform availability depends on the local Flutter environment and desktop support configuration.
+
+## Platform Operations and Troubleshooting
+
+Sponzey FileSharing uses UDP for discovery, control, and data transfer. Platform issues should be solved at the platform boundary, not by adding OS-specific protocol branches.
+
+Default UDP ports:
+
+- Discovery: `38400/udp`
+- Control/auth: `38401/udp`
+- Data transfer: `38410-38430/udp`
+
+If these values are changed in `AppConfig`, firewall and smoke-test instructions must be updated at the same time.
+
+### macOS
+
+- Run with `flutter run -d macos` during development.
+- The default receive directory is `~/Downloads/Sponzey FileSharing`.
+- App support data, logs, and diagnostics export files are stored under `~/Library/Application Support/Sponzey FileSharing`.
+- If clicks or keyboard input appear delayed, first check whether another modal, transition overlay, or scroll cue is intercepting input. Primary actions must respond to a single click and keep a desktop hit target of at least 48 logical pixels.
+
+### Windows Runtime
+
+- Allow the app through Windows Defender Firewall for Private networks.
+- If discovery or transfer does not work, explicitly allow the configured UDP ports: discovery `38400/udp`, control `38401/udp`, and data `38410-38430/udp`.
+- In a Windows VM, use bridged networking when host/guest discovery is required. NAT-only VM networking can block broadcast discovery.
+- The default receive directory is `%USERPROFILE%\Downloads\Sponzey FileSharing`.
+- App support data, logs, and diagnostics export files are stored under `%APPDATA%\Sponzey FileSharing`.
+
+PowerShell firewall example:
+
+```powershell
+New-NetFirewallRule -DisplayName "Sponzey FileSharing UDP" -Direction Inbound -Action Allow -Protocol UDP -LocalPort 38400,38401,38410-38430 -Profile Private
+```
+
+### Windows Development Mode and Symlinks
+
+Flutter desktop plugins require symlink support on Windows. Enable Developer Mode before building:
+
+```powershell
+start ms-settings:developers
+```
+
+Use a local NTFS path such as `C:\Work\SponzeyFileSharing`. Avoid Parallels shared folders, mapped drives, and network drives for builds because plugin symlink creation can fail there even if Flutter itself is installed correctly.
+
+### Linux Ubuntu 22.04 Runtime and Build
+
+Ubuntu 22.04 LTS is the minimum Linux support baseline.
+
+Install build dependencies:
+
+```sh
+sudo apt-get update
+sudo apt-get install -y \
+  clang \
+  cmake \
+  ninja-build \
+  pkg-config \
+  libgtk-3-dev \
+  liblzma-dev \
+  libsecret-1-dev
+flutter config --enable-linux-desktop
+flutter pub get
+flutter build linux --release
+```
+
+Linux receive and app data paths:
+
+- Default receive directory: `$XDG_DOWNLOAD_DIR/Sponzey FileSharing` when `XDG_DOWNLOAD_DIR` is set, otherwise `~/Downloads/Sponzey FileSharing`.
+- App support data, logs, and diagnostics export files: `$XDG_DATA_HOME/Sponzey FileSharing` when set, otherwise `~/.local/share/Sponzey FileSharing`.
+- If saving fails, confirm directory ownership and write permission before changing app settings.
+
+### Platform Smoke Checklist
+
+Before treating a build as platform-ready:
+
+1. Start the app and sign in with an ID/password.
+2. Confirm login fields accept keyboard input and the login button enables immediately after both fields are filled.
+3. Confirm primary buttons respond to a single click.
+4. Confirm peer discovery on the intended network path.
+5. Confirm authenticated connection reaches an active route.
+6. Transfer a small file in both directions.
+7. Confirm the receiver writes the file under the default receive directory.
+8. Create a diagnostics export and confirm it contains route, auth, transfer, and storage state without passwords, JWTs, session keys, file payloads, or full sensitive paths.
 
 ## Windows Build
 
@@ -293,22 +379,27 @@ Feature changes should follow TDD.
 - [.tasks/phase001/README.md](.tasks/phase001/README.md): phase001 task index
 - [.tasks/phase002/README.md](.tasks/phase002/README.md): phase002 task index for state machines, MessageBus, and UDP port separation
 - [.tasks/phase003/README.md](.tasks/phase003/README.md): phase003 task index for full multi-Ethernet interface support
+- [.tasks/phase004/plan.md](.tasks/phase004/plan.md): peer connection and active path stabilization plan
+- [.tasks/phase005/plan.md](.tasks/phase005/plan.md): high-speed UDP Data channel transition record
+- [docs/release_gate.md](docs/release_gate.md): release gate, bidirectional host/VM transfer validation, and benchmark record template
 
-Tasks are organized under `.tasks/phase001`, `.tasks/phase002`, and `.tasks/phase003`. The current cross-phase connection-first plan is kept at `.tasks/plan.md`.
+Tasks are organized under `.tasks` and phase archive directories. The current connection-first plan is kept at `.tasks/plan.md`, with current execution tasks at `.tasks/task001.md` through `.tasks/task011.md`.
 
 ## Current Development Flow
 
-phase001 follows this sequence:
+The current stabilization flow follows `.tasks/plan.md`:
 
-1. Build the Flutter Desktop skeleton and shared foundations.
-2. Build local account, settings storage, and secure storage.
-3. Implement UDP node discovery and the peer list UI.
-4. Implement password-derived JWT mutual authentication and allowed user policy.
-5. Implement the single-file transfer MVP and receive pipeline.
-6. Reinforce UDP reliability, retransmission, and performance measurement.
-7. Implement multi-file transfer, 1:N transfer, and queue management.
-8. Improve receive policy, history/logging, and settings screens.
-9. Stabilize platforms, packaging, and beta verification.
+1. Align product documents and task standards.
+2. Stabilize peer identity, route candidates, route leases, and self-packet suppression.
+3. Verify multi-Ethernet discovery targets and packet receive decisions.
+4. Complete automatic authentication and connection state machines.
+5. Ensure active route leases and Data transfer paths match.
+6. Stabilize receive paths, temp files, and receiver preparation lifecycle.
+7. Verify Data channel correctness, digest validation, and throughput benchmarks.
+8. Productize transfer UX, retry/cancel, and persisted history.
+9. Provide diagnostics export with safe redaction.
+10. Harden macOS, Windows, and Linux platform behavior.
+11. Enforce release gates with bidirectional host/VM transfer verification.
 
 ## Development Standards
 

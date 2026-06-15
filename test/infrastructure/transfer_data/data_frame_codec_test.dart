@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sponzey_file_sharing/domain/transfer/data_transfer_tuning_policy.dart';
 import 'package:sponzey_file_sharing/infrastructure/transfer_data/data_frame.dart';
 import 'package:sponzey_file_sharing/infrastructure/transfer_data/data_frame_codec.dart';
 
@@ -69,6 +70,10 @@ void main() {
     const codec = DataFrameCodec();
 
     expect(codec.maxPayloadBytes(), inInclusiveRange(1200, 1400));
+    expect(
+      codec.maxPayloadBytes(),
+      DataTransferTuningPolicy.defaults.maxPayloadBytes,
+    );
     expect(
       codec
           .encode(chunkFrame(payload: Uint8List(codec.maxPayloadBytes())))
