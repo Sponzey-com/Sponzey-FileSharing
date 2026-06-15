@@ -124,6 +124,63 @@ void main() {
     },
   );
 
+  test(
+    'receiver uses default receive path when settings repository cannot load',
+    () async {
+      final network = _LinkedFakeAuthNetwork();
+      final alice = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41001,
+        receivePath: '${workspaceDirectory.path}/alice-settings-fallback',
+      );
+      final bobReceivePath = '${workspaceDirectory.path}/bob-settings-fallback';
+      final bob = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-b',
+        authPort: 41002,
+        receivePath: bobReceivePath,
+        useSwitchableSettingsRepository: true,
+      );
+      addTearDown(alice.dispose);
+      addTearDown(bob.dispose);
+      await _prepareAuthenticatedPair(
+        alice: alice,
+        bob: bob,
+        bobReceivePath: bobReceivePath,
+        bobPort: 41002,
+        clock: clock,
+      );
+      bob.settingsRepository?.failLoadOrCreate = true;
+
+      final sourceFile = File(
+        '${workspaceDirectory.path}/settings-fallback.txt',
+      );
+      await sourceFile.writeAsString('settings repository is not required');
+
+      await alice.transferController.sendFile(
+        peerId: 'team@instance-device-b',
+        filePath: sourceFile.path,
+      );
+
+      final aliceJob = await _waitForTerminalTransfer(alice.container);
+      final bobJob = await _waitForTerminalTransfer(bob.container);
+
+      expect(aliceJob.status, TransferJobStatus.completed);
+      expect(bobJob.status, TransferJobStatus.completed);
+      expect(
+        await File('$bobReceivePath/settings-fallback.txt').readAsString(),
+        'settings repository is not required',
+      );
+    },
+  );
+
   test('does not send file chunks through the Control channel', () async {
     final transferChunkPacketSizes = <int>[];
     var transferWindowUpdateCount = 0;
@@ -980,9 +1037,14 @@ Future<_TransferHarness> _createNode({
   required String receivePath,
   AppLogger? logger,
   DataTransport? dataTransport,
+  bool useSwitchableSettingsRepository = false,
 }) async {
   final database = AppDatabase.forTesting(NativeDatabase.memory());
+  final settingsRepository = useSwitchableSettingsRepository
+      ? _SwitchableSettingsRepository(database)
+      : null;
   final transport = network.attach(authPort);
+  final resolvedDataTransport = dataTransport ?? network.attachDataTransport();
   final container = ProviderContainer(
     overrides: [
       appConfigProvider.overrideWithValue(
@@ -1002,6 +1064,8 @@ Future<_TransferHarness> _createNode({
         ),
       ),
       appDatabaseProvider.overrideWithValue(database),
+      if (settingsRepository != null)
+        settingsRepositoryProvider.overrideWithValue(settingsRepository),
       appSecureStorageProvider.overrideWithValue(_FakeSecureStorage()),
       appStoragePathProvider.overrideWithValue(
         _FakeStoragePathProvider(receivePath),
@@ -1013,8 +1077,7 @@ Future<_TransferHarness> _createNode({
       controlTransportProvider.overrideWithValue(
         AuthControlTransportAdapter(authTransport: transport),
       ),
-      if (dataTransport != null)
-        dataTransportProvider.overrideWithValue(dataTransport),
+      dataTransportProvider.overrideWithValue(resolvedDataTransport),
       localDeviceIdentityServiceProvider.overrideWithValue(
         _FakeLocalDeviceIdentityService(localDeviceId),
       ),
@@ -1037,6 +1100,7 @@ Future<_TransferHarness> _createNode({
     peerAuthController: container.read(peerAuthControllerProvider.notifier),
     transferController: container.read(transferControllerProvider.notifier),
     database: database,
+    settingsRepository: settingsRepository,
   );
 }
 
@@ -1190,16 +1254,32 @@ class _TransferHarness {
     required this.peerAuthController,
     required this.transferController,
     required this.database,
+    this.settingsRepository,
   });
 
   final ProviderContainer container;
   final PeerAuthController peerAuthController;
   final TransferController transferController;
   final AppDatabase database;
+  final _SwitchableSettingsRepository? settingsRepository;
 
   Future<void> dispose() async {
     container.dispose();
     await database.close();
+  }
+}
+
+class _SwitchableSettingsRepository extends SettingsRepository {
+  _SwitchableSettingsRepository(super.database);
+
+  bool failLoadOrCreate = false;
+
+  @override
+  Future<AppSettings> loadOrCreate({required String defaultSavePath}) {
+    if (failLoadOrCreate) {
+      throw StateError('settings repository load failed for test');
+    }
+    return super.loadOrCreate(defaultSavePath: defaultSavePath);
   }
 }
 
@@ -1288,6 +1368,11 @@ class _LinkedFakeAuthNetwork {
 
   final _PacketInterceptor? interceptor;
   final Map<int, _FakeAuthTransport> _transports = {};
+  final _LinkedFakeDataNetwork _dataNetwork = _LinkedFakeDataNetwork();
+
+  DataTransport attachDataTransport() {
+    return _dataNetwork.attach();
+  }
 
   _FakeAuthTransport attach(int port) {
     final transport = _FakeAuthTransport(

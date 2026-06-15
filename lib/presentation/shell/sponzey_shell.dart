@@ -70,7 +70,7 @@ class SponzeyShell extends ConsumerWidget {
                       ),
                       const SizedBox(width: AppSpacing.lg),
                       Expanded(
-                        child: _ShellContentPane(
+                        child: ShellContentPane(
                           currentLocation: routerState.matchedLocation,
                           child: child,
                         ),
@@ -89,8 +89,12 @@ class SponzeyShell extends ConsumerWidget {
   }
 }
 
-class _ShellContentPane extends StatelessWidget {
-  const _ShellContentPane({required this.currentLocation, required this.child});
+class ShellContentPane extends StatelessWidget {
+  const ShellContentPane({
+    super.key,
+    required this.currentLocation,
+    required this.child,
+  });
 
   final String currentLocation;
   final Widget child;
@@ -110,8 +114,9 @@ class _ShellContentPane extends StatelessWidget {
             return Stack(
               fit: StackFit.expand,
               children: [
-                ...previousChildren,
-                ...?currentChild == null ? null : [currentChild],
+                for (final previousChild in previousChildren)
+                  IgnorePointer(child: previousChild),
+                ?currentChild,
               ],
             );
           },
@@ -130,9 +135,15 @@ class _ShellContentPane extends StatelessWidget {
                   ),
                 );
 
-            return SlideTransition(
-              position: offsetAnimation,
-              child: FadeTransition(opacity: animation, child: transitionChild),
+            return IgnorePointer(
+              ignoring: !isIncoming,
+              child: SlideTransition(
+                position: offsetAnimation,
+                child: FadeTransition(
+                  opacity: animation,
+                  child: transitionChild,
+                ),
+              ),
             );
           },
           child: KeyedSubtree(key: currentKey, child: child),

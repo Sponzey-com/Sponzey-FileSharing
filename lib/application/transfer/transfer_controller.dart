@@ -2055,35 +2055,78 @@ class TransferController extends Notifier<TransferState> {
     _markFailed(transferId, message);
   }
 
-  Future<AppSettings> _loadSettings() async {
-    final defaultSavePath = await ref
-        .read(appStoragePathProvider)
-        .getDefaultReceivePath();
-    return ref
-        .read(settingsRepositoryProvider)
-        .loadOrCreate(defaultSavePath: defaultSavePath);
-  }
-
   Future<AppSettings> _loadIncomingSettingsForTransfer(
     String transferId,
   ) async {
+    final defaultSavePath = await _loadDefaultReceivePathForTransfer(
+      transferId,
+    );
     try {
-      return await _loadSettings();
+      final settings = await ref
+          .read(settingsRepositoryProvider)
+          .loadOrCreate(defaultSavePath: defaultSavePath);
+      return _normalizeIncomingSettings(
+        settings,
+        fallbackSavePath: defaultSavePath,
+      );
     } catch (error, stackTrace) {
       ref
           .read(appLoggerProvider)
           .warning(
             AppLogCategory.transferControl,
-            'Failed to load receive settings for '
+            'Failed to load receive settings for ${_safeTransfer(transferId)}. '
+            'Falling back to default receive path.',
+            error: error,
+            stackTrace: stackTrace,
+          );
+      return _normalizeIncomingSettings(
+        AppSettings.initial(),
+        fallbackSavePath: defaultSavePath,
+      );
+    }
+  }
+
+  Future<String> _loadDefaultReceivePathForTransfer(String transferId) async {
+    try {
+      final defaultSavePath = await ref
+          .read(appStoragePathProvider)
+          .getDefaultReceivePath();
+      if (defaultSavePath.trim().isNotEmpty) {
+        return defaultSavePath;
+      }
+      throw const AppException(
+        code: 'transfer_default_receive_path_empty',
+        message: '기본 수신 경로가 비어 있습니다.',
+      );
+    } catch (error, stackTrace) {
+      ref
+          .read(appLoggerProvider)
+          .warning(
+            AppLogCategory.transferControl,
+            'Failed to prepare default receive path for '
             '${_safeTransfer(transferId)}',
             error: error,
             stackTrace: stackTrace,
           );
       throw const AppException(
-        code: 'transfer_receive_settings_failed',
-        message: '수신 설정을 불러오지 못했습니다. 기본 저장 경로 권한을 확인해 주세요.',
+        code: 'transfer_default_receive_path_failed',
+        message: '기본 수신 경로를 준비하지 못했습니다. 저장 경로 권한을 확인해 주세요.',
       );
     }
+  }
+
+  AppSettings _normalizeIncomingSettings(
+    AppSettings settings, {
+    required String fallbackSavePath,
+  }) {
+    final savePath = settings.defaultSavePath.trim().isEmpty
+        ? fallbackSavePath
+        : settings.defaultSavePath;
+    return settings.copyWith(
+      defaultSavePath: savePath,
+      autoReceiveEnabled: true,
+      receivePolicy: ReceivePolicy.autoReceiveAll,
+    );
   }
 
   Future<IncomingDigestingTransferWriter> _openIncomingWriterForTransfer(
