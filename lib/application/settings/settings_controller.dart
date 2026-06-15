@@ -7,6 +7,7 @@ import 'package:sponzey_file_sharing/core/errors/app_exception.dart';
 import 'package:sponzey_file_sharing/core/logger/app_log_category.dart';
 import 'package:sponzey_file_sharing/core/logger/app_logger.dart';
 import 'package:sponzey_file_sharing/domain/entities/app_settings.dart';
+import 'package:sponzey_file_sharing/infrastructure/platform/app_platform_directories.dart';
 import 'package:sponzey_file_sharing/infrastructure/platform/app_storage_path_provider.dart';
 import 'package:sponzey_file_sharing/infrastructure/repositories/settings_repository.dart';
 
@@ -50,7 +51,7 @@ class SettingsController extends Notifier<SettingsState> {
   SettingsState build() {
     if (!_didInitialize) {
       _didInitialize = true;
-      unawaited(load());
+      unawaited(Future<void>.microtask(load));
     }
 
     return SettingsState.initial();
@@ -58,12 +59,26 @@ class SettingsController extends Notifier<SettingsState> {
 
   Future<void> load() async {
     try {
+      final repository = ref.read(settingsRepositoryProvider);
+      final savedSettings = await repository.load();
+      if (_canUseSavedReceivePath(savedSettings)) {
+        state = state.copyWith(
+          settings: savedSettings!,
+          isLoading: false,
+          isSaving: false,
+          clearError: true,
+        );
+        return;
+      }
+
       final defaultSavePath = await ref
           .read(appStoragePathProvider)
           .getDefaultReceivePath();
-      final settings = await ref
-          .read(settingsRepositoryProvider)
-          .loadOrCreate(defaultSavePath: defaultSavePath);
+      final settings = savedSettings == null
+          ? await repository.loadOrCreate(defaultSavePath: defaultSavePath)
+          : await repository.save(
+              savedSettings.copyWith(defaultSavePath: defaultSavePath),
+            );
       state = state.copyWith(
         settings: settings,
         isLoading: false,
@@ -81,6 +96,15 @@ class SettingsController extends Notifier<SettingsState> {
           );
       state = state.copyWith(isLoading: false, errorMessage: '설정을 불러오지 못했습니다.');
     }
+  }
+
+  bool _canUseSavedReceivePath(AppSettings? settings) {
+    if (settings == null) {
+      return false;
+    }
+    final savePath = settings.defaultSavePath.trim();
+    return savePath.isNotEmpty &&
+        !AppPlatformDirectories.looksLikeLegacySandboxReceivePath(savePath);
   }
 
   Future<void> save(AppSettings nextSettings) async {

@@ -58,4 +58,23 @@ final class AppPlatformDirectories {
     }
     return p.join(home, 'Documents', appFolderName);
   }
+
+  static bool looksLikeLegacySandboxReceivePath(String rawPath) {
+    final normalized = p.normalize(rawPath.trim());
+    if (normalized.isEmpty) {
+      return false;
+    }
+
+    final parts = p.split(normalized);
+    final libraryIndex = parts.indexOf('Library');
+    if (libraryIndex < 0 || libraryIndex + 4 >= parts.length) {
+      return false;
+    }
+
+    return parts[libraryIndex + 1] == 'Containers' &&
+        parts.contains('Data') &&
+        parts.length >= 2 &&
+        parts[parts.length - 2] == 'Downloads' &&
+        parts.last == appFolderName;
+  }
 }

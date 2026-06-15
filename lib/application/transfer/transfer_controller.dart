@@ -11,6 +11,7 @@ import 'package:sponzey_file_sharing/application/auth/auth_controller.dart';
 import 'package:sponzey_file_sharing/application/auth/peer_auth_controller.dart';
 import 'package:sponzey_file_sharing/application/network/peer_path_registry.dart';
 import 'package:sponzey_file_sharing/application/transfer/transfer_diagnostics_ring_buffer.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_data_endpoint_resolver.dart';
 import 'package:sponzey_file_sharing/application/transfer/transfer_rtt_estimator.dart';
 import 'package:sponzey_file_sharing/core/errors/app_exception.dart';
 import 'package:sponzey_file_sharing/core/logger/app_log_category.dart';
@@ -26,6 +27,7 @@ import 'package:sponzey_file_sharing/domain/network/peer_connection_path.dart';
 import 'package:sponzey_file_sharing/domain/transfer/data_transfer_protocol.dart';
 import 'package:sponzey_file_sharing/infrastructure/auth/auth_packet.dart';
 import 'package:sponzey_file_sharing/infrastructure/control/control_transport.dart';
+import 'package:sponzey_file_sharing/infrastructure/platform/app_platform_directories.dart';
 import 'package:sponzey_file_sharing/infrastructure/platform/app_storage_path_provider.dart';
 import 'package:sponzey_file_sharing/infrastructure/platform/local_device_identity_service.dart';
 import 'package:sponzey_file_sharing/infrastructure/repositories/settings_repository.dart';
@@ -444,13 +446,18 @@ class TransferController extends Notifier<TransferState> {
           windowSize: context.windowSize,
         ),
       );
-      if (initAck.dataAddress == null || initAck.dataPort == null) {
+      if (initAck.dataPort == null) {
         throw const AppException(
           code: 'transfer_data_endpoint_missing',
           message: '상대 노드의 data endpoint 정보가 없습니다.',
         );
       }
-      context.remoteDataAddress = InternetAddress(initAck.dataAddress!);
+      context.remoteDataAddress = InternetAddress(
+        TransferDataEndpointResolver.senderRemoteAddress(
+          advertisedAddress: initAck.dataAddress,
+          controlAckSourceAddress: initAck.sourceAddress,
+        ),
+      );
       context.remoteDataPort = initAck.dataPort!;
       context.advertisedWindowSize =
           initAck.acceptedWindowSize ?? context.advertisedWindowSize;
@@ -850,9 +857,9 @@ class TransferController extends Notifier<TransferState> {
         accepted: true,
         savePath: settings.defaultSavePath,
         dataEndpoint: dataBind.endpoint,
-        dataAddress: dataBind.endpoint.isWildcardBind
-            ? datagram.address.address
-            : dataBind.endpoint.localAddress,
+        dataAddress: TransferDataEndpointResolver.advertisedReceiverAddress(
+          dataEndpoint: dataBind.endpoint,
+        ),
         acceptedChunkSize: packet.transferAcceptedChunkSize ?? _dataChunkSize,
         acceptedWindowSize: _receiverAdvertisedWindow,
         receiverBufferBudget: _receiverAdvertisedWindow * _dataChunkSize,
@@ -940,6 +947,7 @@ class TransferController extends Notifier<TransferState> {
         accepted: packet.transferAccepted ?? false,
         message: packet.rejectMessage,
         savePath: packet.transferSavePath,
+        sourceAddress: datagram.address.address,
         dataAddress: packet.transferDataAddress,
         dataPort: packet.transferDataPort,
         acceptedChunkSize: packet.transferAcceptedChunkSize,
@@ -1701,7 +1709,13 @@ class TransferController extends Notifier<TransferState> {
         transferAccepted: accepted,
         rejectMessage: message,
         transferSavePath: savePath,
-        transferDataAddress: dataAddress ?? dataEndpoint?.localAddress,
+        transferDataAddress:
+            dataAddress ??
+            (dataEndpoint == null
+                ? null
+                : TransferDataEndpointResolver.advertisedReceiverAddress(
+                    dataEndpoint: dataEndpoint,
+                  )),
         transferDataPort: dataEndpoint?.port,
         transferAcceptedChunkSize: acceptedChunkSize,
         transferAcceptedWindowSize: acceptedWindowSize,
@@ -2058,16 +2072,49 @@ class TransferController extends Notifier<TransferState> {
   Future<AppSettings> _loadIncomingSettingsForTransfer(
     String transferId,
   ) async {
+    final repository = ref.read(settingsRepositoryProvider);
+    try {
+      final savedSettings = await repository.load();
+      final preparedSavedSettings =
+          await _prepareIncomingSettingsDirectoryOrNull(
+            savedSettings,
+            transferId: transferId,
+            source: 'saved',
+          );
+      if (preparedSavedSettings != null) {
+        return preparedSavedSettings;
+      }
+    } catch (error, stackTrace) {
+      ref
+          .read(appLoggerProvider)
+          .warning(
+            AppLogCategory.transferControl,
+            'Failed to load saved receive settings for '
+            '${_safeTransfer(transferId)}. Falling back to default path.',
+            error: error,
+            stackTrace: stackTrace,
+          );
+    }
+
     final defaultSavePath = await _loadDefaultReceivePathForTransfer(
       transferId,
     );
     try {
-      final settings = await ref
-          .read(settingsRepositoryProvider)
-          .loadOrCreate(defaultSavePath: defaultSavePath);
-      return _normalizeIncomingSettings(
+      final settings = await repository.loadOrCreate(
+        defaultSavePath: defaultSavePath,
+      );
+      final preparedSettings = await _prepareIncomingSettingsDirectoryOrNull(
         settings,
+        transferId: transferId,
+        source: 'default',
         fallbackSavePath: defaultSavePath,
+      );
+      if (preparedSettings != null) {
+        return preparedSettings;
+      }
+      throw const AppException(
+        code: 'transfer_receive_path_unavailable',
+        message: '수신 저장 경로를 사용할 수 없습니다.',
       );
     } catch (error, stackTrace) {
       ref
@@ -2079,8 +2126,9 @@ class TransferController extends Notifier<TransferState> {
             error: error,
             stackTrace: stackTrace,
           );
-      return _normalizeIncomingSettings(
+      return _prepareIncomingSettingsDirectory(
         AppSettings.initial(),
+        transferId: transferId,
         fallbackSavePath: defaultSavePath,
       );
     }
@@ -2115,15 +2163,72 @@ class TransferController extends Notifier<TransferState> {
     }
   }
 
-  AppSettings _normalizeIncomingSettings(
+  Future<AppSettings?> _prepareIncomingSettingsDirectoryOrNull(
+    AppSettings? settings, {
+    required String transferId,
+    required String source,
+    String? fallbackSavePath,
+  }) async {
+    if (settings == null) {
+      return null;
+    }
+    try {
+      return await _prepareIncomingSettingsDirectory(
+        settings,
+        transferId: transferId,
+        fallbackSavePath: fallbackSavePath,
+      );
+    } catch (error, stackTrace) {
+      ref
+          .read(appLoggerProvider)
+          .warning(
+            AppLogCategory.transferControl,
+            'Rejected $source receive path for ${_safeTransfer(transferId)}',
+            error: error,
+            stackTrace: stackTrace,
+          );
+      return null;
+    }
+  }
+
+  Future<AppSettings> _prepareIncomingSettingsDirectory(
     AppSettings settings, {
-    required String fallbackSavePath,
-  }) {
-    final savePath = settings.defaultSavePath.trim().isEmpty
-        ? fallbackSavePath
-        : settings.defaultSavePath;
+    required String transferId,
+    String? fallbackSavePath,
+  }) async {
+    final configuredPath = settings.defaultSavePath.trim();
+    if (AppPlatformDirectories.looksLikeLegacySandboxReceivePath(
+      configuredPath,
+    )) {
+      throw AppException(
+        code: 'transfer_receive_path_legacy_sandbox',
+        message:
+            'legacy sandbox 수신 경로는 사용하지 않습니다: ${_safeTransfer(transferId)}',
+      );
+    }
+    final savePath = configuredPath.isEmpty
+        ? fallbackSavePath?.trim()
+        : configuredPath;
+    if (savePath == null || savePath.isEmpty) {
+      throw AppException(
+        code: 'transfer_receive_path_empty',
+        message: '수신 저장 경로가 비어 있습니다: ${_safeTransfer(transferId)}',
+      );
+    }
+    final directory = Directory(savePath);
+    final existingType = await FileSystemEntity.type(savePath);
+    if (existingType == FileSystemEntityType.file) {
+      throw AppException(
+        code: 'transfer_receive_path_is_file',
+        message: '수신 저장 경로가 폴더가 아닙니다: ${_safeTransfer(transferId)}',
+      );
+    }
+    if (!await directory.exists()) {
+      await directory.create(recursive: true);
+    }
+
     return settings.copyWith(
-      defaultSavePath: savePath,
+      defaultSavePath: directory.absolute.path,
       autoReceiveEnabled: true,
       receivePolicy: ReceivePolicy.autoReceiveAll,
     );
@@ -2897,6 +3002,7 @@ class _IncomingTransferContext {
 class _TransferInitAckResult {
   const _TransferInitAckResult({
     required this.accepted,
+    required this.sourceAddress,
     this.message,
     this.savePath,
     this.dataAddress,
@@ -2906,6 +3012,7 @@ class _TransferInitAckResult {
   });
 
   final bool accepted;
+  final String sourceAddress;
   final String? message;
   final String? savePath;
   final String? dataAddress;

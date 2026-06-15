@@ -9,6 +9,7 @@ import 'package:sponzey_file_sharing/core/logger/console_app_logger.dart';
 import 'package:sponzey_file_sharing/domain/entities/app_settings.dart';
 import 'package:sponzey_file_sharing/infrastructure/database/app_database.dart';
 import 'package:sponzey_file_sharing/infrastructure/platform/app_storage_path_provider.dart';
+import 'package:sponzey_file_sharing/infrastructure/repositories/settings_repository.dart';
 
 void main() {
   late AppDatabase database;
@@ -57,6 +58,68 @@ void main() {
     },
   );
 
+  test(
+    'load uses saved path when default receive path cannot be prepared',
+    () async {
+      final tempDirectory = await Directory.systemTemp.createTemp(
+        'settings-controller-load-saved',
+      );
+      addTearDown(() => tempDirectory.delete(recursive: true));
+
+      final savedPath = '${tempDirectory.path}/saved-downloads';
+      await SettingsRepository(
+        database,
+      ).save(AppSettings.initial().copyWith(defaultSavePath: savedPath));
+
+      final container = _createContainer(
+        database: database,
+        storagePathProvider: const _ThrowingStoragePathProvider(),
+      );
+      addTearDown(container.dispose);
+
+      container.read(settingsControllerProvider);
+      await _flush();
+
+      final state = container.read(settingsControllerProvider);
+      expect(state.errorMessage, isNull);
+      expect(state.settings.defaultSavePath, savedPath);
+    },
+  );
+
+  test(
+    'load migrates legacy macOS sandbox receive path to default path',
+    () async {
+      final tempDirectory = await Directory.systemTemp.createTemp(
+        'settings-controller-legacy-sandbox',
+      );
+      addTearDown(() => tempDirectory.delete(recursive: true));
+
+      final defaultPath = '${tempDirectory.path}/normal-downloads';
+      const legacySandboxPath =
+          '/Users/alice/Library/Containers/com.sponzey.filesharing/Data/Downloads/Sponzey FileSharing';
+      await SettingsRepository(database).save(
+        AppSettings.initial().copyWith(defaultSavePath: legacySandboxPath),
+      );
+
+      final container = _createContainer(
+        database: database,
+        defaultReceivePath: defaultPath,
+      );
+      addTearDown(container.dispose);
+
+      container.read(settingsControllerProvider);
+      await _flush();
+
+      final state = container.read(settingsControllerProvider);
+      expect(state.errorMessage, isNull);
+      expect(state.settings.defaultSavePath, defaultPath);
+      expect(
+        (await SettingsRepository(database).load())?.defaultSavePath,
+        defaultPath,
+      );
+    },
+  );
+
   test('save rejects a file path and keeps the app alive', () async {
     final tempDirectory = await Directory.systemTemp.createTemp(
       'settings-controller-save-file',
@@ -87,13 +150,15 @@ void main() {
 
 ProviderContainer _createContainer({
   required AppDatabase database,
-  required String defaultReceivePath,
+  String? defaultReceivePath,
+  AppStoragePathProvider? storagePathProvider,
 }) {
+  assert(defaultReceivePath != null || storagePathProvider != null);
   return ProviderContainer(
     overrides: [
       appDatabaseProvider.overrideWithValue(database),
       appStoragePathProvider.overrideWithValue(
-        _FakeStoragePathProvider(defaultReceivePath),
+        storagePathProvider ?? _FakeStoragePathProvider(defaultReceivePath!),
       ),
       appLoggerProvider.overrideWithValue(
         const ConsoleAppLogger(minimumLevel: AppLogLevel.error),
@@ -114,4 +179,13 @@ class _FakeStoragePathProvider implements AppStoragePathProvider {
 
   @override
   Future<String> getDefaultReceivePath() async => path;
+}
+
+class _ThrowingStoragePathProvider implements AppStoragePathProvider {
+  const _ThrowingStoragePathProvider();
+
+  @override
+  Future<String> getDefaultReceivePath() {
+    throw StateError('default receive path is unavailable for test');
+  }
 }

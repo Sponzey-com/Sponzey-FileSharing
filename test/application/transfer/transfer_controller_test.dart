@@ -181,6 +181,120 @@ void main() {
     },
   );
 
+  test(
+    'receiver uses saved receive path when default receive path cannot be prepared',
+    () async {
+      final network = _LinkedFakeAuthNetwork();
+      final alice = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41011,
+        receivePath: '${workspaceDirectory.path}/alice-saved-path',
+      );
+      final bobReceivePath = '${workspaceDirectory.path}/bob-saved-path';
+      final bob = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-b',
+        authPort: 41012,
+        receivePath: bobReceivePath,
+        storagePathProvider: const _ThrowingStoragePathProvider(),
+      );
+      addTearDown(alice.dispose);
+      addTearDown(bob.dispose);
+      await _prepareAuthenticatedPair(
+        alice: alice,
+        bob: bob,
+        bobReceivePath: bobReceivePath,
+        bobPort: 41012,
+        clock: clock,
+      );
+
+      final sourceFile = File('${workspaceDirectory.path}/saved-path.txt');
+      await sourceFile.writeAsString('saved path should win');
+
+      await alice.transferController.sendFile(
+        peerId: 'team@instance-device-b',
+        filePath: sourceFile.path,
+      );
+
+      final aliceJob = await _waitForTerminalTransfer(alice.container);
+      final bobJob = await _waitForTerminalTransfer(bob.container);
+
+      expect(aliceJob.status, TransferJobStatus.completed);
+      expect(bobJob.status, TransferJobStatus.completed);
+      expect(
+        await File('$bobReceivePath/saved-path.txt').readAsString(),
+        'saved path should win',
+      );
+    },
+  );
+
+  test(
+    'receiver ignores legacy macOS sandbox receive path and uses default path',
+    () async {
+      final network = _LinkedFakeAuthNetwork();
+      final alice = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41013,
+        receivePath: '${workspaceDirectory.path}/alice-legacy-path',
+      );
+      final bobReceivePath = '${workspaceDirectory.path}/bob-normal-path';
+      final bob = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-b',
+        authPort: 41014,
+        receivePath: bobReceivePath,
+      );
+      addTearDown(alice.dispose);
+      addTearDown(bob.dispose);
+      await _prepareAuthenticatedPair(
+        alice: alice,
+        bob: bob,
+        bobReceivePath: bobReceivePath,
+        bobPort: 41014,
+        clock: clock,
+      );
+      const legacySandboxPath =
+          '/Users/alice/Library/Containers/com.sponzey.filesharing/Data/Downloads/Sponzey FileSharing';
+      await bob.container
+          .read(settingsRepositoryProvider)
+          .save(
+            AppSettings.initial().copyWith(defaultSavePath: legacySandboxPath),
+          );
+
+      final sourceFile = File('${workspaceDirectory.path}/legacy-path.txt');
+      await sourceFile.writeAsString('legacy path should not be used');
+
+      await alice.transferController.sendFile(
+        peerId: 'team@instance-device-b',
+        filePath: sourceFile.path,
+      );
+
+      final aliceJob = await _waitForTerminalTransfer(alice.container);
+      final bobJob = await _waitForTerminalTransfer(bob.container);
+
+      expect(aliceJob.status, TransferJobStatus.completed);
+      expect(bobJob.status, TransferJobStatus.completed);
+      expect(
+        await File('$bobReceivePath/legacy-path.txt').readAsString(),
+        'legacy path should not be used',
+      );
+    },
+  );
+
   test('does not send file chunks through the Control channel', () async {
     final transferChunkPacketSizes = <int>[];
     var transferWindowUpdateCount = 0;
@@ -1037,6 +1151,7 @@ Future<_TransferHarness> _createNode({
   required String receivePath,
   AppLogger? logger,
   DataTransport? dataTransport,
+  AppStoragePathProvider? storagePathProvider,
   bool useSwitchableSettingsRepository = false,
 }) async {
   final database = AppDatabase.forTesting(NativeDatabase.memory());
@@ -1068,7 +1183,7 @@ Future<_TransferHarness> _createNode({
         settingsRepositoryProvider.overrideWithValue(settingsRepository),
       appSecureStorageProvider.overrideWithValue(_FakeSecureStorage()),
       appStoragePathProvider.overrideWithValue(
-        _FakeStoragePathProvider(receivePath),
+        storagePathProvider ?? _FakeStoragePathProvider(receivePath),
       ),
       appLoggerProvider.overrideWithValue(
         logger ?? const ConsoleAppLogger(minimumLevel: AppLogLevel.error),
@@ -1616,6 +1731,15 @@ class _FakeStoragePathProvider implements AppStoragePathProvider {
 
   @override
   Future<String> getDefaultReceivePath() async => path;
+}
+
+class _ThrowingStoragePathProvider implements AppStoragePathProvider {
+  const _ThrowingStoragePathProvider();
+
+  @override
+  Future<String> getDefaultReceivePath() {
+    throw StateError('default receive path is unavailable for test');
+  }
 }
 
 class _FakeLocalDeviceIdentityService implements LocalDeviceIdentityService {

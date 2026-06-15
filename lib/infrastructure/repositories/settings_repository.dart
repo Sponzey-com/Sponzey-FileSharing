@@ -18,10 +18,15 @@ class SettingsRepository {
     return _map(row);
   }
 
-  Future<AppSettings> loadOrCreate({required String defaultSavePath}) async {
+  Future<AppSettings?> load() async {
     final row = await _database.getSettings();
-    if (row != null) {
-      return _map(row);
+    return row != null ? _map(row) : null;
+  }
+
+  Future<AppSettings> loadOrCreate({required String defaultSavePath}) async {
+    final current = await load();
+    if (current != null) {
+      return current;
     }
 
     return ensureDefaults(defaultSavePath: defaultSavePath);
