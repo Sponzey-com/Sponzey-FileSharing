@@ -99,6 +99,17 @@ void main() {
     expect(await File(draft.tempFilePath).readAsString(), 'fast-path-receive');
   });
 
+  test('sanitizes Windows sender path names for incoming drafts', () async {
+    final draft = await service.createIncomingDraft(
+      transferId: 'transfer-windows-name',
+      fileName: r'C:\Users\atom\Downloads\report?.txt',
+    );
+
+    expect(draft.fileName, 'report_.txt');
+    expect(p.basename(draft.tempFilePath), 'report_.txt.part');
+    expect(await File(draft.tempFilePath).exists(), isTrue);
+  });
+
   test(
     'digesting incoming writer computes streaming sha256 while appending',
     () async {

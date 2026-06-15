@@ -22,9 +22,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _savePathController = TextEditingController();
 
-  ReceivePolicy _receivePolicy = ReceivePolicy.manualApproval;
   AppLogLevel _logLevel = AppLogLevel.info;
-  bool _autoReceiveEnabled = false;
   bool _didHydrate = false;
 
   @override
@@ -41,9 +39,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (!_didHydrate && !settingsState.isLoading) {
       _didHydrate = true;
       _savePathController.text = settingsState.settings.defaultSavePath;
-      _receivePolicy = settingsState.settings.receivePolicy;
       _logLevel = settingsState.settings.logLevel;
-      _autoReceiveEnabled = settingsState.settings.autoReceiveEnabled;
     }
 
     return Column(
@@ -66,41 +62,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('자동 수신 활성화'),
-                        subtitle: const Text('허용된 정책에 맞으면 수신 요청을 자동 처리합니다.'),
-                        value: _autoReceiveEnabled,
-                        onChanged: settingsState.isSaving
-                            ? null
-                            : (value) {
-                                setState(() {
-                                  _autoReceiveEnabled = value;
-                                });
-                              },
+                      Text(
+                        '인증된 피어가 보낸 파일은 별도 승인 창 없이 기본 저장 경로에 즉시 저장합니다.',
+                        style: Theme.of(context).textTheme.bodyLarge,
                       ),
                       const SizedBox(height: AppSpacing.md),
-                      DropdownButtonFormField<ReceivePolicy>(
-                        initialValue: _receivePolicy,
-                        items: ReceivePolicy.values
-                            .map(
-                              (policy) => DropdownMenuItem(
-                                value: policy,
-                                child: Text(_policyLabel(policy)),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: settingsState.isSaving
-                            ? null
-                            : (value) {
-                                if (value == null) {
-                                  return;
-                                }
-                                setState(() {
-                                  _receivePolicy = value;
-                                });
-                              },
-                        decoration: const InputDecoration(labelText: '수신 정책'),
+                      Text(
+                        '수신 전 수동 승인 정책은 현재 제품 범위에서 사용하지 않습니다. 수신 가능 여부는 피어 인증과 저장 경로 준비 상태로만 결정합니다.',
+                        style: Theme.of(context).textTheme.bodyMedium,
                       ),
                     ],
                   ),
@@ -193,22 +162,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         .save(
           currentState.settings.copyWith(
             defaultSavePath: _savePathController.text.trim(),
-            autoReceiveEnabled: _autoReceiveEnabled,
-            receivePolicy: _receivePolicy,
+            autoReceiveEnabled: true,
+            receivePolicy: ReceivePolicy.autoReceiveAll,
             logLevel: _logLevel,
           ),
         );
-  }
-
-  String _policyLabel(ReceivePolicy policy) {
-    switch (policy) {
-      case ReceivePolicy.manualApproval:
-        return '수신 전 승인 필요';
-      case ReceivePolicy.autoReceiveAll:
-        return '모든 파일 자동 수신';
-      case ReceivePolicy.autoReceiveAllowedUsers:
-        return '허용 사용자만 자동 수신';
-    }
   }
 }
 

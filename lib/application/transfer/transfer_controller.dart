@@ -781,17 +781,24 @@ class TransferController extends Notifier<TransferState> {
       return;
     }
 
+    IncomingTransferDraft? draft;
+    IncomingDigestingTransferWriter? writer;
+    var ownershipMovedToSession = false;
     try {
-      final settings = await _loadSettings();
+      final settings = await _loadIncomingSettingsForTransfer(transferId);
       final fileService = ref.read(transferFileServiceProvider);
-      final draft = await fileService.createIncomingDraft(
+      draft = await fileService.createIncomingDraft(
         transferId: transferId,
         fileName: fileName,
       );
-      final writer = await fileService.openIncomingDigestingWriter(
+      writer = await _openIncomingWriterForTransfer(
         draft.tempFilePath,
+        transferId: transferId,
       );
-      final dataBind = await _bindDataTransport(datagram.localEndpoint);
+      final dataBind = await _bindDataTransportForIncoming(
+        datagram.localEndpoint,
+        transferId: transferId,
+      );
       final now = _now();
       final transferIdBytes = transferIdBytesFromString(transferId);
       _transferIdByFrameKey[_frameKey(transferIdBytes)] = transferId;
@@ -813,6 +820,7 @@ class TransferController extends Notifier<TransferState> {
         transferIdBytes: transferIdBytes,
         sessionHash: 0,
       );
+      ownershipMovedToSession = true;
       _upsertJob(
         TransferJob(
           id: transferId,
@@ -861,6 +869,18 @@ class TransferController extends Notifier<TransferState> {
         ),
       );
     } on AppException catch (error) {
+      if (!ownershipMovedToSession) {
+        await _cleanupRejectedIncomingDraft(draft, writer);
+      }
+      ref
+          .read(appLoggerProvider)
+          .warning(
+            AppLogCategory.transferControl,
+            'Incoming transfer prepare rejected '
+            'transfer=${_safeTransfer(transferId)} code=${error.code} '
+            'peer=$peerId source=${datagram.address.address}:${datagram.port} '
+            'local=${_endpointLabel(datagram.localEndpoint)}',
+          );
       await _sendTransferInitAck(
         sessionId: packet.sessionId,
         transferId: transferId,
@@ -871,11 +891,17 @@ class TransferController extends Notifier<TransferState> {
         localEndpoint: datagram.localEndpoint,
       );
     } catch (error, stackTrace) {
+      if (!ownershipMovedToSession) {
+        await _cleanupRejectedIncomingDraft(draft, writer);
+      }
       ref
           .read(appLoggerProvider)
           .error(
             AppLogCategory.transferControl,
-            'Failed to prepare incoming transfer',
+            'Failed to prepare incoming transfer '
+            'transfer=${_safeTransfer(transferId)} '
+            'peer=$peerId source=${datagram.address.address}:${datagram.port} '
+            'local=${_endpointLabel(datagram.localEndpoint)}',
             error: error,
             stackTrace: stackTrace,
           );
@@ -885,7 +911,7 @@ class TransferController extends Notifier<TransferState> {
         address: datagram.address,
         port: datagram.port,
         accepted: false,
-        message: '수신 임시 파일을 준비하지 못했습니다.',
+        message: '수신 준비 중 알 수 없는 오류가 발생했습니다. 수신 노드 로그를 확인해 주세요.',
         localEndpoint: datagram.localEndpoint,
       );
     }
@@ -2036,6 +2062,112 @@ class TransferController extends Notifier<TransferState> {
     return ref
         .read(settingsRepositoryProvider)
         .loadOrCreate(defaultSavePath: defaultSavePath);
+  }
+
+  Future<AppSettings> _loadIncomingSettingsForTransfer(
+    String transferId,
+  ) async {
+    try {
+      return await _loadSettings();
+    } catch (error, stackTrace) {
+      ref
+          .read(appLoggerProvider)
+          .warning(
+            AppLogCategory.transferControl,
+            'Failed to load receive settings for '
+            '${_safeTransfer(transferId)}',
+            error: error,
+            stackTrace: stackTrace,
+          );
+      throw const AppException(
+        code: 'transfer_receive_settings_failed',
+        message: '수신 설정을 불러오지 못했습니다. 기본 저장 경로 권한을 확인해 주세요.',
+      );
+    }
+  }
+
+  Future<IncomingDigestingTransferWriter> _openIncomingWriterForTransfer(
+    String tempFilePath, {
+    required String transferId,
+  }) async {
+    try {
+      return await ref
+          .read(transferFileServiceProvider)
+          .openIncomingDigestingWriter(tempFilePath);
+    } catch (error, stackTrace) {
+      ref
+          .read(appLoggerProvider)
+          .warning(
+            AppLogCategory.transferControl,
+            'Failed to open incoming temp writer for '
+            '${_safeTransfer(transferId)}',
+            error: error,
+            stackTrace: stackTrace,
+          );
+      throw const AppException(
+        code: 'incoming_writer_open_failed',
+        message: '수신 임시 파일 writer를 열지 못했습니다. 임시 저장소 권한을 확인해 주세요.',
+      );
+    }
+  }
+
+  Future<DataBindResult> _bindDataTransportForIncoming(
+    UdpInterfaceEndpoint? localEndpoint, {
+    required String transferId,
+  }) async {
+    try {
+      return await _bindDataTransport(localEndpoint);
+    } catch (error, stackTrace) {
+      ref
+          .read(appLoggerProvider)
+          .warning(
+            AppLogCategory.transferData,
+            'Failed to bind incoming data endpoint for '
+            '${_safeTransfer(transferId)} local=${_endpointLabel(localEndpoint)}',
+            error: error,
+            stackTrace: stackTrace,
+          );
+      throw const AppException(
+        code: 'incoming_data_bind_failed',
+        message:
+            '수신 Data UDP 포트를 준비하지 못했습니다. 방화벽 또는 UDP 포트 38410-38430 사용 상태를 확인해 주세요.',
+      );
+    }
+  }
+
+  Future<void> _cleanupRejectedIncomingDraft(
+    IncomingTransferDraft? draft,
+    IncomingDigestingTransferWriter? writer,
+  ) async {
+    try {
+      await writer?.close();
+    } catch (error, stackTrace) {
+      ref
+          .read(appLoggerProvider)
+          .debug(
+            AppLogCategory.transferData,
+            'Ignored incoming writer cleanup failure',
+            error: error,
+            stackTrace: stackTrace,
+          );
+    }
+    if (draft == null) {
+      return;
+    }
+    try {
+      await ref
+          .read(transferFileServiceProvider)
+          .discardDraft(draft.tempFilePath);
+    } catch (error, stackTrace) {
+      ref
+          .read(appLoggerProvider)
+          .debug(
+            AppLogCategory.transferData,
+            'Ignored incoming draft cleanup failure',
+            error: error,
+            stackTrace: stackTrace,
+          );
+    }
   }
 
   PeerAuthSession _requireAuthenticatedSession(String peerId) {

@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sponzey_file_sharing/core/logger/app_logger.dart';
@@ -24,6 +25,8 @@ void main() {
     );
 
     expect(defaults.defaultSavePath, '/tmp/sponzey-downloads');
+    expect(defaults.autoReceiveEnabled, isTrue);
+    expect(defaults.receivePolicy, ReceivePolicy.autoReceiveAll);
     expect(defaults.logLevel, AppLogLevel.info);
 
     final loaded = await repository.loadOrCreate(
@@ -32,6 +35,32 @@ void main() {
 
     expect(loaded.defaultSavePath, '/tmp/sponzey-downloads');
   });
+
+  test(
+    'normalizes legacy manual approval settings to automatic receive',
+    () async {
+      final now = DateTime(2026);
+      await database.saveSettings(
+        SettingsCompanion(
+          id: const Value(1),
+          defaultSavePath: const Value('/tmp/legacy-downloads'),
+          autoReceiveEnabled: const Value(false),
+          receivePolicy: Value(ReceivePolicy.manualApproval.name),
+          logLevel: Value(AppLogLevel.info.name),
+          createdAt: Value(now),
+          updatedAt: Value(now),
+        ),
+      );
+
+      final loaded = await repository.loadOrCreate(
+        defaultSavePath: '/tmp/sponzey-downloads',
+      );
+
+      expect(loaded.defaultSavePath, '/tmp/legacy-downloads');
+      expect(loaded.autoReceiveEnabled, isTrue);
+      expect(loaded.receivePolicy, ReceivePolicy.autoReceiveAll);
+    },
+  );
 
   test('saves updated settings', () async {
     await repository.ensureDefaults(defaultSavePath: '/tmp/sponzey-downloads');
@@ -47,6 +76,6 @@ void main() {
 
     expect(saved.defaultSavePath, '/tmp/custom-path');
     expect(saved.autoReceiveEnabled, isTrue);
-    expect(saved.receivePolicy, ReceivePolicy.autoReceiveAllowedUsers);
+    expect(saved.receivePolicy, ReceivePolicy.autoReceiveAll);
   });
 }

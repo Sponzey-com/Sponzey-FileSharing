@@ -71,7 +71,7 @@ Transfer work is managed as independent `transfer job` or session units so that 
 
 ### Receive Policy and History
 
-Receivers can automatically accept files or require approval depending on policy. Transfer results should remain in history so that users can inspect diagnostics such as failure reason, peer node, filename, size, and timestamp.
+Receivers automatically accept files from authenticated peers and save them to the configured default receive directory. There is no pre-receive approval dialog in the current app scope. Transfer results should remain in history so that users can inspect diagnostics such as failure reason, peer node, filename, size, and timestamp.
 
 ## In Scope
 

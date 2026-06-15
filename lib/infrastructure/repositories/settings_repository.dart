@@ -12,7 +12,7 @@ class SettingsRepository {
   Future<AppSettings> ensureDefaults({required String defaultSavePath}) async {
     final row = await _database.ensureSettings(
       defaultSavePathValue: defaultSavePath,
-      receivePolicyValue: ReceivePolicy.manualApproval.name,
+      receivePolicyValue: ReceivePolicy.autoReceiveAll.name,
       logLevelValue: AppLogLevel.info.name,
     );
     return _map(row);
@@ -30,34 +30,44 @@ class SettingsRepository {
   Future<AppSettings> save(AppSettings settings) async {
     final now = DateTime.now();
     final current = await _database.getSettings();
+    final normalizedSettings = _normalizeReceivePolicy(settings);
     await _database.saveSettings(
       SettingsCompanion(
         id: const Value(1),
-        defaultSavePath: Value(settings.defaultSavePath),
-        autoReceiveEnabled: Value(settings.autoReceiveEnabled),
-        receivePolicy: Value(settings.receivePolicy.name),
-        logLevel: Value(settings.logLevel.name),
+        defaultSavePath: Value(normalizedSettings.defaultSavePath),
+        autoReceiveEnabled: Value(normalizedSettings.autoReceiveEnabled),
+        receivePolicy: Value(normalizedSettings.receivePolicy.name),
+        logLevel: Value(normalizedSettings.logLevel.name),
         createdAt: Value(current?.createdAt ?? now),
         updatedAt: Value(now),
       ),
     );
 
     final savedRow = await _database.getSettings();
-    return savedRow != null ? _map(savedRow) : settings;
+    return savedRow != null ? _map(savedRow) : normalizedSettings;
   }
 
   AppSettings _map(Setting row) {
-    return AppSettings(
-      defaultSavePath: row.defaultSavePath,
-      autoReceiveEnabled: row.autoReceiveEnabled,
-      receivePolicy: ReceivePolicy.values.firstWhere(
-        (value) => value.name == row.receivePolicy,
-        orElse: () => ReceivePolicy.manualApproval,
+    return _normalizeReceivePolicy(
+      AppSettings(
+        defaultSavePath: row.defaultSavePath,
+        autoReceiveEnabled: row.autoReceiveEnabled,
+        receivePolicy: ReceivePolicy.values.firstWhere(
+          (value) => value.name == row.receivePolicy,
+          orElse: () => ReceivePolicy.autoReceiveAll,
+        ),
+        logLevel: AppLogLevel.values.firstWhere(
+          (value) => value.name == row.logLevel,
+          orElse: () => AppLogLevel.info,
+        ),
       ),
-      logLevel: AppLogLevel.values.firstWhere(
-        (value) => value.name == row.logLevel,
-        orElse: () => AppLogLevel.info,
-      ),
+    );
+  }
+
+  AppSettings _normalizeReceivePolicy(AppSettings settings) {
+    return settings.copyWith(
+      autoReceiveEnabled: true,
+      receivePolicy: ReceivePolicy.autoReceiveAll,
     );
   }
 }

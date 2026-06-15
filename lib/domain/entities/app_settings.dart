@@ -13,8 +13,8 @@ class AppSettings {
   factory AppSettings.initial() {
     return const AppSettings(
       defaultSavePath: '',
-      autoReceiveEnabled: false,
-      receivePolicy: ReceivePolicy.manualApproval,
+      autoReceiveEnabled: true,
+      receivePolicy: ReceivePolicy.autoReceiveAll,
       logLevel: AppLogLevel.info,
     );
   }

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -241,18 +242,25 @@ class LocalTransferFileService implements TransferFileService {
     required String transferId,
     required String fileName,
   }) async {
-    final draftDirectory = await Directory.systemTemp.createTemp(
-      'sponzey-transfer-$transferId-',
-    );
-    final safeFileName = p.basename(fileName.trim());
-    final tempFilePath = p.join(draftDirectory.path, '$safeFileName.part');
-    await File(tempFilePath).create(recursive: true);
-    return IncomingTransferDraft(
-      transferId: transferId,
-      fileName: safeFileName,
-      tempDirectoryPath: draftDirectory.path,
-      tempFilePath: tempFilePath,
-    );
+    try {
+      final draftDirectory = await Directory.systemTemp.createTemp(
+        'sponzey-transfer-$transferId-',
+      );
+      final safeFileName = _safeIncomingFileName(fileName);
+      final tempFilePath = p.join(draftDirectory.path, '$safeFileName.part');
+      await File(tempFilePath).create(recursive: true);
+      return IncomingTransferDraft(
+        transferId: transferId,
+        fileName: safeFileName,
+        tempDirectoryPath: draftDirectory.path,
+        tempFilePath: tempFilePath,
+      );
+    } catch (_) {
+      throw const AppException(
+        code: 'incoming_draft_prepare_failed',
+        message: '수신 임시 파일을 준비하지 못했습니다. 파일명 또는 임시 저장소 권한을 확인해 주세요.',
+      );
+    }
   }
 
   @override
@@ -336,6 +344,35 @@ class LocalTransferFileService implements TransferFileService {
       index += 1;
     }
     return candidate;
+  }
+
+  String _safeIncomingFileName(String fileName) {
+    final trimmed = fileName.trim();
+    final candidate = trimmed.isEmpty ? 'received-file' : trimmed;
+    final windowsBase = p.Context(style: p.Style.windows).basename(candidate);
+    final posixBase = p.Context(style: p.Style.posix).basename(windowsBase);
+    var safeName = posixBase
+        .replaceAll(RegExp(r'[\x00-\x1f\x7f<>:"/\\|?*]+'), '_')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    safeName = safeName.replaceAll(RegExp(r'^\.+$'), '');
+    safeName = safeName.replaceAll(RegExp(r'^[. ]+|[. ]+$'), '');
+    if (safeName.isEmpty) {
+      safeName = 'received-file';
+    }
+    if (RegExp(
+      r'^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$',
+      caseSensitive: false,
+    ).hasMatch(safeName)) {
+      safeName = '_$safeName';
+    }
+    if (safeName.length > 180) {
+      final extension = p.extension(safeName);
+      final basename = p.basenameWithoutExtension(safeName);
+      final maxBaseLength = extension.isEmpty ? 180 : 180 - extension.length;
+      safeName = '${basename.substring(0, max(1, maxBaseLength))}$extension';
+    }
+    return safeName;
   }
 
   Future<void> _cleanupParentDirectory(String tempFilePath) async {
