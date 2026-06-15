@@ -43,6 +43,20 @@ void main() {
     expect(utf8.decode(merged), content);
   });
 
+  test('prepares outgoing metadata without computing sha256', () async {
+    final sourceFile = File(p.join(tempDirectory.path, 'metadata.txt'));
+    await sourceFile.writeAsString('metadata-only');
+
+    final metadata = await service.prepareOutgoingMetadata(
+      sourceFile.path,
+      chunkSize: 4,
+    );
+
+    expect(metadata.fileName, 'metadata.txt');
+    expect(metadata.fileSize, 'metadata-only'.length);
+    expect(metadata.chunkCount, 4);
+  });
+
   test('computes sha256 and finalizes incoming file', () async {
     final sourceFile = File(p.join(tempDirectory.path, 'hash.txt'));
     const content = 'sponzey-file-sharing';
@@ -68,5 +82,53 @@ void main() {
 
     expect(await File(finalPath).readAsString(), content);
     expect(await File(draft.tempFilePath).exists(), isFalse);
+  });
+
+  test('keeps incoming writer open across multiple appends', () async {
+    final draft = await service.createIncomingDraft(
+      transferId: 'transfer-writer',
+      fileName: 'writer.txt',
+    );
+    final writer = await service.openIncomingWriter(draft.tempFilePath);
+
+    await writer.append(utf8.encode('fast-'));
+    await writer.append(utf8.encode('path-'));
+    await writer.append(utf8.encode('receive'));
+    await writer.close();
+
+    expect(await File(draft.tempFilePath).readAsString(), 'fast-path-receive');
+  });
+
+  test(
+    'digesting incoming writer computes streaming sha256 while appending',
+    () async {
+      final draft = await service.createIncomingDraft(
+        transferId: 'transfer-digest',
+        fileName: 'digest.txt',
+      );
+      final writer = await service.openIncomingDigestingWriter(
+        draft.tempFilePath,
+      );
+
+      await writer.append(utf8.encode('stream-'));
+      await writer.append(utf8.encode('digest'));
+      final digest = await writer.closeWithDigest();
+
+      expect(digest, sha256.convert(utf8.encode('stream-digest')).toString());
+      expect(await File(draft.tempFilePath).readAsString(), 'stream-digest');
+    },
+  );
+
+  test('keeps outgoing reader open across positioned chunk reads', () async {
+    final sourceFile = File(p.join(tempDirectory.path, 'reader.txt'));
+    await sourceFile.writeAsString('abcdefghij');
+    final reader = await service.openOutgoingReader(sourceFile.path);
+
+    final secondChunk = await reader.readAt(chunkSize: 3, chunkIndex: 1);
+    final fourthChunk = await reader.readAt(chunkSize: 3, chunkIndex: 3);
+    await reader.close();
+
+    expect(utf8.decode(secondChunk), 'def');
+    expect(utf8.decode(fourthChunk), 'j');
   });
 }

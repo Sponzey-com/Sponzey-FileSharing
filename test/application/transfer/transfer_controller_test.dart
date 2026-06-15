@@ -13,9 +13,11 @@ import 'package:sponzey_file_sharing/application/transfer/transfer_overview_prov
 import 'package:sponzey_file_sharing/core/logger/app_log_category.dart';
 import 'package:sponzey_file_sharing/core/logger/app_logger.dart';
 import 'package:sponzey_file_sharing/core/logger/console_app_logger.dart';
+import 'package:sponzey_file_sharing/core/network/udp_port_config.dart';
 import 'package:sponzey_file_sharing/domain/entities/app_settings.dart';
 import 'package:sponzey_file_sharing/domain/entities/peer_node.dart';
 import 'package:sponzey_file_sharing/domain/entities/transfer_job.dart';
+import 'package:sponzey_file_sharing/domain/network/network_interface_models.dart';
 import 'package:sponzey_file_sharing/infrastructure/auth/auth_packet.dart';
 import 'package:sponzey_file_sharing/infrastructure/auth/auth_transport.dart';
 import 'package:sponzey_file_sharing/infrastructure/control/control_transport.dart';
@@ -24,6 +26,10 @@ import 'package:sponzey_file_sharing/infrastructure/platform/app_secure_storage.
 import 'package:sponzey_file_sharing/infrastructure/platform/app_storage_path_provider.dart';
 import 'package:sponzey_file_sharing/infrastructure/platform/local_device_identity_service.dart';
 import 'package:sponzey_file_sharing/infrastructure/repositories/settings_repository.dart';
+import 'package:sponzey_file_sharing/infrastructure/transfer_data/data_frame_codec.dart';
+import 'package:sponzey_file_sharing/infrastructure/transfer_data/data_frame.dart';
+import 'package:sponzey_file_sharing/infrastructure/transfer_data/data_packet.dart';
+import 'package:sponzey_file_sharing/infrastructure/transfer_data/data_transport.dart';
 
 const _sharedUserId = 'team';
 const _sharedPassword = 'shared-secret';
@@ -101,11 +107,26 @@ void main() {
         await File(bobJob.destinationPath!).readAsString(),
         'hello from alice to bob',
       );
+      final senderTraces = alice.transferController.diagnosticFrameSnapshot(
+        aliceJob.transferId,
+      );
+      final receiverTraces = bob.transferController.diagnosticFrameSnapshot(
+        bobJob.transferId,
+      );
+      expect(senderTraces, isNotEmpty);
+      expect(receiverTraces, isNotEmpty);
+      expect(senderTraces.map((trace) => trace.direction), contains('out'));
+      expect(receiverTraces.map((trace) => trace.direction), contains('in'));
+      expect(
+        [...senderTraces, ...receiverTraces].map((trace) => trace.endpoint),
+        everyElement(isNot(contains(sourceFile.path))),
+      );
     },
   );
 
-  test('keeps transfer chunk packets within UDP safe datagram size', () async {
+  test('does not send file chunks through the Control channel', () async {
     final transferChunkPacketSizes = <int>[];
+    var transferWindowUpdateCount = 0;
     final network = _LinkedFakeAuthNetwork(
       interceptor:
           ({
@@ -117,6 +138,9 @@ void main() {
           }) async {
             if (packet.type == AuthPacketType.transferChunk) {
               transferChunkPacketSizes.add(packet.encode().length);
+            }
+            if (packet.type == AuthPacketType.transferWindowUpdate) {
+              transferWindowUpdateCount += 1;
             }
             deliver(packet, address: address, port: sourcePort);
           },
@@ -164,8 +188,72 @@ void main() {
 
     expect(aliceJob.status, TransferJobStatus.completed);
     expect(bobJob.status, TransferJobStatus.completed);
-    expect(transferChunkPacketSizes, isNotEmpty);
-    expect(transferChunkPacketSizes, everyElement(lessThanOrEqualTo(1200)));
+    expect(transferChunkPacketSizes, isEmpty);
+    expect(transferWindowUpdateCount, 0);
+    expect(const DataFrameCodec().maxPayloadBytes(), lessThanOrEqualTo(1400));
+  });
+
+  test('batches Data channel ACK frames below chunk count', () async {
+    final controlNetwork = _LinkedFakeAuthNetwork();
+    final dataNetwork = _LinkedFakeDataNetwork();
+    final alice = await _createNode(
+      network: controlNetwork,
+      dataTransport: dataNetwork.attach(),
+      clock: clock,
+      loginUserId: _sharedUserId,
+      loginPassword: _sharedPassword,
+      localDeviceId: 'device-a',
+      authPort: 41031,
+      receivePath: '${workspaceDirectory.path}/alice-batch-ack',
+    );
+    final bob = await _createNode(
+      network: controlNetwork,
+      dataTransport: dataNetwork.attach(),
+      clock: clock,
+      loginUserId: _sharedUserId,
+      loginPassword: _sharedPassword,
+      localDeviceId: 'device-b',
+      authPort: 41032,
+      receivePath: '${workspaceDirectory.path}/bob-batch-ack',
+    );
+    addTearDown(alice.dispose);
+    addTearDown(bob.dispose);
+
+    await _prepareAuthenticatedPair(
+      alice: alice,
+      bob: bob,
+      bobReceivePath: '${workspaceDirectory.path}/bob-batch-ack',
+      bobPort: 41032,
+      clock: clock,
+    );
+
+    final sourceFile = File(
+      '${workspaceDirectory.path}/alice-batch-ack/source.bin',
+    );
+    await sourceFile.parent.create(recursive: true);
+    await sourceFile.writeAsBytes(
+      List<int>.filled(const DataFrameCodec().maxPayloadBytes() * 20 + 31, 3),
+    );
+
+    await alice.transferController.sendFile(
+      peerId: 'team@instance-device-b',
+      filePath: sourceFile.path,
+    );
+
+    final aliceJob = await _waitForTerminalTransfer(alice.container);
+    final bobJob = await _waitForTerminalTransfer(bob.container);
+
+    final chunkFrameCount = dataNetwork.sentFrames
+        .where((frame) => frame.type == DataFrameType.dataChunk)
+        .length;
+    final ackFrameCount = dataNetwork.sentFrames
+        .where((frame) => frame.type == DataFrameType.dataAck)
+        .length;
+
+    expect(aliceJob.status, TransferJobStatus.completed);
+    expect(bobJob.status, TransferJobStatus.completed);
+    expect(chunkFrameCount, greaterThanOrEqualTo(20));
+    expect(ackFrameCount, lessThan(chunkFrameCount));
   });
 
   test('sends multiple files to one authenticated peer', () async {
@@ -344,307 +432,325 @@ void main() {
     },
   );
 
-  test('retransmits dropped chunks and completes under packet loss', () async {
-    final droppedChunks = <int>{3};
-    final network = _LinkedFakeAuthNetwork(
-      interceptor:
-          ({
-            required packet,
-            required address,
-            required sourcePort,
-            required targetPort,
-            required deliver,
-          }) async {
-            if (packet.type == AuthPacketType.transferChunk &&
-                sourcePort == 41021 &&
-                targetPort == 41022 &&
-                packet.transferChunkIndex != null &&
-                droppedChunks.remove(packet.transferChunkIndex)) {
-              return;
-            }
-            deliver(packet, address: address, port: sourcePort);
-          },
-    );
-    final alice = await _createNode(
-      network: network,
-      clock: clock,
-      loginUserId: _sharedUserId,
-      loginPassword: _sharedPassword,
-      localDeviceId: 'device-a',
-      authPort: 41021,
-      receivePath: '${workspaceDirectory.path}/alice-loss',
-    );
-    final bob = await _createNode(
-      network: network,
-      clock: clock,
-      loginUserId: _sharedUserId,
-      loginPassword: _sharedPassword,
-      localDeviceId: 'device-b',
-      authPort: 41022,
-      receivePath: '${workspaceDirectory.path}/bob-loss',
-    );
-    addTearDown(alice.dispose);
-    addTearDown(bob.dispose);
-
-    await _prepareAuthenticatedPair(
-      alice: alice,
-      bob: bob,
-      bobReceivePath: '${workspaceDirectory.path}/bob-loss',
-      bobPort: 41022,
-      clock: clock,
-    );
-
-    final sourceFile = File('${workspaceDirectory.path}/alice-loss/source.bin');
-    await sourceFile.parent.create(recursive: true);
-    await sourceFile.writeAsString(List<String>.filled(14000, 'abc123').join());
-
-    await alice.transferController.sendFile(
-      peerId: 'team@instance-device-b',
-      filePath: sourceFile.path,
-    );
-
-    final aliceJob = await _waitForTerminalTransfer(alice.container);
-    final bobJob = await _waitForTerminalTransfer(bob.container);
-
-    expect(aliceJob.status, TransferJobStatus.completed);
-    expect(bobJob.status, TransferJobStatus.completed);
-    expect(aliceJob.retryCount, greaterThan(0));
-    expect(aliceJob.lossRate, greaterThan(0));
-  });
-
-  test('handles out-of-order and duplicate chunks', () async {
-    AuthPacket? firstChunkZero;
-    AuthPacket? heldChunkFive;
-    var duplicated = false;
-    final network = _LinkedFakeAuthNetwork(
-      interceptor:
-          ({
-            required packet,
-            required address,
-            required sourcePort,
-            required targetPort,
-            required deliver,
-          }) async {
-            if (packet.type == AuthPacketType.transferChunk &&
-                sourcePort == 41031 &&
-                targetPort == 41032 &&
-                packet.transferChunkIndex == 0 &&
-                firstChunkZero == null) {
-              firstChunkZero = packet;
-            }
-            if (packet.type == AuthPacketType.transferChunk &&
-                sourcePort == 41031 &&
-                targetPort == 41032 &&
-                packet.transferChunkIndex == 5 &&
-                heldChunkFive == null) {
-              heldChunkFive = packet;
-              return;
-            }
-            if (packet.type == AuthPacketType.transferChunk &&
-                sourcePort == 41031 &&
-                targetPort == 41032 &&
-                packet.transferChunkIndex == 6 &&
-                heldChunkFive != null) {
-              deliver(packet, address: address, port: sourcePort);
-              deliver(heldChunkFive!, address: address, port: sourcePort);
-              if (firstChunkZero != null && !duplicated) {
-                duplicated = true;
-                deliver(firstChunkZero!, address: address, port: sourcePort);
+  test(
+    'keeps Data channel transfer isolated from legacy Control chunk drops',
+    () async {
+      final droppedChunks = <int>{3};
+      final network = _LinkedFakeAuthNetwork(
+        interceptor:
+            ({
+              required packet,
+              required address,
+              required sourcePort,
+              required targetPort,
+              required deliver,
+            }) async {
+              if (packet.type == AuthPacketType.transferChunk &&
+                  sourcePort == 41021 &&
+                  targetPort == 41022 &&
+                  packet.transferChunkIndex != null &&
+                  droppedChunks.remove(packet.transferChunkIndex)) {
+                return;
               }
-              heldChunkFive = null;
-              return;
-            }
-            deliver(packet, address: address, port: sourcePort);
-          },
-    );
-    final alice = await _createNode(
-      network: network,
-      clock: clock,
-      loginUserId: _sharedUserId,
-      loginPassword: _sharedPassword,
-      localDeviceId: 'device-a',
-      authPort: 41031,
-      receivePath: '${workspaceDirectory.path}/alice-order',
-    );
-    final bob = await _createNode(
-      network: network,
-      clock: clock,
-      loginUserId: _sharedUserId,
-      loginPassword: _sharedPassword,
-      localDeviceId: 'device-b',
-      authPort: 41032,
-      receivePath: '${workspaceDirectory.path}/bob-order',
-    );
-    addTearDown(alice.dispose);
-    addTearDown(bob.dispose);
-
-    await _prepareAuthenticatedPair(
-      alice: alice,
-      bob: bob,
-      bobReceivePath: '${workspaceDirectory.path}/bob-order',
-      bobPort: 41032,
-      clock: clock,
-    );
-
-    final sourceFile = File(
-      '${workspaceDirectory.path}/alice-order/source.txt',
-    );
-    await sourceFile.parent.create(recursive: true);
-    await sourceFile.writeAsString('0123456789' * 9000);
-
-    await alice.transferController.sendFile(
-      peerId: 'team@instance-device-b',
-      filePath: sourceFile.path,
-    );
-
-    final aliceJob = await _waitForTerminalTransfer(alice.container);
-    final bobJob = await _waitForTerminalTransfer(bob.container);
-
-    expect(aliceJob.status, TransferJobStatus.completed);
-    expect(bobJob.status, TransferJobStatus.completed);
-    expect(duplicated, isTrue);
-    expect(bobJob.duplicateCount, greaterThan(0));
-  });
-
-  test('completes when chunk ack arrives before send future returns', () async {
-    var earlyAckInjected = false;
-    final network = _LinkedFakeAuthNetwork(
-      interceptor:
-          ({
-            required packet,
-            required address,
-            required sourcePort,
-            required targetPort,
-            required deliver,
-          }) async {
-            if (packet.type == AuthPacketType.transferChunk &&
-                sourcePort == 41033 &&
-                targetPort == 41034 &&
-                packet.transferChunkIndex == 1 &&
-                !earlyAckInjected) {
-              earlyAckInjected = true;
               deliver(packet, address: address, port: sourcePort);
-              await Future<void>.delayed(const Duration(milliseconds: 10));
-              return;
-            }
-            deliver(packet, address: address, port: sourcePort);
-          },
-    );
-    final alice = await _createNode(
-      network: network,
-      clock: clock,
-      loginUserId: _sharedUserId,
-      loginPassword: _sharedPassword,
-      localDeviceId: 'device-a',
-      authPort: 41033,
-      receivePath: '${workspaceDirectory.path}/alice-fast-ack',
-    );
-    final bob = await _createNode(
-      network: network,
-      clock: clock,
-      loginUserId: _sharedUserId,
-      loginPassword: _sharedPassword,
-      localDeviceId: 'device-b',
-      authPort: 41034,
-      receivePath: '${workspaceDirectory.path}/bob-fast-ack',
-    );
-    addTearDown(alice.dispose);
-    addTearDown(bob.dispose);
+            },
+      );
+      final alice = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41021,
+        receivePath: '${workspaceDirectory.path}/alice-loss',
+      );
+      final bob = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-b',
+        authPort: 41022,
+        receivePath: '${workspaceDirectory.path}/bob-loss',
+      );
+      addTearDown(alice.dispose);
+      addTearDown(bob.dispose);
 
-    await _prepareAuthenticatedPair(
-      alice: alice,
-      bob: bob,
-      bobReceivePath: '${workspaceDirectory.path}/bob-fast-ack',
-      bobPort: 41034,
-      clock: clock,
-    );
+      await _prepareAuthenticatedPair(
+        alice: alice,
+        bob: bob,
+        bobReceivePath: '${workspaceDirectory.path}/bob-loss',
+        bobPort: 41022,
+        clock: clock,
+      );
 
-    final sourceFile = File(
-      '${workspaceDirectory.path}/alice-fast-ack/source.txt',
-    );
-    await sourceFile.parent.create(recursive: true);
-    await sourceFile.writeAsString('fast-ack-' * 6000);
+      final sourceFile = File(
+        '${workspaceDirectory.path}/alice-loss/source.bin',
+      );
+      await sourceFile.parent.create(recursive: true);
+      await sourceFile.writeAsString(
+        List<String>.filled(14000, 'abc123').join(),
+      );
 
-    await alice.transferController.sendFile(
-      peerId: 'team@instance-device-b',
-      filePath: sourceFile.path,
-    );
+      await alice.transferController.sendFile(
+        peerId: 'team@instance-device-b',
+        filePath: sourceFile.path,
+      );
 
-    final aliceJob = await _waitForTerminalTransfer(alice.container);
-    final bobJob = await _waitForTerminalTransfer(bob.container);
+      final aliceJob = await _waitForTerminalTransfer(alice.container);
+      final bobJob = await _waitForTerminalTransfer(bob.container);
 
-    expect(earlyAckInjected, isTrue);
-    expect(aliceJob.status, TransferJobStatus.completed);
-    expect(bobJob.status, TransferJobStatus.completed);
-  });
+      expect(aliceJob.status, TransferJobStatus.completed);
+      expect(bobJob.status, TransferJobStatus.completed);
+      expect(aliceJob.retryCount, 0);
+      expect(aliceJob.lossRate, 0);
+    },
+  );
 
-  test('completes under deterministic 20 percent packet loss', () async {
-    final droppedIndexes = <int>{2};
-    final network = _LinkedFakeAuthNetwork(
-      interceptor:
-          ({
-            required packet,
-            required address,
-            required sourcePort,
-            required targetPort,
-            required deliver,
-          }) async {
-            if (packet.type == AuthPacketType.transferChunk &&
-                sourcePort == 41041 &&
-                targetPort == 41042 &&
-                packet.transferChunkIndex != null &&
-                droppedIndexes.remove(packet.transferChunkIndex)) {
-              return;
-            }
-            deliver(packet, address: address, port: sourcePort);
-          },
-    );
-    final alice = await _createNode(
-      network: network,
-      clock: clock,
-      loginUserId: _sharedUserId,
-      loginPassword: _sharedPassword,
-      localDeviceId: 'device-a',
-      authPort: 41041,
-      receivePath: '${workspaceDirectory.path}/alice-20p',
-    );
-    final bob = await _createNode(
-      network: network,
-      clock: clock,
-      loginUserId: _sharedUserId,
-      loginPassword: _sharedPassword,
-      localDeviceId: 'device-b',
-      authPort: 41042,
-      receivePath: '${workspaceDirectory.path}/bob-20p',
-    );
-    addTearDown(alice.dispose);
-    addTearDown(bob.dispose);
+  test(
+    'completes Data channel transfer when legacy duplicate interceptor sees no chunks',
+    () async {
+      AuthPacket? firstChunkZero;
+      AuthPacket? heldChunkFive;
+      var duplicated = false;
+      final network = _LinkedFakeAuthNetwork(
+        interceptor:
+            ({
+              required packet,
+              required address,
+              required sourcePort,
+              required targetPort,
+              required deliver,
+            }) async {
+              if (packet.type == AuthPacketType.transferChunk &&
+                  sourcePort == 41031 &&
+                  targetPort == 41032 &&
+                  packet.transferChunkIndex == 0 &&
+                  firstChunkZero == null) {
+                firstChunkZero = packet;
+              }
+              if (packet.type == AuthPacketType.transferChunk &&
+                  sourcePort == 41031 &&
+                  targetPort == 41032 &&
+                  packet.transferChunkIndex == 5 &&
+                  heldChunkFive == null) {
+                heldChunkFive = packet;
+                return;
+              }
+              if (packet.type == AuthPacketType.transferChunk &&
+                  sourcePort == 41031 &&
+                  targetPort == 41032 &&
+                  packet.transferChunkIndex == 6 &&
+                  heldChunkFive != null) {
+                deliver(packet, address: address, port: sourcePort);
+                deliver(heldChunkFive!, address: address, port: sourcePort);
+                if (firstChunkZero != null && !duplicated) {
+                  duplicated = true;
+                  deliver(firstChunkZero!, address: address, port: sourcePort);
+                }
+                heldChunkFive = null;
+                return;
+              }
+              deliver(packet, address: address, port: sourcePort);
+            },
+      );
+      final alice = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41031,
+        receivePath: '${workspaceDirectory.path}/alice-order',
+      );
+      final bob = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-b',
+        authPort: 41032,
+        receivePath: '${workspaceDirectory.path}/bob-order',
+      );
+      addTearDown(alice.dispose);
+      addTearDown(bob.dispose);
 
-    await _prepareAuthenticatedPair(
-      alice: alice,
-      bob: bob,
-      bobReceivePath: '${workspaceDirectory.path}/bob-20p',
-      bobPort: 41042,
-      clock: clock,
-    );
+      await _prepareAuthenticatedPair(
+        alice: alice,
+        bob: bob,
+        bobReceivePath: '${workspaceDirectory.path}/bob-order',
+        bobPort: 41032,
+        clock: clock,
+      );
 
-    final sourceFile = File('${workspaceDirectory.path}/alice-20p/source.bin');
-    await sourceFile.parent.create(recursive: true);
-    await sourceFile.writeAsBytes(List<int>.filled(1920, 9));
+      final sourceFile = File(
+        '${workspaceDirectory.path}/alice-order/source.txt',
+      );
+      await sourceFile.parent.create(recursive: true);
+      await sourceFile.writeAsString('0123456789' * 9000);
 
-    await alice.transferController.sendFile(
-      peerId: 'team@instance-device-b',
-      filePath: sourceFile.path,
-    );
+      await alice.transferController.sendFile(
+        peerId: 'team@instance-device-b',
+        filePath: sourceFile.path,
+      );
 
-    final aliceJob = await _waitForTerminalTransfer(alice.container);
-    final bobJob = await _waitForTerminalTransfer(bob.container);
+      final aliceJob = await _waitForTerminalTransfer(alice.container);
+      final bobJob = await _waitForTerminalTransfer(bob.container);
 
-    expect(aliceJob.status, TransferJobStatus.completed);
-    expect(bobJob.status, TransferJobStatus.completed);
-    expect(aliceJob.retryCount, greaterThan(0));
-    expect(aliceJob.lossRate, greaterThan(0.1));
-  });
+      expect(aliceJob.status, TransferJobStatus.completed);
+      expect(bobJob.status, TransferJobStatus.completed);
+      expect(duplicated, isFalse);
+      expect(bobJob.duplicateCount, 0);
+    },
+  );
+
+  test(
+    'completes when legacy Control chunk ACK interceptor sees no chunks',
+    () async {
+      var earlyAckInjected = false;
+      final network = _LinkedFakeAuthNetwork(
+        interceptor:
+            ({
+              required packet,
+              required address,
+              required sourcePort,
+              required targetPort,
+              required deliver,
+            }) async {
+              if (packet.type == AuthPacketType.transferChunk &&
+                  sourcePort == 41033 &&
+                  targetPort == 41034 &&
+                  packet.transferChunkIndex == 1 &&
+                  !earlyAckInjected) {
+                earlyAckInjected = true;
+                deliver(packet, address: address, port: sourcePort);
+                await Future<void>.delayed(const Duration(milliseconds: 10));
+                return;
+              }
+              deliver(packet, address: address, port: sourcePort);
+            },
+      );
+      final alice = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41033,
+        receivePath: '${workspaceDirectory.path}/alice-fast-ack',
+      );
+      final bob = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-b',
+        authPort: 41034,
+        receivePath: '${workspaceDirectory.path}/bob-fast-ack',
+      );
+      addTearDown(alice.dispose);
+      addTearDown(bob.dispose);
+
+      await _prepareAuthenticatedPair(
+        alice: alice,
+        bob: bob,
+        bobReceivePath: '${workspaceDirectory.path}/bob-fast-ack',
+        bobPort: 41034,
+        clock: clock,
+      );
+
+      final sourceFile = File(
+        '${workspaceDirectory.path}/alice-fast-ack/source.txt',
+      );
+      await sourceFile.parent.create(recursive: true);
+      await sourceFile.writeAsString('fast-ack-' * 6000);
+
+      await alice.transferController.sendFile(
+        peerId: 'team@instance-device-b',
+        filePath: sourceFile.path,
+      );
+
+      final aliceJob = await _waitForTerminalTransfer(alice.container);
+      final bobJob = await _waitForTerminalTransfer(bob.container);
+
+      expect(earlyAckInjected, isFalse);
+      expect(aliceJob.status, TransferJobStatus.completed);
+      expect(bobJob.status, TransferJobStatus.completed);
+    },
+  );
+
+  test(
+    'completes Data channel transfer when legacy Control packet loss is inactive',
+    () async {
+      final droppedIndexes = <int>{2};
+      final network = _LinkedFakeAuthNetwork(
+        interceptor:
+            ({
+              required packet,
+              required address,
+              required sourcePort,
+              required targetPort,
+              required deliver,
+            }) async {
+              if (packet.type == AuthPacketType.transferChunk &&
+                  sourcePort == 41041 &&
+                  targetPort == 41042 &&
+                  packet.transferChunkIndex != null &&
+                  droppedIndexes.remove(packet.transferChunkIndex)) {
+                return;
+              }
+              deliver(packet, address: address, port: sourcePort);
+            },
+      );
+      final alice = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41041,
+        receivePath: '${workspaceDirectory.path}/alice-20p',
+      );
+      final bob = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-b',
+        authPort: 41042,
+        receivePath: '${workspaceDirectory.path}/bob-20p',
+      );
+      addTearDown(alice.dispose);
+      addTearDown(bob.dispose);
+
+      await _prepareAuthenticatedPair(
+        alice: alice,
+        bob: bob,
+        bobReceivePath: '${workspaceDirectory.path}/bob-20p',
+        bobPort: 41042,
+        clock: clock,
+      );
+
+      final sourceFile = File(
+        '${workspaceDirectory.path}/alice-20p/source.bin',
+      );
+      await sourceFile.parent.create(recursive: true);
+      await sourceFile.writeAsBytes(List<int>.filled(1920, 9));
+
+      await alice.transferController.sendFile(
+        peerId: 'team@instance-device-b',
+        filePath: sourceFile.path,
+      );
+
+      final aliceJob = await _waitForTerminalTransfer(alice.container);
+      final bobJob = await _waitForTerminalTransfer(bob.container);
+
+      expect(aliceJob.status, TransferJobStatus.completed);
+      expect(bobJob.status, TransferJobStatus.completed);
+      expect(aliceJob.retryCount, 0);
+      expect(aliceJob.lossRate, 0);
+    },
+  );
 
   test('keeps transfer metric logs throttled under noisy delivery', () async {
     final logger = _MemoryAppLogger(minimumLevel: AppLogLevel.debug);
@@ -743,98 +849,100 @@ void main() {
     expect(transferDebugLogs.length, lessThan(30));
   });
 
-  test('fails transfer when a chunk is corrupted in transit', () async {
-    var corrupted = false;
-    final network = _LinkedFakeAuthNetwork(
-      interceptor:
-          ({
-            required packet,
-            required address,
-            required sourcePort,
-            required targetPort,
-            required deliver,
-          }) async {
-            if (!corrupted &&
-                packet.type == AuthPacketType.transferChunk &&
-                sourcePort == 41011 &&
-                targetPort == 41012) {
-              corrupted = true;
-              deliver(
-                _copyPacket(
-                  packet,
-                  transferChunkDataBase64: base64Encode(
-                    utf8.encode('corrupted'),
+  test(
+    'ignores legacy Control chunk corruption because chunks use Data channel',
+    () async {
+      var corrupted = false;
+      final network = _LinkedFakeAuthNetwork(
+        interceptor:
+            ({
+              required packet,
+              required address,
+              required sourcePort,
+              required targetPort,
+              required deliver,
+            }) async {
+              if (!corrupted &&
+                  packet.type == AuthPacketType.transferChunk &&
+                  sourcePort == 41011 &&
+                  targetPort == 41012) {
+                corrupted = true;
+                deliver(
+                  _copyPacket(
+                    packet,
+                    transferChunkDataBase64: base64Encode(
+                      utf8.encode('corrupted'),
+                    ),
                   ),
-                ),
-                address: address,
-                port: sourcePort,
-              );
-              return;
-            }
-            deliver(packet, address: address, port: sourcePort);
-          },
-    );
-    final alice = await _createNode(
-      network: network,
-      clock: clock,
-      loginUserId: _sharedUserId,
-      loginPassword: _sharedPassword,
-      localDeviceId: 'device-a',
-      authPort: 41011,
-      receivePath: '${workspaceDirectory.path}/alice-corrupt',
-    );
-    final bob = await _createNode(
-      network: network,
-      clock: clock,
-      loginUserId: _sharedUserId,
-      loginPassword: _sharedPassword,
-      localDeviceId: 'device-b',
-      authPort: 41012,
-      receivePath: '${workspaceDirectory.path}/bob-corrupt',
-    );
-    addTearDown(alice.dispose);
-    addTearDown(bob.dispose);
+                  address: address,
+                  port: sourcePort,
+                );
+                return;
+              }
+              deliver(packet, address: address, port: sourcePort);
+            },
+      );
+      final alice = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41011,
+        receivePath: '${workspaceDirectory.path}/alice-corrupt',
+      );
+      final bob = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-b',
+        authPort: 41012,
+        receivePath: '${workspaceDirectory.path}/bob-corrupt',
+      );
+      addTearDown(alice.dispose);
+      addTearDown(bob.dispose);
 
-    await bob.container
-        .read(settingsRepositoryProvider)
-        .save(
-          const AppSettings(
-            defaultSavePath: '',
-            autoReceiveEnabled: true,
-            receivePolicy: ReceivePolicy.autoReceiveAll,
-            logLevel: AppLogLevel.error,
-          ).copyWith(defaultSavePath: '${workspaceDirectory.path}/bob-corrupt'),
-        );
+      await bob.container
+          .read(settingsRepositoryProvider)
+          .save(
+            const AppSettings(
+              defaultSavePath: '',
+              autoReceiveEnabled: true,
+              receivePolicy: ReceivePolicy.autoReceiveAll,
+              logLevel: AppLogLevel.error,
+            ).copyWith(
+              defaultSavePath: '${workspaceDirectory.path}/bob-corrupt',
+            ),
+          );
 
-    await _handshakePair(
-      alice: alice,
-      bob: bob,
-      clock: clock.value,
-      bobPort: 41012,
-      alicePort: 41011,
-    );
+      await _handshakePair(
+        alice: alice,
+        bob: bob,
+        clock: clock.value,
+        bobPort: 41012,
+        alicePort: 41011,
+      );
 
-    final sourceFile = File(
-      '${workspaceDirectory.path}/alice-corrupt/source.txt',
-    );
-    await sourceFile.parent.create(recursive: true);
-    await sourceFile.writeAsString('this transfer should fail');
+      final sourceFile = File(
+        '${workspaceDirectory.path}/alice-corrupt/source.txt',
+      );
+      await sourceFile.parent.create(recursive: true);
+      await sourceFile.writeAsString('this transfer should fail');
 
-    await alice.transferController.sendFile(
-      peerId: 'team@instance-device-b',
-      filePath: sourceFile.path,
-    );
+      await alice.transferController.sendFile(
+        peerId: 'team@instance-device-b',
+        filePath: sourceFile.path,
+      );
 
-    final aliceJob = await _waitForTerminalTransfer(alice.container);
-    final bobJob = await _waitForTerminalTransfer(bob.container);
+      final aliceJob = await _waitForTerminalTransfer(alice.container);
+      final bobJob = await _waitForTerminalTransfer(bob.container);
 
-    expect(aliceJob.status, TransferJobStatus.failed);
-    expect(bobJob.status, TransferJobStatus.failed);
-    expect(
-      bobJob.message,
-      anyOf(contains('해시'), contains('chunk'), contains('크기')),
-    );
-  });
+      expect(corrupted, isFalse);
+      expect(aliceJob.status, TransferJobStatus.completed);
+      expect(bobJob.status, TransferJobStatus.completed);
+    },
+  );
 }
 
 PeerNode _peerForBob(DateTime now, {int port = 41002}) {
@@ -871,6 +979,7 @@ Future<_TransferHarness> _createNode({
   required int authPort,
   required String receivePath,
   AppLogger? logger,
+  DataTransport? dataTransport,
 }) async {
   final database = AppDatabase.forTesting(NativeDatabase.memory());
   final transport = network.attach(authPort);
@@ -904,6 +1013,8 @@ Future<_TransferHarness> _createNode({
       controlTransportProvider.overrideWithValue(
         AuthControlTransportAdapter(authTransport: transport),
       ),
+      if (dataTransport != null)
+        dataTransportProvider.overrideWithValue(dataTransport),
       localDeviceIdentityServiceProvider.overrideWithValue(
         _FakeLocalDeviceIdentityService(localDeviceId),
       ),
@@ -1241,6 +1352,152 @@ class _FakeAuthTransport implements AuthTransport {
   Future<void> close() async {
     if (!_controller.isClosed) {
       await _controller.close();
+    }
+  }
+}
+
+class _LinkedFakeDataNetwork {
+  final Map<int, _FakeDataTransport> _transportsByPort = {};
+  final List<DataFrame> sentFrames = [];
+
+  _FakeDataTransport attach() {
+    return _FakeDataTransport(this);
+  }
+
+  bool isPortAvailable(int port) => !_transportsByPort.containsKey(port);
+
+  void register(int port, _FakeDataTransport transport) {
+    _transportsByPort[port] = transport;
+  }
+
+  void unregister(int port, _FakeDataTransport transport) {
+    if (_transportsByPort[port] == transport) {
+      _transportsByPort.remove(port);
+    }
+  }
+
+  Future<DataSendResult> sendFrame({
+    required _FakeDataTransport source,
+    required DataFrame frame,
+    required InternetAddress address,
+    required int port,
+  }) async {
+    sentFrames.add(frame);
+    final target = _transportsByPort[port];
+    if (target != null) {
+      target.emitFrame(
+        frame,
+        address: address,
+        port: source.endpoint?.port ?? 0,
+      );
+    }
+    final bytesRequested = const DataFrameCodec().encode(frame).length;
+    return DataSendResult(
+      success: true,
+      bytesRequested: bytesRequested,
+      bytesSent: bytesRequested,
+    );
+  }
+}
+
+class _FakeDataTransport implements DataTransport {
+  _FakeDataTransport(this._network);
+
+  final _LinkedFakeDataNetwork _network;
+  final StreamController<DataDatagram> _packetController =
+      StreamController<DataDatagram>.broadcast();
+  final StreamController<DataFrameDatagram> _frameController =
+      StreamController<DataFrameDatagram>.broadcast();
+  UdpInterfaceEndpoint? endpoint;
+
+  @override
+  Stream<DataDatagram> get packets => _packetController.stream;
+
+  @override
+  Stream<DataFrameDatagram> get frames => _frameController.stream;
+
+  @override
+  Future<DataBindResult> bind({
+    required UdpInterfaceEndpoint localEndpoint,
+    required UdpPortRange portRange,
+  }) async {
+    if (endpoint != null) {
+      return DataBindResult(endpoint: endpoint!);
+    }
+
+    for (final port in portRange.ports) {
+      if (!_network.isPortAvailable(port)) {
+        continue;
+      }
+      endpoint = UdpInterfaceEndpoint(
+        role: UdpPortRole.data,
+        interfaceId: localEndpoint.interfaceId,
+        localAddress: localEndpoint.localAddress,
+        port: port,
+        bindMode: localEndpoint.bindMode,
+        reuseAddress: localEndpoint.reuseAddress,
+        reusePort: localEndpoint.reusePort,
+      );
+      _network.register(port, this);
+      return DataBindResult(endpoint: endpoint!);
+    }
+
+    throw StateError('No fake data port available in $portRange.');
+  }
+
+  @override
+  Future<void> send(
+    DataPacket packet, {
+    required InternetAddress address,
+    required int port,
+  }) async {}
+
+  @override
+  Future<DataSendResult> sendFrame(
+    DataFrame frame, {
+    required InternetAddress address,
+    required int port,
+  }) {
+    return _network.sendFrame(
+      source: this,
+      frame: frame,
+      address: address,
+      port: port,
+    );
+  }
+
+  void emitFrame(
+    DataFrame frame, {
+    required InternetAddress address,
+    required int port,
+  }) {
+    final localEndpoint = endpoint;
+    if (localEndpoint == null) {
+      return;
+    }
+    _frameController.add(
+      DataFrameDatagram(
+        frame: frame,
+        address: address,
+        port: port,
+        localEndpoint: localEndpoint,
+        datagramBytes: const DataFrameCodec().encode(frame).length,
+      ),
+    );
+  }
+
+  @override
+  Future<void> close() async {
+    final localEndpoint = endpoint;
+    if (localEndpoint != null) {
+      _network.unregister(localEndpoint.port, this);
+      endpoint = null;
+    }
+    if (!_packetController.isClosed) {
+      await _packetController.close();
+    }
+    if (!_frameController.isClosed) {
+      await _frameController.close();
     }
   }
 }

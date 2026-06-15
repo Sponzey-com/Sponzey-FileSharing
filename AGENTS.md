@@ -139,6 +139,9 @@ UDP와 파일 전송 변경은 다음 기준을 만족해야 한다.
 - Discovery에는 JWT, session key, raw password, password-derived reusable verifier처럼 인증에 재사용 가능한 값을 싣지 않는다. 같은 ID/PW 그룹 필터링이 필요하면 인증 재료와 분리된 discovery-only tag를 사용한다.
 - Control은 인증, 세션 협상, 전송 제어에 사용하고, 대량 파일 chunk를 싣지 않는다.
 - Data는 인증된 세션의 파일 chunk 송수신에 사용한다.
+- Data channel의 대량 파일 chunk는 raw binary payload를 기준으로 설계한다. JSON/base64 file chunk 전송은 호환 fallback이나 테스트 목적이 아닌 기본 경로로 사용하지 않는다.
+- UDP 전송 성능을 해치는 per-packet product/info 로그, per-packet MessageBus event, chunk별 파일 open/flush/close, chunk별 독립 timer 남발을 기본 구현으로 두지 않는다.
+- Data channel 변경에는 packet size, ACK/NACK 빈도, retransmission, throughput smoke 또는 benchmark 기준을 함께 정의한다.
 - 패킷 손실, 중복, 재전송, 타임아웃, 순서 어긋남을 명시적으로 고려한다.
 - 인증되지 않은 peer가 전송 흐름에 진입하지 못하도록 한다.
 - 인증 성공 후 데이터 통신에 사용할 세션 문맥과 세션 키 lifecycle을 명확히 관리한다.

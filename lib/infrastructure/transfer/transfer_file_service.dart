@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
@@ -24,6 +25,22 @@ class PreparedTransferFile {
   final int chunkCount;
 }
 
+class PreparedTransferMetadata {
+  const PreparedTransferMetadata({
+    required this.filePath,
+    required this.fileName,
+    required this.fileSize,
+    required this.chunkSize,
+    required this.chunkCount,
+  });
+
+  final String filePath;
+  final String fileName;
+  final int fileSize;
+  final int chunkSize;
+  final int chunkCount;
+}
+
 class TransferChunk {
   const TransferChunk({required this.index, required this.data});
 
@@ -45,13 +62,37 @@ class IncomingTransferDraft {
   final String tempFilePath;
 }
 
+abstract interface class OutgoingTransferReader {
+  Future<List<int>> readAt({required int chunkSize, required int chunkIndex});
+
+  Future<void> close();
+}
+
+abstract interface class IncomingTransferWriter {
+  Future<void> append(List<int> bytes);
+
+  Future<void> close();
+}
+
+abstract interface class IncomingDigestingTransferWriter
+    implements IncomingTransferWriter {
+  Future<String> closeWithDigest();
+}
+
 abstract interface class TransferFileService {
+  Future<PreparedTransferMetadata> prepareOutgoingMetadata(
+    String filePath, {
+    required int chunkSize,
+  });
+
   Future<PreparedTransferFile> prepareOutgoingFile(
     String filePath, {
     required int chunkSize,
   });
 
   Stream<TransferChunk> readChunks(String filePath, {required int chunkSize});
+
+  Future<OutgoingTransferReader> openOutgoingReader(String filePath);
 
   Future<List<int>> readChunkAt(
     String filePath, {
@@ -63,6 +104,12 @@ abstract interface class TransferFileService {
     required String transferId,
     required String fileName,
   });
+
+  Future<IncomingTransferWriter> openIncomingWriter(String tempFilePath);
+
+  Future<IncomingDigestingTransferWriter> openIncomingDigestingWriter(
+    String tempFilePath,
+  );
 
   Future<void> appendChunk({
     required String tempFilePath,
@@ -82,7 +129,7 @@ abstract interface class TransferFileService {
 
 class LocalTransferFileService implements TransferFileService {
   @override
-  Future<PreparedTransferFile> prepareOutgoingFile(
+  Future<PreparedTransferMetadata> prepareOutgoingMetadata(
     String filePath, {
     required int chunkSize,
   }) async {
@@ -119,15 +166,32 @@ class LocalTransferFileService implements TransferFileService {
     }
 
     final safeChunkSize = chunkSize <= 0 ? 8192 : chunkSize;
-    final sha256 = await computeSha256(normalizedPath);
-    final chunkCount = (stat.size / safeChunkSize).ceil();
-    return PreparedTransferFile(
+    return PreparedTransferMetadata(
       filePath: normalizedPath,
       fileName: p.basename(normalizedPath),
       fileSize: stat.size,
-      sha256: sha256,
       chunkSize: safeChunkSize,
-      chunkCount: chunkCount,
+      chunkCount: (stat.size / safeChunkSize).ceil(),
+    );
+  }
+
+  @override
+  Future<PreparedTransferFile> prepareOutgoingFile(
+    String filePath, {
+    required int chunkSize,
+  }) async {
+    final metadata = await prepareOutgoingMetadata(
+      filePath,
+      chunkSize: chunkSize,
+    );
+    final sha256 = await computeSha256(metadata.filePath);
+    return PreparedTransferFile(
+      filePath: metadata.filePath,
+      fileName: metadata.fileName,
+      fileSize: metadata.fileSize,
+      sha256: sha256,
+      chunkSize: metadata.chunkSize,
+      chunkCount: metadata.chunkCount,
     );
   }
 
@@ -159,15 +223,17 @@ class LocalTransferFileService implements TransferFileService {
     required int chunkSize,
     required int chunkIndex,
   }) async {
-    final file = File(filePath);
-    final access = await file.open();
+    final reader = await openOutgoingReader(filePath);
     try {
-      await access.setPosition(chunkSize * chunkIndex);
-      final bytes = await access.read(chunkSize);
-      return bytes;
+      return await reader.readAt(chunkSize: chunkSize, chunkIndex: chunkIndex);
     } finally {
-      await access.close();
+      await reader.close();
     }
+  }
+
+  @override
+  Future<OutgoingTransferReader> openOutgoingReader(String filePath) async {
+    return _LocalOutgoingTransferReader(await File(filePath).open());
   }
 
   @override
@@ -194,11 +260,28 @@ class LocalTransferFileService implements TransferFileService {
     required String tempFilePath,
     required List<int> bytes,
   }) async {
+    final writer = await openIncomingWriter(tempFilePath);
+    try {
+      await writer.append(bytes);
+    } finally {
+      await writer.close();
+    }
+  }
+
+  @override
+  Future<IncomingTransferWriter> openIncomingWriter(String tempFilePath) async {
     final file = File(tempFilePath);
-    final sink = file.openWrite(mode: FileMode.append);
-    sink.add(bytes);
-    await sink.flush();
-    await sink.close();
+    return _LocalIncomingTransferWriter(file.openWrite(mode: FileMode.append));
+  }
+
+  @override
+  Future<IncomingDigestingTransferWriter> openIncomingDigestingWriter(
+    String tempFilePath,
+  ) async {
+    final file = File(tempFilePath);
+    return _LocalDigestingIncomingTransferWriter(
+      file.openWrite(mode: FileMode.append),
+    );
   }
 
   @override
@@ -261,6 +344,116 @@ class LocalTransferFileService implements TransferFileService {
       await parent.delete(recursive: true);
     }
   }
+}
+
+class _LocalOutgoingTransferReader implements OutgoingTransferReader {
+  _LocalOutgoingTransferReader(this._access);
+
+  final RandomAccessFile _access;
+  bool _isClosed = false;
+
+  @override
+  Future<List<int>> readAt({
+    required int chunkSize,
+    required int chunkIndex,
+  }) async {
+    if (_isClosed) {
+      throw StateError('Outgoing transfer reader is already closed.');
+    }
+    await _access.setPosition(chunkSize * chunkIndex);
+    return _access.read(chunkSize);
+  }
+
+  @override
+  Future<void> close() async {
+    if (_isClosed) {
+      return;
+    }
+    _isClosed = true;
+    await _access.close();
+  }
+}
+
+class _LocalIncomingTransferWriter implements IncomingTransferWriter {
+  _LocalIncomingTransferWriter(this._sink);
+
+  final IOSink _sink;
+  bool _isClosed = false;
+
+  @override
+  Future<void> append(List<int> bytes) async {
+    if (_isClosed) {
+      throw StateError('Incoming transfer writer is already closed.');
+    }
+    _sink.add(bytes);
+  }
+
+  @override
+  Future<void> close() async {
+    if (_isClosed) {
+      return;
+    }
+    _isClosed = true;
+    await _sink.flush();
+    await _sink.close();
+  }
+}
+
+class _LocalDigestingIncomingTransferWriter
+    implements IncomingDigestingTransferWriter {
+  _LocalDigestingIncomingTransferWriter(this._sink);
+
+  final IOSink _sink;
+  final _DigestSink _digestSink = _DigestSink();
+  late final ByteConversionSink _digestInput = sha256.startChunkedConversion(
+    _digestSink,
+  );
+  bool _isClosed = false;
+
+  @override
+  Future<void> append(List<int> bytes) async {
+    if (_isClosed) {
+      throw StateError('Incoming transfer writer is already closed.');
+    }
+    _digestInput.add(bytes);
+    _sink.add(bytes);
+  }
+
+  @override
+  Future<void> close() async {
+    await closeWithDigest();
+  }
+
+  @override
+  Future<String> closeWithDigest() async {
+    if (!_isClosed) {
+      _isClosed = true;
+      _digestInput.close();
+      await _sink.flush();
+      await _sink.close();
+    }
+    return _digestSink.digest.toString();
+  }
+}
+
+class _DigestSink implements Sink<Digest> {
+  Digest? _digest;
+
+  Digest get digest {
+    final digest = _digest;
+    if (digest == null) {
+      throw StateError('Digest is not ready yet.');
+    }
+    return digest;
+  }
+
+  @override
+  void add(Digest data) {
+    _digest = data;
+  }
+
+  @override
+  void close() {}
 }
 
 final transferFileServiceProvider = Provider<TransferFileService>((ref) {

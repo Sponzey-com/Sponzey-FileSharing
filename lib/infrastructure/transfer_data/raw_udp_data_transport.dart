@@ -5,15 +5,22 @@ import 'package:sponzey_file_sharing/core/logger/app_log_category.dart';
 import 'package:sponzey_file_sharing/core/logger/app_logger.dart';
 import 'package:sponzey_file_sharing/core/network/udp_port_config.dart';
 import 'package:sponzey_file_sharing/domain/network/network_interface_models.dart';
+import 'package:sponzey_file_sharing/infrastructure/transfer_data/data_frame.dart';
+import 'package:sponzey_file_sharing/infrastructure/transfer_data/data_frame_codec.dart';
 import 'package:sponzey_file_sharing/infrastructure/transfer_data/data_packet.dart';
 import 'package:sponzey_file_sharing/infrastructure/transfer_data/data_transport.dart';
 
 class RawUdpDataTransport implements DataTransport {
-  RawUdpDataTransport({required AppLogger logger}) : _logger = logger;
+  RawUdpDataTransport({required AppLogger logger, DataFrameCodec? frameCodec})
+    : _logger = logger,
+      _frameCodec = frameCodec ?? const DataFrameCodec();
 
   final AppLogger _logger;
+  final DataFrameCodec _frameCodec;
   final StreamController<DataDatagram> _packetsController =
       StreamController<DataDatagram>.broadcast();
+  final StreamController<DataFrameDatagram> _framesController =
+      StreamController<DataFrameDatagram>.broadcast();
 
   RawDatagramSocket? _socket;
   StreamSubscription<RawSocketEvent>? _subscription;
@@ -21,6 +28,9 @@ class RawUdpDataTransport implements DataTransport {
 
   @override
   Stream<DataDatagram> get packets => _packetsController.stream;
+
+  @override
+  Stream<DataFrameDatagram> get frames => _framesController.stream;
 
   @override
   Future<DataBindResult> bind({
@@ -84,7 +94,58 @@ class RawUdpDataTransport implements DataTransport {
     required int port,
   }) async {
     final socket = _requireSocket();
-    socket.send(packet.encode(), address, port);
+    final bytes = packet.encode();
+    final sent = await _sendWithBoundedRetry(socket, bytes, address, port);
+    if (sent != bytes.length) {
+      throw StateError(
+        'Data packet partial send: requested ${bytes.length}, sent $sent.',
+      );
+    }
+  }
+
+  @override
+  Future<DataSendResult> sendFrame(
+    DataFrame frame, {
+    required InternetAddress address,
+    required int port,
+  }) async {
+    try {
+      final socket = _requireSocket();
+      final bytes = _frameCodec.encode(frame);
+      final sent = await _sendWithBoundedRetry(socket, bytes, address, port);
+      if (sent != bytes.length) {
+        _logger.debug(
+          AppLogCategory.transferData,
+          'Data frame partial send type=${frame.type.name} '
+          'requested=${bytes.length} sent=$sent target=${address.address}:$port',
+        );
+        return DataSendResult(
+          success: false,
+          bytesRequested: bytes.length,
+          bytesSent: sent,
+          reasonCode: 'partialSend',
+        );
+      }
+      return DataSendResult(
+        success: true,
+        bytesRequested: bytes.length,
+        bytesSent: sent,
+      );
+    } on Object catch (error, stackTrace) {
+      _logger.debug(
+        AppLogCategory.transferData,
+        'Data frame send failed type=${frame.type.name} '
+        'target=${address.address}:$port',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      return DataSendResult(
+        success: false,
+        bytesRequested: 0,
+        bytesSent: 0,
+        reasonCode: 'sendFailed',
+      );
+    }
   }
 
   @override
@@ -96,6 +157,9 @@ class RawUdpDataTransport implements DataTransport {
     _localEndpoint = null;
     if (!_packetsController.isClosed) {
       await _packetsController.close();
+    }
+    if (!_framesController.isClosed) {
+      await _framesController.close();
     }
   }
 
@@ -111,6 +175,21 @@ class RawUdpDataTransport implements DataTransport {
     Datagram? datagram;
     while ((datagram = socket.receive()) != null) {
       final current = datagram!;
+      try {
+        final frame = _frameCodec.decode(current.data);
+        _framesController.add(
+          DataFrameDatagram(
+            frame: frame,
+            address: current.address,
+            port: current.port,
+            localEndpoint: endpoint,
+            datagramBytes: current.data.length,
+          ),
+        );
+        continue;
+      } on FormatException {
+        // Fall through to the legacy JSON DataPacket decoder below.
+      }
       try {
         _packetsController.add(
           DataDatagram(
@@ -137,6 +216,23 @@ class RawUdpDataTransport implements DataTransport {
       throw StateError('Data transport has not been bound.');
     }
     return socket;
+  }
+
+  Future<int> _sendWithBoundedRetry(
+    RawDatagramSocket socket,
+    List<int> bytes,
+    InternetAddress address,
+    int port,
+  ) async {
+    var sent = 0;
+    for (var attempt = 0; attempt < 3; attempt += 1) {
+      sent = socket.send(bytes, address, port);
+      if (sent == bytes.length) {
+        return sent;
+      }
+      await Future<void>.delayed(Duration.zero);
+    }
+    return sent;
   }
 
   bool _isAddressInUse(Object error) {

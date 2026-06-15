@@ -184,10 +184,11 @@ class RawUdpControlTransport implements ControlTransport {
     UdpInterfaceEndpoint? localEndpoint,
   }) async {
     final socket = await _senderSocketFor(localEndpoint);
-    _logger.info(
-      AppLogCategory.auth,
-      'Sending ${packet.type.wireName} to ${address.address}:$port '
-      '(session ${_safeSession(packet.sessionId)})',
+    _logPacket(
+      packet,
+      message:
+          'Sending ${packet.type.wireName} to ${address.address}:$port '
+          '(session ${_safeSession(packet.sessionId)})',
     );
     socket.send(packet.encode(), address, port);
   }
@@ -346,11 +347,12 @@ class RawUdpControlTransport implements ControlTransport {
       final current = datagram!;
       try {
         final packet = AuthPacket.decode(current.data);
-        _logger.info(
-          AppLogCategory.auth,
-          'Received ${packet.type.wireName} from '
-          '${current.address.address}:${current.port} '
-          '(session ${_safeSession(packet.sessionId)})',
+        _logPacket(
+          packet,
+          message:
+              'Received ${packet.type.wireName} from '
+              '${current.address.address}:${current.port} '
+              '(session ${_safeSession(packet.sessionId)})',
         );
         _packetsController.add(
           ControlDatagram(
@@ -398,6 +400,20 @@ class RawUdpControlTransport implements ControlTransport {
 
   String _safeSession(String sessionId) {
     return sessionId.length <= 8 ? sessionId : sessionId.substring(0, 8);
+  }
+
+  void _logPacket(AuthPacket packet, {required String message}) {
+    if (_isHighVolumeTransferPacket(packet.type)) {
+      _logger.debug(AppLogCategory.auth, message);
+      return;
+    }
+    _logger.info(AppLogCategory.auth, message);
+  }
+
+  bool _isHighVolumeTransferPacket(AuthPacketType type) {
+    return type == AuthPacketType.transferChunk ||
+        type == AuthPacketType.transferChunkAck ||
+        type == AuthPacketType.transferWindowUpdate;
   }
 
   bool _isAddressInUse(Object error) {

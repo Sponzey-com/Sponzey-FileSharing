@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sponzey_file_sharing/core/logger/app_log_category.dart';
 import 'package:sponzey_file_sharing/core/logger/app_logger.dart';
 import 'package:sponzey_file_sharing/core/logger/console_app_logger.dart';
 import 'package:sponzey_file_sharing/core/message_bus/app_event.dart';
@@ -104,11 +105,47 @@ void main() {
       );
     },
   );
+
+  test('logs high-volume transfer packets at debug level', () async {
+    final bus = InMemoryMessageBus();
+    addTearDown(bus.dispose);
+    final logger = _MemoryAppLogger(minimumLevel: AppLogLevel.debug);
+    final transport = _transport(bus, logger: logger);
+    addTearDown(transport.close);
+    await transport.start(preferredPort: 0);
+
+    await transport.send(
+      _packet(
+        AuthPacketType.transferChunk,
+        sessionId: 'session-transfer',
+        transferId: 'transfer-001',
+      ),
+      address: InternetAddress.loopbackIPv4,
+      port: 9,
+    );
+
+    expect(
+      logger.entries.where(
+        (entry) =>
+            entry.level == AppLogLevel.info &&
+            entry.message.contains('TRANSFER_CHUNK'),
+      ),
+      isEmpty,
+    );
+    expect(
+      logger.entries.where(
+        (entry) =>
+            entry.level == AppLogLevel.debug &&
+            entry.message.contains('TRANSFER_CHUNK'),
+      ),
+      isNotEmpty,
+    );
+  });
 }
 
-RawUdpControlTransport _transport(MessageBus bus) {
+RawUdpControlTransport _transport(MessageBus bus, {AppLogger? logger}) {
   return RawUdpControlTransport(
-    logger: const ConsoleAppLogger(minimumLevel: AppLogLevel.error),
+    logger: logger ?? const ConsoleAppLogger(minimumLevel: AppLogLevel.error),
     messageBus: bus,
     bindPolicy: ControlSocketBindPolicy(
       platform: Platform.isWindows
@@ -124,6 +161,7 @@ AuthPacket _packet(
   AuthPacketType type, {
   required String sessionId,
   String? token,
+  String? transferId,
 }) {
   return AuthPacket(
     type: type,
@@ -132,6 +170,62 @@ AuthPacket _packet(
     fromUserId: 'team',
     fromDeviceId: 'device-a',
     token: token,
+    transferId: transferId,
     sentAtEpochMs: 1,
   );
+}
+
+class _LogEntry {
+  const _LogEntry({required this.level, required this.message});
+
+  final AppLogLevel level;
+  final String message;
+}
+
+class _MemoryAppLogger implements AppLogger {
+  _MemoryAppLogger({required this.minimumLevel});
+
+  @override
+  final AppLogLevel minimumLevel;
+
+  final List<_LogEntry> entries = [];
+
+  @override
+  void debug(
+    AppLogCategory category,
+    String message, {
+    Object? error,
+    StackTrace? stackTrace,
+  }) => _add(AppLogLevel.debug, message);
+
+  @override
+  void info(
+    AppLogCategory category,
+    String message, {
+    Object? error,
+    StackTrace? stackTrace,
+  }) => _add(AppLogLevel.info, message);
+
+  @override
+  void warning(
+    AppLogCategory category,
+    String message, {
+    Object? error,
+    StackTrace? stackTrace,
+  }) => _add(AppLogLevel.warning, message);
+
+  @override
+  void error(
+    AppLogCategory category,
+    String message, {
+    Object? error,
+    StackTrace? stackTrace,
+  }) => _add(AppLogLevel.error, message);
+
+  void _add(AppLogLevel level, String message) {
+    if (level.index < minimumLevel.index) {
+      return;
+    }
+    entries.add(_LogEntry(level: level, message: message));
+  }
 }

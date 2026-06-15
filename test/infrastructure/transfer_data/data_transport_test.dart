@@ -1,5 +1,9 @@
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sponzey_file_sharing/core/network/udp_port_config.dart';
+import 'package:sponzey_file_sharing/infrastructure/transfer_data/data_frame.dart';
+import 'package:sponzey_file_sharing/infrastructure/transfer_data/data_frame_codec.dart';
 import 'package:sponzey_file_sharing/infrastructure/transfer_data/data_port_bind_policy.dart';
 
 void main() {
@@ -28,6 +32,28 @@ void main() {
         canBind: (_) => false,
       ),
       throwsStateError,
+    );
+  });
+
+  test('binary data frame codec stays within safe datagram size', () {
+    const codec = DataFrameCodec();
+    final frame = DataFrame(
+      version: DataFrameCodec.version,
+      type: DataFrameType.dataChunk,
+      flags: 0,
+      sessionHash: 1,
+      transferIdBytes: transferIdBytesFromString('transfer'),
+      sequence: 1,
+      chunkIndex: 0,
+      windowStart: 0,
+      windowSize: 128,
+      ackBase: 0,
+      payload: Uint8List(codec.maxPayloadBytes()),
+    );
+
+    expect(
+      codec.encode(frame).length,
+      lessThanOrEqualTo(DataFrameCodec.safeUdpPayloadBytes),
     );
   });
 }

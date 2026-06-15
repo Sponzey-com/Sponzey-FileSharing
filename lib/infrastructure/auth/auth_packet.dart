@@ -54,6 +54,14 @@ class AuthPacket {
     this.transferSavePath,
     this.transferWindowStart,
     this.transferWindowSize,
+    this.transferDataAddress,
+    this.transferDataPort,
+    this.transferAcceptedChunkSize,
+    this.transferAcceptedWindowSize,
+    this.transferReceiverBufferBudget,
+    this.transferDataProtocol,
+    this.transferCapabilities,
+    this.transferDataAuthContextId,
   });
 
   final AuthPacketType type;
@@ -80,6 +88,14 @@ class AuthPacket {
   final String? transferSavePath;
   final int? transferWindowStart;
   final int? transferWindowSize;
+  final String? transferDataAddress;
+  final int? transferDataPort;
+  final int? transferAcceptedChunkSize;
+  final int? transferAcceptedWindowSize;
+  final int? transferReceiverBufferBudget;
+  final String? transferDataProtocol;
+  final List<String>? transferCapabilities;
+  final String? transferDataAuthContextId;
 
   List<int> encode() {
     return utf8.encode(
@@ -107,6 +123,14 @@ class AuthPacket {
         'transferSavePath': transferSavePath,
         'transferWindowStart': transferWindowStart,
         'transferWindowSize': transferWindowSize,
+        'transferDataAddress': transferDataAddress,
+        'transferDataPort': transferDataPort,
+        'transferAcceptedChunkSize': transferAcceptedChunkSize,
+        'transferAcceptedWindowSize': transferAcceptedWindowSize,
+        'transferReceiverBufferBudget': transferReceiverBufferBudget,
+        'transferDataProtocol': transferDataProtocol,
+        'transferCapabilities': transferCapabilities,
+        'transferDataAuthContextId': transferDataAuthContextId,
         'sentAtEpochMs': sentAtEpochMs,
       }),
     );
@@ -149,6 +173,32 @@ class AuthPacket {
       transferSavePath: _readOptionalString(payload, 'transferSavePath'),
       transferWindowStart: _readOptionalInt(payload, 'transferWindowStart'),
       transferWindowSize: _readOptionalInt(payload, 'transferWindowSize'),
+      transferDataAddress: _readOptionalString(payload, 'transferDataAddress'),
+      transferDataPort: _readOptionalInt(payload, 'transferDataPort'),
+      transferAcceptedChunkSize: _readOptionalInt(
+        payload,
+        'transferAcceptedChunkSize',
+      ),
+      transferAcceptedWindowSize: _readOptionalInt(
+        payload,
+        'transferAcceptedWindowSize',
+      ),
+      transferReceiverBufferBudget: _readOptionalInt(
+        payload,
+        'transferReceiverBufferBudget',
+      ),
+      transferDataProtocol: _readOptionalString(
+        payload,
+        'transferDataProtocol',
+      ),
+      transferCapabilities: _readOptionalStringList(
+        payload,
+        'transferCapabilities',
+      ),
+      transferDataAuthContextId: _readOptionalString(
+        payload,
+        'transferDataAuthContextId',
+      ),
     );
   }
 
@@ -215,6 +265,27 @@ class AuthPacket {
     return value
         .map((item) {
           if (item is! int) {
+            throw FormatException('Auth packet field $key is invalid.');
+          }
+          return item;
+        })
+        .toList(growable: false);
+  }
+
+  static List<String>? _readOptionalStringList(
+    Map<String, dynamic> payload,
+    String key,
+  ) {
+    final value = payload[key];
+    if (value == null) {
+      return null;
+    }
+    if (value is! List) {
+      throw FormatException('Auth packet field $key is invalid.');
+    }
+    return value
+        .map((item) {
+          if (item is! String || item.trim().isEmpty) {
             throw FormatException('Auth packet field $key is invalid.');
           }
           return item;
