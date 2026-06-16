@@ -20,7 +20,7 @@ void main() {
     );
   });
 
-  test('desktop release workflow keeps releases draft until manual gate', () {
+  test('desktop release workflow publishes non-draft releases by default', () {
     final workflow = File(
       '.github/workflows/desktop-release.yml',
     ).readAsStringSync();
@@ -28,10 +28,11 @@ void main() {
     expect(workflow, contains('SPONZEY_APP_VERSION'));
     expect(workflow, contains('--dart-define=SPONZEY_APP_VERSION'));
     expect(workflow, contains('scripts\\build_windows.ps1 -AppVersion'));
+    expect(workflow, contains('default: false'));
     expect(
       workflow,
       contains(
-        "draft: \${{ github.event_name != 'workflow_dispatch' || github.event.inputs.draft == 'true' }}",
+        "draft: \${{ github.event_name == 'workflow_dispatch' && github.event.inputs.draft == 'true' }}",
       ),
     );
   });

@@ -17,7 +17,7 @@ on:
         description: 'Create the GitHub Release as a draft'
         required: true
         type: boolean
-        default: true
+        default: false
       prerelease:
         description: 'Mark the GitHub Release as a prerelease'
         required: true
@@ -207,7 +207,7 @@ jobs:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag || github.ref_name }}
           target_commitish: ${{ github.sha }}
           name: Sponzey FileSharing ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag || github.ref_name }}
-          draft: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.draft == 'true' }}
+          draft: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.draft == 'true' }}
           prerelease: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.prerelease == 'true' || contains(github.ref_name, '-') }}
           files: dist/*
           fail_on_unmatched_files: true
