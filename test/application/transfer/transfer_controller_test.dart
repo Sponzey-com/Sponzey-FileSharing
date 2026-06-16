@@ -746,6 +746,198 @@ void main() {
   );
 
   test(
+    'receiver retries failed Data ACK flush without failing the transfer',
+    () async {
+      var shouldFailFirstAck = true;
+      final failedAckSequences = <int>{};
+      final controlNetwork = _LinkedFakeAuthNetwork();
+      final dataNetwork = _LinkedFakeDataNetwork(
+        interceptor:
+            ({
+              required frame,
+              required address,
+              required sourcePort,
+              required targetPort,
+              required deliver,
+            }) async {
+              if (frame.type == DataFrameType.dataAck && shouldFailFirstAck) {
+                shouldFailFirstAck = false;
+                failedAckSequences.add(frame.sequence);
+                return;
+              }
+              deliver(frame, address: address, port: sourcePort);
+            },
+        resultOverride:
+            ({
+              required frame,
+              required address,
+              required sourcePort,
+              required targetPort,
+            }) {
+              if (failedAckSequences.remove(frame.sequence)) {
+                return const DataSendResult(
+                  success: false,
+                  bytesRequested: 0,
+                  bytesSent: 0,
+                  reasonCode: 'sendFailed',
+                );
+              }
+              return null;
+            },
+      );
+      final alice = await _createNode(
+        network: controlNetwork,
+        dataTransport: dataNetwork.attach(),
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41245,
+        receivePath: '${workspaceDirectory.path}/alice-ack-retry',
+      );
+      final bob = await _createNode(
+        network: controlNetwork,
+        dataTransport: dataNetwork.attach(),
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-b',
+        authPort: 41246,
+        receivePath: '${workspaceDirectory.path}/bob-ack-retry',
+      );
+      addTearDown(alice.dispose);
+      addTearDown(bob.dispose);
+
+      await _prepareAuthenticatedPair(
+        alice: alice,
+        bob: bob,
+        bobReceivePath: '${workspaceDirectory.path}/bob-ack-retry',
+        bobPort: 41246,
+        alicePort: 41245,
+        clock: clock,
+      );
+
+      final sourceFile = File(
+        '${workspaceDirectory.path}/alice-ack-retry/source.bin',
+      );
+      await sourceFile.parent.create(recursive: true);
+      final bytes = List<int>.generate(40 * 1024, (index) => index % 251);
+      await sourceFile.writeAsBytes(bytes);
+
+      await alice.transferController.sendFile(
+        peerId: 'team@instance-device-b',
+        filePath: sourceFile.path,
+      );
+
+      final aliceJob = await _waitForTerminalTransfer(alice.container);
+      final bobJob = await _waitForTerminalTransfer(bob.container);
+      expect(aliceJob.status, TransferJobStatus.completed);
+      expect(bobJob.status, TransferJobStatus.completed);
+      expect(await File(bobJob.destinationPath!).readAsBytes(), bytes);
+      expect(
+        dataNetwork.sentFrames.where(
+          (frame) => frame.type == DataFrameType.dataAck,
+        ),
+        isNotEmpty,
+      );
+    },
+  );
+
+  test(
+    'sender retries transient Data chunk send failure without failing transfer',
+    () async {
+      var shouldFailFirstChunk = true;
+      final failedChunkSequences = <int>{};
+      final controlNetwork = _LinkedFakeAuthNetwork();
+      final dataNetwork = _LinkedFakeDataNetwork(
+        interceptor:
+            ({
+              required frame,
+              required address,
+              required sourcePort,
+              required targetPort,
+              required deliver,
+            }) async {
+              if (frame.type == DataFrameType.dataChunk &&
+                  shouldFailFirstChunk) {
+                shouldFailFirstChunk = false;
+                failedChunkSequences.add(frame.sequence);
+                return;
+              }
+              deliver(frame, address: address, port: sourcePort);
+            },
+        resultOverride:
+            ({
+              required frame,
+              required address,
+              required sourcePort,
+              required targetPort,
+            }) {
+              if (failedChunkSequences.remove(frame.sequence)) {
+                return const DataSendResult(
+                  success: false,
+                  bytesRequested: 0,
+                  bytesSent: 0,
+                  reasonCode: 'sendFailed',
+                );
+              }
+              return null;
+            },
+      );
+      final alice = await _createNode(
+        network: controlNetwork,
+        dataTransport: dataNetwork.attach(),
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41247,
+        receivePath: '${workspaceDirectory.path}/alice-chunk-send-retry',
+      );
+      final bob = await _createNode(
+        network: controlNetwork,
+        dataTransport: dataNetwork.attach(),
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-b',
+        authPort: 41248,
+        receivePath: '${workspaceDirectory.path}/bob-chunk-send-retry',
+      );
+      addTearDown(alice.dispose);
+      addTearDown(bob.dispose);
+
+      await _prepareAuthenticatedPair(
+        alice: alice,
+        bob: bob,
+        bobReceivePath: '${workspaceDirectory.path}/bob-chunk-send-retry',
+        bobPort: 41248,
+        alicePort: 41247,
+        clock: clock,
+      );
+
+      final sourceFile = File(
+        '${workspaceDirectory.path}/alice-chunk-send-retry/source.bin',
+      );
+      await sourceFile.parent.create(recursive: true);
+      final bytes = List<int>.generate(48 * 1024, (index) => index % 239);
+      await sourceFile.writeAsBytes(bytes);
+
+      await alice.transferController.sendFile(
+        peerId: 'team@instance-device-b',
+        filePath: sourceFile.path,
+      );
+
+      final aliceJob = await _waitForTerminalTransfer(alice.container);
+      final bobJob = await _waitForTerminalTransfer(bob.container);
+      expect(aliceJob.status, TransferJobStatus.completed);
+      expect(bobJob.status, TransferJobStatus.completed);
+      expect(aliceJob.retryCount, greaterThanOrEqualTo(1));
+      expect(await File(bobJob.destinationPath!).readAsBytes(), bytes);
+    },
+  );
+
+  test(
     'accepts transfer init when packet peer id differs from authenticated session alias',
     () async {
       final network = _LinkedFakeAuthNetwork(
@@ -2534,6 +2726,14 @@ typedef _DataFrameInterceptor =
       deliver,
     });
 
+typedef _DataFrameResultOverride =
+    DataSendResult? Function({
+      required DataFrame frame,
+      required InternetAddress address,
+      required int sourcePort,
+      required int targetPort,
+    });
+
 class _LinkedFakeAuthNetwork {
   _LinkedFakeAuthNetwork({this.interceptor});
 
@@ -2613,9 +2813,10 @@ class _FakeAuthTransport implements AuthTransport {
 }
 
 class _LinkedFakeDataNetwork {
-  _LinkedFakeDataNetwork({this.interceptor});
+  _LinkedFakeDataNetwork({this.interceptor, this.resultOverride});
 
   final _DataFrameInterceptor? interceptor;
+  final _DataFrameResultOverride? resultOverride;
   final Map<int, _FakeDataTransport> _transportsByPort = {};
   final List<DataFrame> sentFrames = [];
 
@@ -2663,6 +2864,15 @@ class _LinkedFakeDataNetwork {
       }
     }
     final bytesRequested = const DataFrameCodec().encode(frame).length;
+    final overridden = resultOverride?.call(
+      frame: frame,
+      address: address,
+      sourcePort: source.endpoint?.port ?? 0,
+      targetPort: port,
+    );
+    if (overridden != null) {
+      return overridden;
+    }
     return DataSendResult(
       success: true,
       bytesRequested: bytesRequested,

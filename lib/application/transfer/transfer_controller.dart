@@ -117,6 +117,7 @@ class TransferController extends Notifier<TransferState> {
       DataTransferTuningPolicy.defaultAckBatchInterval;
   static const Duration _metricLogInterval =
       DataTransferTuningPolicy.defaultMetricLogInterval;
+  static const Duration _sendBackpressureRetryDelay = Duration(milliseconds: 8);
   static final int _dataChunkSize =
       DataTransferTuningPolicy.defaults.maxPayloadBytes;
   static const TransferJobStateMachine _jobStateMachine =
@@ -702,12 +703,15 @@ class TransferController extends Notifier<TransferState> {
         }
 
         final isRetransmission = context.dequeueRetransmission(nextChunkIndex);
-        await _sendChunk(
+        final sent = await _sendChunk(
           transferId,
           context,
           nextChunkIndex,
           isRetransmission: isRetransmission,
         );
+        if (!sent) {
+          break;
+        }
       }
 
       if (!context.allChunksAcked.isCompleted &&
@@ -746,7 +750,7 @@ class TransferController extends Notifier<TransferState> {
     return null;
   }
 
-  Future<void> _sendChunk(
+  Future<bool> _sendChunk(
     String transferId,
     _OutgoingTransferContext context,
     int chunkIndex, {
@@ -803,6 +807,50 @@ class TransferController extends Notifier<TransferState> {
         address: remoteAddress,
         port: remotePort,
       );
+    } on AppException catch (error, stackTrace) {
+      context.inFlightChunks.remove(chunkIndex);
+      context.sentAtByChunk.remove(chunkIndex);
+      if (!_isRetryableDataFrameSendFailure(error)) {
+        rethrow;
+      }
+      final attemptsAfterFailure = max(
+        nextAttempts,
+        (context.retransmissionAttempts[chunkIndex] ?? 0) + 1,
+      );
+      if (attemptsAfterFailure > _maxRetransmissions) {
+        throw AppException(
+          code: 'transfer_retry_exhausted',
+          message: 'chunk $chunkIndex 재전송 한도를 초과했습니다.',
+        );
+      }
+      if (!isRetransmission) {
+        context.retryCount += 1;
+        context.windowSize = max(1, context.windowSize ~/ 2);
+      }
+      context.retransmissionAttempts[chunkIndex] = attemptsAfterFailure;
+      context.hasRetransmitted.add(chunkIndex);
+      context.queueRetransmission(chunkIndex);
+      context.scheduleBackpressureRetry(
+        _sendBackpressureRetryDelay,
+        () => unawaited(_pumpOutgoingWindow(transferId, context)),
+      );
+      ref
+          .read(appLoggerProvider)
+          .warning(
+            AppLogCategory.transferData,
+            'Data chunk send failed; queued retry '
+            'transfer=${_safeTransfer(transferId)} chunk=$chunkIndex '
+            'attempt=$attemptsAfterFailure window=${context.windowSize}',
+            error: error,
+            stackTrace: stackTrace,
+          );
+      _updateOutgoingMetrics(
+        transferId,
+        context,
+        message: 'data chunk $chunkIndex 송신 실패, 재전송 대기 중',
+        important: true,
+      );
+      return false;
     } catch (_) {
       context.inFlightChunks.remove(chunkIndex);
       context.sentAtByChunk.remove(chunkIndex);
@@ -819,6 +867,13 @@ class TransferController extends Notifier<TransferState> {
           ? 'chunk $chunkIndex 재전송 중'
           : 'window ${context.windowSize} 기준으로 전송 중',
     );
+    return true;
+  }
+
+  bool _isRetryableDataFrameSendFailure(AppException error) {
+    return error.code == 'sendFailed' ||
+        error.code == 'partialSend' ||
+        error.code == 'data_frame_send_failed';
   }
 
   void _onRetransmissionScan(String transferId) {
@@ -1296,7 +1351,7 @@ class TransferController extends Notifier<TransferState> {
     }
 
     if (chunkIndex >= context.expectedChunkCount) {
-      await _sendDataNack(
+      await _sendDataNackSafely(
         context,
         chunkIndexes: [context.nextExpectedChunk],
         address: datagram.address,
@@ -1340,7 +1395,7 @@ class TransferController extends Notifier<TransferState> {
           limit: _maxNackIndexesPerPacket,
         );
         if (missingIndexes.isNotEmpty) {
-          await _sendDataNack(
+          await _sendDataNackSafely(
             context,
             chunkIndexes: missingIndexes,
             address: datagram.address,
@@ -1503,7 +1558,7 @@ class TransferController extends Notifier<TransferState> {
         limit: _maxNackIndexesPerPacket,
       );
       if (missingIndexes.isNotEmpty) {
-        await _sendDataNack(
+        await _sendDataNackSafely(
           context,
           chunkIndexes: missingIndexes,
           address: datagram.address,
@@ -1991,10 +2046,7 @@ class TransferController extends Notifier<TransferState> {
         context.pendingAckChunks.length >= _ackBatchChunkThreshold) {
       return _flushDataAck(context);
     }
-    context.ackFlushTimer ??= Timer(_ackBatchInterval, () {
-      context.ackFlushTimer = null;
-      unawaited(_flushDataAck(context));
-    });
+    _scheduleDataAckRetry(context);
     return Future.value();
   }
 
@@ -2014,7 +2066,28 @@ class TransferController extends Notifier<TransferState> {
       chunkIndexes: chunkIndexes,
       address: address,
       port: port,
-    );
+    ).catchError((Object error, StackTrace stackTrace) {
+      context.pendingAckChunks.addAll(chunkIndexes);
+      context.pendingAckAddress = address;
+      context.pendingAckPort = port;
+      _scheduleDataAckRetry(context);
+      ref
+          .read(appLoggerProvider)
+          .warning(
+            AppLogCategory.transferData,
+            'Data ACK flush failed; queued retry '
+            'peer=${context.peerId} chunks=${chunkIndexes.length}',
+            error: error,
+            stackTrace: stackTrace,
+          );
+    });
+  }
+
+  void _scheduleDataAckRetry(_IncomingTransferContext context) {
+    context.ackFlushTimer ??= Timer(_ackBatchInterval, () {
+      context.ackFlushTimer = null;
+      unawaited(_flushDataAck(context));
+    });
   }
 
   Future<void> _sendDataAck(
@@ -2067,6 +2140,32 @@ class TransferController extends Notifier<TransferState> {
       address: address,
       port: port,
     );
+  }
+
+  Future<void> _sendDataNackSafely(
+    _IncomingTransferContext context, {
+    required List<int> chunkIndexes,
+    required InternetAddress address,
+    required int port,
+  }) async {
+    try {
+      await _sendDataNack(
+        context,
+        chunkIndexes: chunkIndexes,
+        address: address,
+        port: port,
+      );
+    } catch (error, stackTrace) {
+      ref
+          .read(appLoggerProvider)
+          .warning(
+            AppLogCategory.transferData,
+            'Data NACK send failed; sender retransmission timeout remains '
+            'available peer=${context.peerId} chunks=${chunkIndexes.length}',
+            error: error,
+            stackTrace: stackTrace,
+          );
+    }
   }
 
   Future<void> _sendChunkAck({
@@ -3490,6 +3589,7 @@ class _OutgoingTransferContext {
   int nextDigestChunk = 0;
   int _nextSequence = 1;
   Timer? retransmissionScanTimer;
+  Timer? backpressureRetryTimer;
   InternetAddress? remoteDataAddress;
   int? remoteDataPort;
   UdpInterfaceEndpoint? localDataEndpoint;
@@ -3556,9 +3656,21 @@ class _OutgoingTransferContext {
     retransmissionScanTimer = null;
   }
 
+  void scheduleBackpressureRetry(Duration delay, void Function() onRetry) {
+    if (backpressureRetryTimer != null) {
+      return;
+    }
+    backpressureRetryTimer = Timer(delay, () {
+      backpressureRetryTimer = null;
+      onRetry();
+    });
+  }
+
   Future<void> dispose() async {
     retransmissionScanTimer?.cancel();
     retransmissionScanTimer = null;
+    backpressureRetryTimer?.cancel();
+    backpressureRetryTimer = null;
     queuedRetransmissions.clear();
     queuedRetransmissionSet.clear();
     if (!_readerClosed) {
