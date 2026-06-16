@@ -32,10 +32,12 @@ void main() {
         child: const MaterialApp(home: Scaffold(body: TransfersScreen())),
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
 
     expect(tester.takeException(), isNull);
     expect(find.text('Transfer Queue'), findsOneWidget);
+    expect(find.text('전송 시작'), findsNothing);
     expect(find.text('demo.txt'), findsOneWidget);
     expect(find.text('재시도'), findsNothing);
     expect(find.textContaining('수신 파일 검증에 실패'), findsOneWidget);

@@ -4,7 +4,6 @@ import 'package:cross_file/cross_file.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path/path.dart' as p;
 import 'package:sponzey_file_sharing/app/theme/app_colors.dart';
 import 'package:sponzey_file_sharing/app/theme/app_spacing.dart';
 import 'package:sponzey_file_sharing/application/auth/peer_auth_controller.dart';
@@ -20,6 +19,7 @@ import 'package:sponzey_file_sharing/presentation/shared/page_header.dart';
 import 'package:sponzey_file_sharing/presentation/shared/sponzey_card.dart';
 import 'package:sponzey_file_sharing/presentation/shared/sponzey_scroll_cue.dart';
 import 'package:sponzey_file_sharing/presentation/shared/status_badge.dart';
+import 'package:sponzey_file_sharing/presentation/transfers/drop_transfer_intent.dart';
 
 class TransfersScreen extends ConsumerStatefulWidget {
   const TransfersScreen({super.key});
@@ -34,8 +34,6 @@ class TransfersScreen extends ConsumerStatefulWidget {
 class _TransfersScreenState extends ConsumerState<TransfersScreen> {
   final ScrollController _scrollController = ScrollController();
   final ScrollController _formScrollController = ScrollController();
-  final TextEditingController _filePathController = TextEditingController();
-  List<String> _selectedFilePaths = const [];
   String? _selectedPeerId;
   bool _isDraggingFiles = false;
 
@@ -43,7 +41,6 @@ class _TransfersScreenState extends ConsumerState<TransfersScreen> {
   void dispose() {
     _scrollController.dispose();
     _formScrollController.dispose();
-    _filePathController.dispose();
     super.dispose();
   }
 
@@ -65,7 +62,7 @@ class _TransfersScreenState extends ConsumerState<TransfersScreen> {
       children: [
         PageHeader(
           title: 'Transfers',
-          description: '인증된 피어 하나를 선택해 단일 파일을 UDP 기반 MVP 파이프라인으로 전송합니다.',
+          description: '인증된 피어를 선택하고 파일을 드롭하면 UDP 기반 파이프라인으로 즉시 전송합니다.',
           trailing: StatusBadge(
             label: transferState.isListening
                 ? 'Transfer Ready'
@@ -166,7 +163,7 @@ class _TransfersScreenState extends ConsumerState<TransfersScreen> {
                             setState(() {
                               _isDraggingFiles = false;
                             });
-                            await _applyDroppedFiles(detail.files);
+                            await _sendDroppedFiles(detail.files, peers);
                           },
                           child: AnimatedContainer(
                             duration: const Duration(milliseconds: 180),
@@ -193,7 +190,7 @@ class _TransfersScreenState extends ConsumerState<TransfersScreen> {
                                     Expanded(
                                       child: Text(
                                         _isDraggingFiles
-                                            ? '파일을 놓아서 전송 경로를 지정하세요'
+                                            ? '파일을 놓으면 즉시 전송합니다'
                                             : '파일을 여기로 드래그 앤 드롭',
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
@@ -209,41 +206,9 @@ class _TransfersScreenState extends ConsumerState<TransfersScreen> {
                                   '여러 파일을 드롭하면 선택한 피어로 순차 전송합니다.',
                                   style: Theme.of(context).textTheme.bodyMedium,
                                 ),
-                                if (_selectedFilePaths.isNotEmpty) ...[
-                                  const SizedBox(height: AppSpacing.sm),
-                                  Text(
-                                    _selectedFilePaths.length == 1
-                                        ? '선택됨: ${p.basename(_selectedFilePaths.first)}'
-                                        : '선택됨: ${_selectedFilePaths.length}개 파일, 첫 파일 ${p.basename(_selectedFilePaths.first)}',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.bodyMedium,
-                                  ),
-                                ],
                               ],
                             ),
                           ),
-                        ),
-                        const SizedBox(height: AppSpacing.md),
-                        TextField(
-                          controller: _filePathController,
-                          onChanged: (_) {
-                            if (_selectedFilePaths.isEmpty) {
-                              return;
-                            }
-                            setState(() {
-                              _selectedFilePaths = const [];
-                            });
-                          },
-                          decoration: const InputDecoration(
-                            labelText: '파일 경로',
-                            hintText: '/Users/me/Desktop/demo.zip',
-                            prefixIcon: Icon(Icons.description_rounded),
-                          ),
-                          minLines: 2,
-                          maxLines: 3,
                         ),
                         const SizedBox(height: AppSpacing.md),
                         _InfoLine(
@@ -280,41 +245,6 @@ class _TransfersScreenState extends ConsumerState<TransfersScreen> {
                                 ?.copyWith(color: AppColors.success),
                           ),
                         ],
-                        const SizedBox(height: AppSpacing.lg),
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton.icon(
-                            onPressed: peers.isEmpty
-                                ? null
-                                : () async {
-                                    final peerId = _selectedPeerId;
-                                    if (peerId == null) {
-                                      ScaffoldMessenger.of(
-                                        context,
-                                      ).showSnackBar(
-                                        const SnackBar(
-                                          content: Text('전송 대상을 먼저 선택해 주세요.'),
-                                        ),
-                                      );
-                                      return;
-                                    }
-                                    final selectedPaths =
-                                        _selectedFilePaths.isEmpty
-                                        ? [_filePathController.text]
-                                        : _selectedFilePaths;
-                                    await ref
-                                        .read(
-                                          transferControllerProvider.notifier,
-                                        )
-                                        .sendFiles(
-                                          peerId: peerId,
-                                          filePaths: selectedPaths,
-                                        );
-                                  },
-                            icon: const Icon(Icons.send_rounded),
-                            label: const Text('전송 시작'),
-                          ),
-                        ),
                       ],
                     ),
                   ),
@@ -348,7 +278,7 @@ class _TransfersScreenState extends ConsumerState<TransfersScreen> {
                                       subtitle: Text(
                                         peers.isEmpty
                                             ? '자동 연결이 완료되면 전송 대상이 여기서 바로 선택됩니다.'
-                                            : '피어와 파일 경로를 선택한 뒤 전송을 시작하세요.',
+                                            : '피어를 선택하고 파일을 드롭하면 즉시 전송됩니다.',
                                       ),
                                     ),
                                   ],
@@ -409,40 +339,39 @@ class _TransfersScreenState extends ConsumerState<TransfersScreen> {
     });
   }
 
-  Future<void> _applyDroppedFiles(List<XFile> files) async {
-    if (files.isEmpty) {
-      return;
-    }
-
-    final filePaths = files
-        .map((file) => file.path.trim())
-        .where((path) => path.isNotEmpty)
-        .toList(growable: false);
-    if (filePaths.isEmpty) {
-      return;
-    }
-
-    String? invalidPath;
-    for (final path in filePaths) {
-      if (!FileSystemEntity.isFileSync(path)) {
-        invalidPath = path;
-        break;
-      }
-    }
-    if (invalidPath != null) {
+  Future<void> _sendDroppedFiles(
+    List<XFile> files,
+    List<PeerNode> peers,
+  ) async {
+    final resolution = resolveDroppedTransfer(
+      droppedPaths: files.map((file) => file.path).toList(growable: false),
+      peers: peers,
+      selectedPeerId: _selectedPeerId,
+      isFile: FileSystemEntity.isFileSync,
+    );
+    final message = resolution.message;
+    if (message != null) {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('디렉터리가 아니라 파일 하나를 드롭해 주세요.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
       return;
     }
+    final intent = resolution.intent;
+    if (intent == null) {
+      return;
+    }
+    if (_selectedPeerId != intent.peerId) {
+      setState(() {
+        _selectedPeerId = intent.peerId;
+      });
+    }
 
-    setState(() {
-      _selectedFilePaths = filePaths;
-      _filePathController.text = filePaths.first;
-    });
+    await ref
+        .read(transferControllerProvider.notifier)
+        .sendFiles(peerId: intent.peerId, filePaths: intent.filePaths);
   }
 }
 
