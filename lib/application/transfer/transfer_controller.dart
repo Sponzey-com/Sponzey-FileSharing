@@ -108,6 +108,8 @@ class TransferController extends Notifier<TransferState> {
       DataTransferTuningPolicy.defaultWindowUpdateChunkInterval;
   static const int _ackBatchChunkThreshold =
       DataTransferTuningPolicy.defaultAckBatchChunkThreshold;
+  static const int _maxWindowGrowthPerAck =
+      DataTransferTuningPolicy.defaultMaxWindowGrowthPerAck;
   static const int _maxRetransmissions =
       DataTransferTuningPolicy.defaultMaxRetransmissions;
   static const int _maxNackIndexesPerPacket =
@@ -118,6 +120,9 @@ class TransferController extends Notifier<TransferState> {
   static const Duration _metricLogInterval =
       DataTransferTuningPolicy.defaultMetricLogInterval;
   static const Duration _sendBackpressureRetryDelay = Duration(milliseconds: 8);
+  static const Duration _outOfOrderNackRepeatInterval = Duration(
+    milliseconds: 120,
+  );
   static final int _dataChunkSize =
       DataTransferTuningPolicy.defaults.maxPayloadBytes;
   static const TransferJobStateMachine _jobStateMachine =
@@ -1273,7 +1278,7 @@ class TransferController extends Notifier<TransferState> {
       context.acknowledgedBytes += bytes.length;
 
       if (chunkIndex == context.nextExpectedChunk) {
-        await context.writer.append(bytes);
+        await _appendIncomingChunk(context, bytes);
         context.nextExpectedChunk += 1;
         await _flushBufferedChunks(context);
         await _sendChunkAck(
@@ -1349,6 +1354,8 @@ class TransferController extends Notifier<TransferState> {
     if (context == null) {
       return;
     }
+    context.lastDataAddress = datagram.address;
+    context.lastDataPort = datagram.port;
 
     if (chunkIndex >= context.expectedChunkCount) {
       await _sendDataNackSafely(
@@ -1384,7 +1391,7 @@ class TransferController extends Notifier<TransferState> {
       context.acknowledgedBytes += bytes.length;
 
       if (chunkIndex == context.nextExpectedChunk) {
-        await context.writer.append(bytes);
+        await _appendIncomingChunk(context, bytes);
         context.nextExpectedChunk += 1;
         await _flushBufferedChunks(context);
       } else {
@@ -1420,6 +1427,11 @@ class TransferController extends Notifier<TransferState> {
             ? 'data chunk $chunkIndex 수신'
             : 'out-of-order data chunk $chunkIndex 버퍼링',
       );
+      if (context.bufferedChunks.isEmpty) {
+        context.cancelMissingNackRetry();
+      } else {
+        _scheduleMissingDataNackRetry(transferId, context);
+      }
     } catch (error, stackTrace) {
       ref
           .read(appLoggerProvider)
@@ -1470,12 +1482,23 @@ class TransferController extends Notifier<TransferState> {
     if (newlyAckedCount == 0) {
       return;
     }
-    if (context.windowSize < _maximumWindowSize) {
-      context.windowSize = min(
-        _maximumWindowSize,
-        context.windowSize + newlyAckedCount,
-      );
-    }
+    context.windowSize =
+        const DataTransferTuningPolicy(
+          initialWindowSize: _initialWindowSize,
+          maximumWindowSize: _maximumWindowSize,
+          receiverAdvertisedWindow: _receiverAdvertisedWindow,
+          windowUpdateChunkInterval: _windowUpdateChunkInterval,
+          ackBatchChunkThreshold: _ackBatchChunkThreshold,
+          maxWindowGrowthPerAck: _maxWindowGrowthPerAck,
+          maxRetransmissions: _maxRetransmissions,
+          maxNackIndexesPerPacket: _maxNackIndexesPerPacket,
+          ackBatchInterval: _ackBatchInterval,
+          metricLogInterval: _metricLogInterval,
+        ).windowAfterAck(
+          currentWindow: context.windowSize,
+          maximumWindow: _maximumWindowSize,
+          newlyAckedChunks: newlyAckedCount,
+        );
     context.remoteWindowStart = datagram.frame.windowStart;
     context.advertisedWindowSize = max(1, datagram.frame.windowSize);
     context.acknowledgedBytes += newlyAckedBytes;
@@ -1612,7 +1635,7 @@ class TransferController extends Notifier<TransferState> {
           message: '파일을 저장했습니다.',
           duplicateCount: context.duplicateChunks,
           throughputBytesPerSec: _throughputBytesPerSec(
-            transferredBytes: context.acknowledgedBytes,
+            transferredBytes: context.writtenBytes,
             startedAt: context.startedAt,
           ),
           windowSize: _receiverWindowSize(context),
@@ -1848,7 +1871,7 @@ class TransferController extends Notifier<TransferState> {
           message: '수신한 chunk 수가 예상과 다릅니다.',
         );
       }
-      if (context.acknowledgedBytes != context.fileSize) {
+      if (context.writtenBytes != context.fileSize) {
         throw const AppException(
           code: 'transfer_size_mismatch',
           message: '수신한 파일 크기가 예상과 다릅니다.',
@@ -1886,7 +1909,7 @@ class TransferController extends Notifier<TransferState> {
           message: '파일을 저장했습니다.',
           duplicateCount: context.duplicateChunks,
           throughputBytesPerSec: _throughputBytesPerSec(
-            transferredBytes: context.acknowledgedBytes,
+            transferredBytes: context.writtenBytes,
             startedAt: context.startedAt,
           ),
           windowSize: _receiverWindowSize(context),
@@ -2291,11 +2314,22 @@ class TransferController extends Notifier<TransferState> {
     while (true) {
       final bytes = context.bufferedChunks.remove(context.nextExpectedChunk);
       if (bytes == null) {
+        if (context.bufferedChunks.isEmpty) {
+          context.cancelMissingNackRetry();
+        }
         return;
       }
-      await context.writer.append(bytes);
+      await _appendIncomingChunk(context, bytes);
       context.nextExpectedChunk += 1;
     }
+  }
+
+  Future<void> _appendIncomingChunk(
+    _IncomingTransferContext context,
+    List<int> bytes,
+  ) async {
+    await context.writer.append(bytes);
+    context.writtenBytes += bytes.length;
   }
 
   Future<void> _sendIncomingFailureAck(
@@ -2830,15 +2864,15 @@ class TransferController extends Notifier<TransferState> {
     bool important = false,
   }) {
     final throughput = _throughputBytesPerSec(
-      transferredBytes: context.acknowledgedBytes,
+      transferredBytes: context.writtenBytes,
       startedAt: context.startedAt,
     );
     _updateJob(
       transferId,
       (job) => job.copyWith(
         status: TransferJobStatus.receiving,
-        bytesTransferred: context.acknowledgedBytes,
-        completedChunks: context.acknowledgedChunks.length,
+        bytesTransferred: context.writtenBytes,
+        completedChunks: context.nextExpectedChunk,
         duplicateCount: context.duplicateChunks,
         throughputBytesPerSec: throughput,
         windowSize: _receiverWindowSize(context),
@@ -2849,13 +2883,63 @@ class TransferController extends Notifier<TransferState> {
     _logMetricSummary(
       transferId,
       message:
-          'incoming ${context.acknowledgedChunks.length}/${context.expectedChunkCount} '
+          'incoming written=${context.nextExpectedChunk}/${context.expectedChunkCount} '
+          'acked=${context.acknowledgedChunks.length}/${context.expectedChunkCount} '
           'route=${context.routeSnapshot.routeLeaseId} '
           'buffered=${context.bufferedChunks.length} dup=${context.duplicateChunks} '
           'rate=${throughput.toStringAsFixed(0)}B/s '
           'window=${_receiverWindowSize(context)} note=$message',
       important: important,
     );
+  }
+
+  void _scheduleMissingDataNackRetry(
+    String transferId,
+    _IncomingTransferContext context,
+  ) {
+    if (context.bufferedChunks.isEmpty ||
+        context.missingNackRetryTimer != null) {
+      return;
+    }
+    context.missingNackRetryTimer = Timer(_outOfOrderNackRepeatInterval, () {
+      context.missingNackRetryTimer = null;
+      unawaited(_repeatMissingDataNack(transferId, context));
+    });
+  }
+
+  Future<void> _repeatMissingDataNack(
+    String transferId,
+    _IncomingTransferContext context,
+  ) async {
+    if (_incomingTransfers[transferId] != context ||
+        context.bufferedChunks.isEmpty) {
+      return;
+    }
+    final address = context.lastDataAddress;
+    final port = context.lastDataPort;
+    if (address == null || port == null) {
+      return;
+    }
+    final missingIndexes = _remainingMissingIndexes(
+      context,
+      limit: _maxNackIndexesPerPacket,
+    );
+    if (missingIndexes.isNotEmpty) {
+      await _sendDataNackSafely(
+        context,
+        chunkIndexes: missingIndexes,
+        address: address,
+        port: port,
+      );
+      _updateIncomingMetrics(
+        transferId,
+        context,
+        message:
+            'missing data chunk ${missingIndexes.first} 재전송 요청 중 '
+            '(buffered=${context.bufferedChunks.length})',
+      );
+    }
+    _scheduleMissingDataNackRetry(transferId, context);
   }
 
   void _logMetricSummary(
@@ -3724,19 +3808,25 @@ class _IncomingTransferContext {
   final Set<int> pendingAckChunks = <int>{};
   int nextExpectedChunk = 0;
   int acknowledgedBytes = 0;
+  int writtenBytes = 0;
   int duplicateChunks = 0;
   int lastAdvertisedWindowStart = 0;
   int _nextSequence = 1;
   bool _writerClosed = false;
   Timer? ackFlushTimer;
+  Timer? missingNackRetryTimer;
   InternetAddress? pendingAckAddress;
   int? pendingAckPort;
+  InternetAddress? lastDataAddress;
+  int? lastDataPort;
 
   int nextSequence() => _nextSequence++;
 
   Future<void> closeWriter() async {
     ackFlushTimer?.cancel();
     ackFlushTimer = null;
+    missingNackRetryTimer?.cancel();
+    missingNackRetryTimer = null;
     pendingAckChunks.clear();
     if (_writerClosed) {
       return;
@@ -3748,12 +3838,22 @@ class _IncomingTransferContext {
   Future<String> closeWriterWithDigest() async {
     ackFlushTimer?.cancel();
     ackFlushTimer = null;
+    missingNackRetryTimer?.cancel();
+    missingNackRetryTimer = null;
     pendingAckChunks.clear();
     if (_writerClosed) {
       return writer.closeWithDigest();
     }
     _writerClosed = true;
     return writer.closeWithDigest();
+  }
+
+  void cancelMissingNackRetry() {
+    if (bufferedChunks.isNotEmpty) {
+      return;
+    }
+    missingNackRetryTimer?.cancel();
+    missingNackRetryTimer = null;
   }
 }
 

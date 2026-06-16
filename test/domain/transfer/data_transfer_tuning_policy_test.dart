@@ -12,10 +12,40 @@ void main() {
       expect(policy.maximumWindowSize, greaterThanOrEqualTo(128));
       expect(policy.receiverAdvertisedWindow, greaterThanOrEqualTo(128));
       expect(policy.ackBatchChunkThreshold, greaterThan(1));
+      expect(policy.maxWindowGrowthPerAck, greaterThanOrEqualTo(1));
       expect(policy.batchesAcks, isTrue);
       expect(policy.maximumInFlightBytes, greaterThanOrEqualTo(128 * 1024));
     },
   );
+
+  test('congestion window growth is capped per ACK frame', () {
+    const policy = DataTransferTuningPolicy.defaults;
+
+    expect(
+      policy.windowAfterAck(
+        currentWindow: 32,
+        maximumWindow: 256,
+        newlyAckedChunks: 13,
+      ),
+      33,
+    );
+    expect(
+      policy.windowAfterAck(
+        currentWindow: 32,
+        maximumWindow: 256,
+        newlyAckedChunks: 80,
+      ),
+      36,
+    );
+    expect(
+      policy.windowAfterAck(
+        currentWindow: 255,
+        maximumWindow: 256,
+        newlyAckedChunks: 80,
+      ),
+      256,
+    );
+  });
 
   test('payload budget leaves room for fixed header and auth tag', () {
     expect(
@@ -37,6 +67,7 @@ void main() {
       receiverAdvertisedWindow: 4,
       windowUpdateChunkInterval: 1,
       ackBatchChunkThreshold: 1,
+      maxWindowGrowthPerAck: 0,
       maxRetransmissions: 6,
       maxNackIndexesPerPacket: 0,
       ackBatchInterval: Duration(milliseconds: 4),
@@ -49,6 +80,7 @@ void main() {
         'maximum_window_below_initial',
         'receiver_window_below_initial',
         'ack_batch_threshold_per_chunk',
+        'max_window_growth_below_one',
         'window_update_interval_per_chunk',
         'nack_indexes_below_ack_batch',
       ]),

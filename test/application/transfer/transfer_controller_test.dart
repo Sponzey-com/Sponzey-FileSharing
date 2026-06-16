@@ -1334,6 +1334,101 @@ void main() {
   });
 
   test(
+    'reports incoming progress from contiguous written chunks while buffering out-of-order data',
+    () async {
+      void Function()? releaseHeldChunkOne;
+      var releasedHeldChunkOne = false;
+      final controlNetwork = _LinkedFakeAuthNetwork();
+      final dataNetwork = _LinkedFakeDataNetwork(
+        interceptor:
+            ({
+              required frame,
+              required address,
+              required sourcePort,
+              required targetPort,
+              required deliver,
+            }) async {
+              if (frame.type == DataFrameType.dataChunk &&
+                  frame.chunkIndex == 1 &&
+                  !releasedHeldChunkOne) {
+                releaseHeldChunkOne ??= () {
+                  releasedHeldChunkOne = true;
+                  deliver(frame, address: address, port: sourcePort);
+                };
+                return;
+              }
+              deliver(frame, address: address, port: sourcePort);
+            },
+      );
+      final alice = await _createNode(
+        network: controlNetwork,
+        dataTransport: dataNetwork.attach(),
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41035,
+        receivePath: '${workspaceDirectory.path}/alice-contiguous-progress',
+      );
+      final bob = await _createNode(
+        network: controlNetwork,
+        dataTransport: dataNetwork.attach(),
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-b',
+        authPort: 41036,
+        receivePath: '${workspaceDirectory.path}/bob-contiguous-progress',
+      );
+      addTearDown(alice.dispose);
+      addTearDown(bob.dispose);
+
+      await _prepareAuthenticatedPair(
+        alice: alice,
+        bob: bob,
+        bobReceivePath: '${workspaceDirectory.path}/bob-contiguous-progress',
+        bobPort: 41036,
+        clock: clock,
+      );
+
+      final chunkSize = const DataFrameCodec().maxPayloadBytes();
+      final sourceFile = File(
+        '${workspaceDirectory.path}/alice-contiguous-progress/source.bin',
+      );
+      await sourceFile.parent.create(recursive: true);
+      await sourceFile.writeAsBytes(
+        List<int>.generate(chunkSize * 40 + 17, (index) => index % 251),
+      );
+
+      await alice.transferController.sendFile(
+        peerId: 'team@instance-device-b',
+        filePath: sourceFile.path,
+      );
+
+      final bufferedJob = await _waitForTransferJobMatching(
+        bob.container,
+        (job) => job.message?.contains('out-of-order data chunk') ?? false,
+      );
+      expect(bufferedJob.bytesTransferred, chunkSize);
+      expect(bufferedJob.completedChunks, 1);
+
+      final release = releaseHeldChunkOne;
+      expect(release, isNotNull);
+      release!();
+      await _flush();
+
+      final aliceJob = await _waitForTerminalTransfer(alice.container);
+      final bobJob = await _waitForTerminalTransfer(bob.container);
+      expect(aliceJob.status, TransferJobStatus.completed);
+      expect(bobJob.status, TransferJobStatus.completed);
+      expect(
+        await File(bobJob.destinationPath!).readAsBytes(),
+        await sourceFile.readAsBytes(),
+      );
+    },
+  );
+
+  test(
     'digest mismatch fails sender and receiver after corrupted Data frame',
     () async {
       var corrupted = false;
@@ -2450,6 +2545,26 @@ Future<List<TransferJob>> _waitForTerminalTransferCount(
   final jobs = container.read(transferJobsProvider);
   fail(
     'Expected $expectedCount terminal transfer jobs. '
+    'Current jobs: ${jobs.map((job) => '${job.statusLabel}:${job.message}').join(' | ')}',
+  );
+}
+
+Future<TransferJob> _waitForTransferJobMatching(
+  ProviderContainer container,
+  bool Function(TransferJob job) matches,
+) async {
+  for (var i = 0; i < 100; i += 1) {
+    final jobs = container.read(transferJobsProvider);
+    for (final job in jobs) {
+      if (matches(job)) {
+        return job;
+      }
+    }
+    await _flush();
+  }
+  final jobs = container.read(transferJobsProvider);
+  fail(
+    'Expected matching transfer job. '
     'Current jobs: ${jobs.map((job) => '${job.statusLabel}:${job.message}').join(' | ')}',
   );
 }

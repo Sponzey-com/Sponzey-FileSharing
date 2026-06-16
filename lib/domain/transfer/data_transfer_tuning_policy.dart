@@ -5,6 +5,7 @@ class DataTransferTuningPolicy {
     required this.receiverAdvertisedWindow,
     required this.windowUpdateChunkInterval,
     required this.ackBatchChunkThreshold,
+    required this.maxWindowGrowthPerAck,
     required this.maxRetransmissions,
     required this.maxNackIndexesPerPacket,
     required this.ackBatchInterval,
@@ -19,6 +20,7 @@ class DataTransferTuningPolicy {
   static const int defaultReceiverAdvertisedWindow = 256;
   static const int defaultWindowUpdateChunkInterval = 16;
   static const int defaultAckBatchChunkThreshold = 16;
+  static const int defaultMaxWindowGrowthPerAck = 4;
   static const int defaultMaxRetransmissions = 6;
   static const int defaultMaxNackIndexesPerPacket = 32;
   static const Duration defaultAckBatchInterval = Duration(milliseconds: 4);
@@ -30,6 +32,7 @@ class DataTransferTuningPolicy {
     receiverAdvertisedWindow: defaultReceiverAdvertisedWindow,
     windowUpdateChunkInterval: defaultWindowUpdateChunkInterval,
     ackBatchChunkThreshold: defaultAckBatchChunkThreshold,
+    maxWindowGrowthPerAck: defaultMaxWindowGrowthPerAck,
     maxRetransmissions: defaultMaxRetransmissions,
     maxNackIndexesPerPacket: defaultMaxNackIndexesPerPacket,
     ackBatchInterval: defaultAckBatchInterval,
@@ -41,6 +44,7 @@ class DataTransferTuningPolicy {
   final int receiverAdvertisedWindow;
   final int windowUpdateChunkInterval;
   final int ackBatchChunkThreshold;
+  final int maxWindowGrowthPerAck;
   final int maxRetransmissions;
   final int maxNackIndexesPerPacket;
   final Duration ackBatchInterval;
@@ -68,6 +72,9 @@ class DataTransferTuningPolicy {
     if (ackBatchChunkThreshold <= 1) {
       issues.add('ack_batch_threshold_per_chunk');
     }
+    if (maxWindowGrowthPerAck < 1) {
+      issues.add('max_window_growth_below_one');
+    }
     if (ackBatchChunkThreshold > receiverAdvertisedWindow) {
       issues.add('ack_batch_threshold_above_receiver_window');
     }
@@ -81,6 +88,24 @@ class DataTransferTuningPolicy {
       issues.add('payload_budget_empty');
     }
     return issues;
+  }
+
+  int windowAfterAck({
+    required int currentWindow,
+    required int maximumWindow,
+    required int newlyAckedChunks,
+  }) {
+    if (newlyAckedChunks <= 0 || currentWindow >= maximumWindow) {
+      return currentWindow;
+    }
+    final ackBatch = ackBatchChunkThreshold < 1 ? 1 : ackBatchChunkThreshold;
+    final batchesRepresented = (newlyAckedChunks + ackBatch - 1) ~/ ackBatch;
+    final growth = batchesRepresented < 1 ? 1 : batchesRepresented;
+    final cappedGrowth = growth > maxWindowGrowthPerAck
+        ? maxWindowGrowthPerAck
+        : growth;
+    final nextWindow = currentWindow + cappedGrowth;
+    return nextWindow > maximumWindow ? maximumWindow : nextWindow;
   }
 
   static int maxPayloadBytesFor({
