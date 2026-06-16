@@ -651,6 +651,13 @@ class PeerAuthController extends Notifier<PeerAuthState> {
       context.peerAddress = datagram.address.address;
       context.peerPort = datagram.port;
       context.nonce = nonce;
+      final observedPath = _pathFromObservedCandidate(
+        peerId: context.peerId,
+        datagram: datagram,
+      );
+      if (observedPath != null) {
+        _selectPathForAuth(observedPath);
+      }
       final verifier = ref
           .read(sharedVerifierServiceProvider)
           .deriveVerifierBase64(userId: user.userId, password: password);
@@ -953,12 +960,13 @@ class PeerAuthController extends Notifier<PeerAuthState> {
         .read(peerRouteCandidateStoreProvider)
         .where((candidate) => candidate.peerId == peerId)
         .toList(growable: false);
-    final observed = candidates
+    final addressMatched = candidates
         .where(
-          (candidate) =>
-              candidate.remoteAddress == datagram.address.address &&
-              candidate.remotePort == datagram.port,
+          (candidate) => candidate.remoteAddress == datagram.address.address,
         )
+        .toList(growable: false);
+    final observed = addressMatched
+        .where((candidate) => candidate.remotePort == datagram.port)
         .toList(growable: false);
     final localEndpoint = datagram.localEndpoint;
     final localMatched =
@@ -971,18 +979,70 @@ class PeerAuthController extends Notifier<PeerAuthState> {
               )
               .toList(growable: false);
     final selectable = localMatched.isNotEmpty ? localMatched : observed;
-    final candidate = selectable.isNotEmpty
+    var candidate = selectable.isNotEmpty
         ? PeerPathSelectionPolicy()
               .select(candidates: selectable, selectedAt: _now())
               ?.path
               .candidate
-        : _upsertObservedControlCandidate(peerId: peerId, datagram: datagram);
-    if (candidate == null) {
-      return null;
-    }
+        : null;
+    candidate ??= _observedPortCandidateFromAddressMatch(
+      candidates: addressMatched,
+      datagram: datagram,
+    );
+    candidate ??= _upsertObservedControlCandidate(
+      peerId: peerId,
+      datagram: datagram,
+    );
     return PeerPathSelectionPolicy()
         .select(candidates: [candidate], selectedAt: _now())
         ?.path;
+  }
+
+  PeerRouteCandidate? _observedPortCandidateFromAddressMatch({
+    required List<PeerRouteCandidate> candidates,
+    required ControlDatagram datagram,
+  }) {
+    if (candidates.isEmpty) {
+      return null;
+    }
+    final localEndpoint = datagram.localEndpoint;
+    final localMatched = localEndpoint == null || localEndpoint.isWildcardBind
+        ? candidates
+        : candidates
+              .where(
+                (candidate) =>
+                    candidate.localAddress == localEndpoint.localAddress ||
+                    candidate.bindMode == UdpInterfaceBindMode.any,
+              )
+              .toList(growable: false);
+    final selectable = localMatched.isNotEmpty ? localMatched : candidates;
+    final base = PeerPathSelectionPolicy()
+        .select(candidates: selectable, selectedAt: _now())
+        ?.path
+        .candidate;
+    if (base == null) {
+      return null;
+    }
+    final observed = PeerRouteCandidate.create(
+      peerId: base.peerId,
+      remoteAddress: base.remoteAddress,
+      remotePort: datagram.port,
+      localInterfaceId: base.localInterfaceId,
+      localAddress: base.localAddress,
+      discoveredBy: RouteCandidateDiscoverySource.unicastProbe,
+      seenAt: _now(),
+      status: RouteCandidateStatus.reachable,
+      rttMs: base.rttMs,
+      failureCount: 0,
+      score: base.score,
+      localInterfaceTypeHint: base.localInterfaceTypeHint,
+      bindMode: base.bindMode,
+      compatible: base.compatible,
+      receiveAvailable: base.receiveAvailable,
+    );
+    return ref
+        .read(peerRouteCandidateProjectionProvider.notifier)
+        .upsertCandidate(observed);
   }
 
   PeerRouteCandidate _upsertObservedControlCandidate({

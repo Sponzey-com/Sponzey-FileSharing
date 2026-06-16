@@ -145,6 +145,111 @@ void main() {
     },
   );
 
+  test('handles simultaneous bidirectional file transfers', () async {
+    final network = _LinkedFakeAuthNetwork();
+    final alice = await _createNode(
+      network: network,
+      clock: clock,
+      loginUserId: _sharedUserId,
+      loginPassword: _sharedPassword,
+      localDeviceId: 'device-a',
+      authPort: 41101,
+      receivePath: '${workspaceDirectory.path}/alice-bidirectional',
+    );
+    final bob = await _createNode(
+      network: network,
+      clock: clock,
+      loginUserId: _sharedUserId,
+      loginPassword: _sharedPassword,
+      localDeviceId: 'device-b',
+      authPort: 41102,
+      receivePath: '${workspaceDirectory.path}/bob-bidirectional',
+    );
+    addTearDown(alice.dispose);
+    addTearDown(bob.dispose);
+    await alice.container
+        .read(settingsRepositoryProvider)
+        .save(
+          const AppSettings(
+            defaultSavePath: '',
+            autoReceiveEnabled: true,
+            receivePolicy: ReceivePolicy.autoReceiveAll,
+            logLevel: AppLogLevel.error,
+          ).copyWith(
+            defaultSavePath: '${workspaceDirectory.path}/alice-bidirectional',
+          ),
+        );
+    await bob.container
+        .read(settingsRepositoryProvider)
+        .save(
+          const AppSettings(
+            defaultSavePath: '',
+            autoReceiveEnabled: true,
+            receivePolicy: ReceivePolicy.autoReceiveAll,
+            logLevel: AppLogLevel.error,
+          ).copyWith(
+            defaultSavePath: '${workspaceDirectory.path}/bob-bidirectional',
+          ),
+        );
+
+    await _handshakePair(
+      alice: alice,
+      bob: bob,
+      clock: clock.value,
+      alicePort: 41101,
+      bobPort: 41102,
+    );
+
+    final aliceSource = File(
+      '${workspaceDirectory.path}/alice-bidirectional/alice-source.txt',
+    );
+    final bobSource = File(
+      '${workspaceDirectory.path}/bob-bidirectional/bob-source.txt',
+    );
+    await aliceSource.parent.create(recursive: true);
+    await bobSource.parent.create(recursive: true);
+    await aliceSource.writeAsString('payload from alice');
+    await bobSource.writeAsString('payload from bob');
+
+    await Future.wait([
+      alice.transferController.sendFile(
+        peerId: 'team@instance-device-b',
+        filePath: aliceSource.path,
+      ),
+      bob.transferController.sendFile(
+        peerId: 'team@instance-device-a',
+        filePath: bobSource.path,
+      ),
+    ]);
+
+    final aliceJobs = await _waitForTerminalTransferCount(alice.container, 2);
+    final bobJobs = await _waitForTerminalTransferCount(bob.container, 2);
+
+    expect(
+      aliceJobs.map((job) => job.status),
+      everyElement(TransferJobStatus.completed),
+    );
+    expect(
+      bobJobs.map((job) => job.status),
+      everyElement(TransferJobStatus.completed),
+    );
+
+    final aliceIncoming = aliceJobs.singleWhere(
+      (job) => job.direction == TransferDirection.incoming,
+    );
+    final bobIncoming = bobJobs.singleWhere(
+      (job) => job.direction == TransferDirection.incoming,
+    );
+    expect(
+      await File(aliceIncoming.destinationPath!).readAsString(),
+      'payload from bob',
+    );
+    expect(
+      await File(bobIncoming.destinationPath!).readAsString(),
+      'payload from alice',
+    );
+  });
+
   test(
     'uses active route remote address instead of stale session loopback target',
     () async {
@@ -2090,102 +2195,106 @@ void main() {
     },
   );
 
-  test('keeps transfer metric logs throttled under noisy delivery', () async {
-    final logger = _MemoryAppLogger(minimumLevel: AppLogLevel.debug);
-    var delayed = false;
-    var duplicated = false;
-    final network = _LinkedFakeAuthNetwork(
-      interceptor:
-          ({
-            required packet,
-            required address,
-            required sourcePort,
-            required targetPort,
-            required deliver,
-          }) async {
-            if (packet.type == AuthPacketType.transferChunk &&
-                sourcePort == 41051 &&
-                targetPort == 41052 &&
-                packet.transferChunkIndex == 4 &&
-                !delayed) {
-              delayed = true;
-              unawaited(
-                Future<void>.delayed(const Duration(milliseconds: 50), () {
-                  deliver(packet, address: address, port: sourcePort);
-                }),
-              );
-              return;
-            }
-            deliver(packet, address: address, port: sourcePort);
-            if (packet.type == AuthPacketType.transferChunk &&
-                sourcePort == 41051 &&
-                targetPort == 41052 &&
-                packet.transferChunkIndex == 7 &&
-                !duplicated) {
-              duplicated = true;
-              unawaited(
-                Future<void>.delayed(const Duration(milliseconds: 5), () {
-                  deliver(packet, address: address, port: sourcePort);
-                }),
-              );
-            }
-          },
-    );
-    final alice = await _createNode(
-      network: network,
-      clock: clock,
-      loginUserId: _sharedUserId,
-      loginPassword: _sharedPassword,
-      localDeviceId: 'device-a',
-      authPort: 41051,
-      receivePath: '${workspaceDirectory.path}/alice-log',
-      logger: logger,
-    );
-    final bob = await _createNode(
-      network: network,
-      clock: clock,
-      loginUserId: _sharedUserId,
-      loginPassword: _sharedPassword,
-      localDeviceId: 'device-b',
-      authPort: 41052,
-      receivePath: '${workspaceDirectory.path}/bob-log',
-      logger: logger,
-    );
-    addTearDown(alice.dispose);
-    addTearDown(bob.dispose);
+  test(
+    'does not emit transfer metric debug logs during noisy delivery',
+    () async {
+      final logger = _MemoryAppLogger(minimumLevel: AppLogLevel.debug);
+      var delayed = false;
+      var duplicated = false;
+      final network = _LinkedFakeAuthNetwork(
+        interceptor:
+            ({
+              required packet,
+              required address,
+              required sourcePort,
+              required targetPort,
+              required deliver,
+            }) async {
+              if (packet.type == AuthPacketType.transferChunk &&
+                  sourcePort == 41051 &&
+                  targetPort == 41052 &&
+                  packet.transferChunkIndex == 4 &&
+                  !delayed) {
+                delayed = true;
+                unawaited(
+                  Future<void>.delayed(const Duration(milliseconds: 50), () {
+                    deliver(packet, address: address, port: sourcePort);
+                  }),
+                );
+                return;
+              }
+              deliver(packet, address: address, port: sourcePort);
+              if (packet.type == AuthPacketType.transferChunk &&
+                  sourcePort == 41051 &&
+                  targetPort == 41052 &&
+                  packet.transferChunkIndex == 7 &&
+                  !duplicated) {
+                duplicated = true;
+                unawaited(
+                  Future<void>.delayed(const Duration(milliseconds: 5), () {
+                    deliver(packet, address: address, port: sourcePort);
+                  }),
+                );
+              }
+            },
+      );
+      final alice = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41051,
+        receivePath: '${workspaceDirectory.path}/alice-log',
+        logger: logger,
+      );
+      final bob = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-b',
+        authPort: 41052,
+        receivePath: '${workspaceDirectory.path}/bob-log',
+        logger: logger,
+      );
+      addTearDown(alice.dispose);
+      addTearDown(bob.dispose);
 
-    await _prepareAuthenticatedPair(
-      alice: alice,
-      bob: bob,
-      bobReceivePath: '${workspaceDirectory.path}/bob-log',
-      bobPort: 41052,
-      clock: clock,
-    );
+      await _prepareAuthenticatedPair(
+        alice: alice,
+        bob: bob,
+        bobReceivePath: '${workspaceDirectory.path}/bob-log',
+        bobPort: 41052,
+        clock: clock,
+      );
 
-    final sourceFile = File('${workspaceDirectory.path}/alice-log/source.txt');
-    await sourceFile.parent.create(recursive: true);
-    await sourceFile.writeAsString('metric-log-test-' * 20000);
+      final sourceFile = File(
+        '${workspaceDirectory.path}/alice-log/source.txt',
+      );
+      await sourceFile.parent.create(recursive: true);
+      await sourceFile.writeAsString('metric-log-test-' * 20000);
 
-    await alice.transferController.sendFile(
-      peerId: 'team@instance-device-b',
-      filePath: sourceFile.path,
-    );
+      await alice.transferController.sendFile(
+        peerId: 'team@instance-device-b',
+        filePath: sourceFile.path,
+      );
 
-    final aliceJob = await _waitForTerminalTransfer(alice.container);
-    final bobJob = await _waitForTerminalTransfer(bob.container);
+      final aliceJob = await _waitForTerminalTransfer(alice.container);
+      final bobJob = await _waitForTerminalTransfer(bob.container);
 
-    expect(aliceJob.status, TransferJobStatus.completed);
-    expect(bobJob.status, TransferJobStatus.completed);
-    final transferDebugLogs = logger.entries
-        .where(
-          (entry) =>
-              entry.level == AppLogLevel.debug &&
-              entry.category == AppLogCategory.transferData,
-        )
-        .toList(growable: false);
-    expect(transferDebugLogs, isNotEmpty);
-    expect(transferDebugLogs.length, lessThan(30));
-  });
+      expect(aliceJob.status, TransferJobStatus.completed);
+      expect(bobJob.status, TransferJobStatus.completed);
+      final transferDebugLogs = logger.entries
+          .where(
+            (entry) =>
+                entry.level == AppLogLevel.debug &&
+                entry.category == AppLogCategory.transferData,
+          )
+          .toList(growable: false);
+      expect(transferDebugLogs, isEmpty);
+    },
+  );
 
   test(
     'ignores legacy Control chunk corruption because chunks use Data channel',

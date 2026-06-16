@@ -114,11 +114,6 @@ class RawUdpDataTransport implements DataTransport {
       final bytes = _frameCodec.encode(frame);
       final sent = await _sendWithBoundedRetry(socket, bytes, address, port);
       if (sent != bytes.length) {
-        _logger.debug(
-          AppLogCategory.transferData,
-          'Data frame partial send type=${frame.type.name} '
-          'requested=${bytes.length} sent=$sent target=${address.address}:$port',
-        );
         return DataSendResult(
           success: false,
           bytesRequested: bytes.length,
@@ -131,14 +126,7 @@ class RawUdpDataTransport implements DataTransport {
         bytesRequested: bytes.length,
         bytesSent: sent,
       );
-    } on Object catch (error, stackTrace) {
-      _logger.debug(
-        AppLogCategory.transferData,
-        'Data frame send failed type=${frame.type.name} '
-        'target=${address.address}:$port',
-        error: error,
-        stackTrace: stackTrace,
-      );
+    } on Object {
       return DataSendResult(
         success: false,
         bytesRequested: 0,

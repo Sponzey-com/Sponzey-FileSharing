@@ -403,17 +403,21 @@ class RawUdpControlTransport implements ControlTransport {
   }
 
   void _logPacket(AuthPacket packet, {required String message}) {
-    if (_isHighVolumeTransferPacket(packet.type)) {
-      _logger.debug(AppLogCategory.auth, message);
+    if (_isTransferPacket(packet.type)) {
       return;
     }
     _logger.info(AppLogCategory.auth, message);
   }
 
-  bool _isHighVolumeTransferPacket(AuthPacketType type) {
-    return type == AuthPacketType.transferChunk ||
+  bool _isTransferPacket(AuthPacketType type) {
+    return type == AuthPacketType.transferInit ||
+        type == AuthPacketType.transferInitAck ||
+        type == AuthPacketType.transferChunk ||
         type == AuthPacketType.transferChunkAck ||
-        type == AuthPacketType.transferWindowUpdate;
+        type == AuthPacketType.transferChunkNack ||
+        type == AuthPacketType.transferWindowUpdate ||
+        type == AuthPacketType.transferComplete ||
+        type == AuthPacketType.transferCompleteAck;
   }
 
   bool _isAddressInUse(Object error) {

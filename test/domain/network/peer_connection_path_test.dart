@@ -264,6 +264,17 @@ void main() {
       expect(result.state.status, PeerPathStatus.failoverRequested);
       expect(result.effects.single.name, 'selectFailoverPath');
     });
+
+    test('does not copy remote port into local control endpoint', () {
+      final path = PeerConnectionPath.fromCandidate(
+        candidate: _candidate(id: 'a'),
+        selectedAt: DateTime.utc(2026),
+        selectionReason: PeerPathSelectionReason.sameSubnet,
+      );
+
+      expect(path.candidate.remotePort, 38401);
+      expect(path.controlEndpoint.port, 0);
+    });
   });
 }
 

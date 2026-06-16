@@ -62,7 +62,7 @@ class PeerConnectionPath {
         role: UdpPortRole.control,
         interfaceId: candidate.localInterfaceId,
         localAddress: candidate.localAddress,
-        port: candidate.remotePort,
+        port: 0,
         bindMode: candidate.bindMode,
       ),
       dataEndpoint: dataPort == null

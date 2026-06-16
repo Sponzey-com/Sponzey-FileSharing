@@ -14,14 +14,25 @@ final navigatorKeyProvider = Provider<GlobalKey<NavigatorState>>((ref) {
   return GlobalKey<NavigatorState>();
 });
 
+final _routerAuthRefreshProvider = Provider<Listenable>((ref) {
+  final refresh = _RouterAuthRefresh();
+  ref.listen<AuthState>(authControllerProvider, (previous, next) {
+    refresh.refresh();
+  });
+  ref.onDispose(refresh.dispose);
+  return refresh;
+});
+
 final goRouterProvider = Provider<GoRouter>((ref) {
   final navigatorKey = ref.watch(navigatorKeyProvider);
-  final authState = ref.watch(authControllerProvider);
+  final authRefresh = ref.watch(_routerAuthRefreshProvider);
 
   return GoRouter(
     navigatorKey: navigatorKey,
+    refreshListenable: authRefresh,
     initialLocation: LoginScreen.routePath,
     redirect: (context, state) {
+      final authState = ref.read(authControllerProvider);
       final isLoggedIn = authState.isAuthenticated;
       final isAtLogin = state.matchedLocation == LoginScreen.routePath;
 
@@ -79,3 +90,9 @@ final goRouterProvider = Provider<GoRouter>((ref) {
     ],
   );
 });
+
+class _RouterAuthRefresh extends ChangeNotifier {
+  void refresh() {
+    notifyListeners();
+  }
+}

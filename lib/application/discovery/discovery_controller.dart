@@ -519,7 +519,7 @@ class DiscoveryController extends Notifier<DiscoveryState> {
       return;
     }
 
-    logger.info(
+    logger.debug(
       AppLogCategory.discovery,
       'Discovery packet handling start source=${datagram.address.address}:'
       '${datagram.port} packet=${_packetSummary(packet)} '
@@ -534,7 +534,7 @@ class DiscoveryController extends Notifier<DiscoveryState> {
         peerId: '${packet.userId}@${packet.instanceId}',
         reason: 'same instance id',
       );
-      logger.info(
+      logger.debug(
         AppLogCategory.discovery,
         'Discovery packet ignored as self packet. '
         'source=${datagram.address.address}:${datagram.port} '
@@ -556,7 +556,7 @@ class DiscoveryController extends Notifier<DiscoveryState> {
         peerId: '${packet.userId}@${packet.instanceId}',
         reason: 'pairing group mismatch',
       );
-      logger.info(
+      logger.debug(
         AppLogCategory.discovery,
         'Discovery packet ignored by group/user filter. '
         'source=${datagram.address.address}:${datagram.port} '
@@ -603,7 +603,7 @@ class DiscoveryController extends Notifier<DiscoveryState> {
       lastDecisionCode: decision.code.name,
     );
     if (routeCandidates.isNotEmpty) {
-      logger.info(
+      logger.debug(
         AppLogCategory.discovery,
         'Projected ${routeCandidates.length} route candidate(s) for ${peer.id}',
       );
@@ -630,7 +630,7 @@ class DiscoveryController extends Notifier<DiscoveryState> {
         .syncDiscoveredPeer(peer, message: 'Discovery에서 피어를 발견했습니다.');
     await _maybeAutoHandshake(peer);
 
-    logger.info(
+    logger.debug(
       AppLogCategory.discovery,
       'Discovery peer accepted peer=${peer.id} address=${peer.address}:'
       '${peer.port} presence=${peer.presence.name} packet=${_packetSummary(packet)}',
@@ -647,7 +647,7 @@ class DiscoveryController extends Notifier<DiscoveryState> {
           await ref
               .read(discoveryTransportProvider)
               .sendUnicast(ackPacket, address: datagram.address, port: ackPort);
-          logger.info(
+          logger.debug(
             AppLogCategory.discovery,
             'Discovery ACK sent peer=${peer.id} target='
             '${datagram.address.address}:$ackPort '

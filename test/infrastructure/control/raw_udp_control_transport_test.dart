@@ -106,41 +106,39 @@ void main() {
     },
   );
 
-  test('logs high-volume transfer packets at debug level', () async {
-    final bus = InMemoryMessageBus();
-    addTearDown(bus.dispose);
-    final logger = _MemoryAppLogger(minimumLevel: AppLogLevel.debug);
-    final transport = _transport(bus, logger: logger);
-    addTearDown(transport.close);
-    await transport.start(preferredPort: 0);
+  test(
+    'does not log transfer packets in low-level control transport',
+    () async {
+      final bus = InMemoryMessageBus();
+      addTearDown(bus.dispose);
+      final logger = _MemoryAppLogger(minimumLevel: AppLogLevel.debug);
+      final transport = _transport(bus, logger: logger);
+      addTearDown(transport.close);
+      await transport.start(preferredPort: 0);
 
-    await transport.send(
-      _packet(
-        AuthPacketType.transferChunk,
-        sessionId: 'session-transfer',
-        transferId: 'transfer-001',
-      ),
-      address: InternetAddress.loopbackIPv4,
-      port: 9,
-    );
+      await transport.send(
+        _packet(
+          AuthPacketType.transferChunk,
+          sessionId: 'session-transfer',
+          transferId: 'transfer-001',
+        ),
+        address: InternetAddress.loopbackIPv4,
+        port: 9,
+      );
+      await transport.send(
+        _packet(
+          AuthPacketType.transferInit,
+          sessionId: 'session-transfer',
+          transferId: 'transfer-002',
+        ),
+        address: InternetAddress.loopbackIPv4,
+        port: 9,
+      );
 
-    expect(
-      logger.entries.where(
-        (entry) =>
-            entry.level == AppLogLevel.info &&
-            entry.message.contains('TRANSFER_CHUNK'),
-      ),
-      isEmpty,
-    );
-    expect(
-      logger.entries.where(
-        (entry) =>
-            entry.level == AppLogLevel.debug &&
-            entry.message.contains('TRANSFER_CHUNK'),
-      ),
-      isNotEmpty,
-    );
-  });
+      final messages = logger.entries.map((entry) => entry.message).join('\n');
+      expect(messages, isNot(contains('TRANSFER_')));
+    },
+  );
 }
 
 RawUdpControlTransport _transport(MessageBus bus, {AppLogger? logger}) {

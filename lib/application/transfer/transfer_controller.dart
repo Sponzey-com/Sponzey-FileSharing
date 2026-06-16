@@ -136,7 +136,6 @@ class TransferController extends Notifier<TransferState> {
   final Map<String, _OutgoingTransferContext> _outgoingTransfers = {};
   final Map<String, _IncomingTransferContext> _incomingTransfers = {};
   final Map<String, String> _transferIdByFrameKey = {};
-  final Map<String, DateTime> _lastMetricLoggedAt = {};
   final Map<String, TransferDiagnosticsRingBuffer> _diagnosticFrameTraces = {};
 
   @override
@@ -225,7 +224,6 @@ class TransferController extends Notifier<TransferState> {
           .discardDraft(incoming.tempFilePath);
     }
 
-    _lastMetricLoggedAt.remove(transferId);
     _updateJob(
       transferId,
       (currentJob) => currentJob.copyWith(
@@ -479,13 +477,6 @@ class TransferController extends Notifier<TransferState> {
     final frame = datagram.frame;
     final transferId = _transferIdByFrameKey[_frameKey(frame.transferIdBytes)];
     if (transferId == null) {
-      ref
-          .read(appLoggerProvider)
-          .debug(
-            AppLogCategory.transferData,
-            'Dropped data frame for unknown transfer type=${frame.type.name} '
-            'from=${datagram.address.address}:${datagram.port}',
-          );
       return;
     }
     _recordFrameTrace(
@@ -658,7 +649,6 @@ class TransferController extends Notifier<TransferState> {
           windowSize: context.windowSize,
         ),
       );
-      _lastMetricLoggedAt.remove(transferId);
       state = state.copyWith(
         infoMessage: '파일 전송이 완료되었습니다: ${context.preparedFile.fileName}',
       );
@@ -812,7 +802,7 @@ class TransferController extends Notifier<TransferState> {
         address: remoteAddress,
         port: remotePort,
       );
-    } on AppException catch (error, stackTrace) {
+    } on AppException catch (error) {
       context.inFlightChunks.remove(chunkIndex);
       context.sentAtByChunk.remove(chunkIndex);
       if (!_isRetryableDataFrameSendFailure(error)) {
@@ -839,21 +829,10 @@ class TransferController extends Notifier<TransferState> {
         _sendBackpressureRetryDelay,
         () => unawaited(_pumpOutgoingWindow(transferId, context)),
       );
-      ref
-          .read(appLoggerProvider)
-          .warning(
-            AppLogCategory.transferData,
-            'Data chunk send failed; queued retry '
-            'transfer=${_safeTransfer(transferId)} chunk=$chunkIndex '
-            'attempt=$attemptsAfterFailure window=${context.windowSize}',
-            error: error,
-            stackTrace: stackTrace,
-          );
       _updateOutgoingMetrics(
         transferId,
         context,
         message: 'data chunk $chunkIndex 송신 실패, 재전송 대기 중',
-        important: true,
       );
       return false;
     } catch (_) {
@@ -913,18 +892,10 @@ class TransferController extends Notifier<TransferState> {
     if (timedOutChunks.isNotEmpty) {
       context.rttEstimator.noteTimeoutBackoff();
       context.windowSize = max(1, context.windowSize ~/ 2);
-      ref
-          .read(appLoggerProvider)
-          .warning(
-            AppLogCategory.transferData,
-            'Retransmission scan timed out ${timedOutChunks.length} chunks '
-            'on transfer ${_safeTransfer(transferId)}',
-          );
       _updateOutgoingMetrics(
         transferId,
         context,
         message: 'timeout ${timedOutChunks.length} chunks, 재전송 대기 중',
-        important: true,
       );
       unawaited(_pumpOutgoingWindow(transferId, context));
     }
@@ -982,17 +953,6 @@ class TransferController extends Notifier<TransferState> {
       );
       return;
     }
-    if (peerId != packetPeerId) {
-      ref
-          .read(appLoggerProvider)
-          .debug(
-            AppLogCategory.transferControl,
-            'Resolved TRANSFER_INIT peer alias '
-            'packetPeer=$packetPeerId sessionPeer=$peerId '
-            'session=${_safeSession(session.sessionId)} '
-            'source=${datagram.address.address}:${datagram.port}',
-          );
-    }
     late final PeerConnectionPath activeRoute;
     try {
       activeRoute = _requireActiveTransferRoute(
@@ -1025,15 +985,6 @@ class TransferController extends Notifier<TransferState> {
     try {
       final settings = await _loadIncomingSettingsForTransfer(transferId);
       final fileService = ref.read(transferFileServiceProvider);
-      ref
-          .read(appLoggerProvider)
-          .debug(
-            AppLogCategory.transferControl,
-            'Preparing incoming transfer storage '
-            'transfer=${_safeTransfer(transferId)} peer=$peerId '
-            'file=${_safeFileNameForLog(fileName)} size=$fileSize '
-            'chunks=$chunkCount',
-          );
       draft = await fileService.createIncomingDraft(
         transferId: transferId,
         fileName: fileName,
@@ -1194,14 +1145,6 @@ class TransferController extends Notifier<TransferState> {
     if (context == null || context.initAck.isCompleted) {
       return;
     }
-    ref
-        .read(appLoggerProvider)
-        .info(
-          AppLogCategory.transferControl,
-          'Received TRANSFER_INIT_ACK ${_safeTransfer(transferId)} '
-          'from=${datagram.address.address}:${datagram.port} '
-          'accepted=${packet.transferAccepted ?? false}',
-        );
     context.initAck.complete(
       _TransferInitAckResult(
         accepted: packet.transferAccepted ?? false,
@@ -1267,7 +1210,6 @@ class TransferController extends Notifier<TransferState> {
         transferId,
         context,
         message: '중복 chunk $chunkIndex 수신',
-        important: true,
       );
       return;
     }
@@ -1380,7 +1322,6 @@ class TransferController extends Notifier<TransferState> {
         transferId,
         context,
         message: '중복 data chunk $chunkIndex 수신',
-        important: true,
       );
       return;
     }
@@ -1551,7 +1492,6 @@ class TransferController extends Notifier<TransferState> {
       transferId,
       context,
       message: 'DATA_NACK ${chunkIndexes.join(', ')} 수신',
-      important: true,
     );
     unawaited(_pumpOutgoingWindow(transferId, context));
   }
@@ -1592,7 +1532,6 @@ class TransferController extends Notifier<TransferState> {
         transferId,
         context,
         message: '누락 data chunk 재전송을 기다리는 중입니다.',
-        important: true,
       );
       return;
     }
@@ -1641,7 +1580,6 @@ class TransferController extends Notifier<TransferState> {
           windowSize: _receiverWindowSize(context),
         ),
       );
-      _lastMetricLoggedAt.remove(transferId);
       state = state.copyWith(infoMessage: '파일을 수신했습니다: ${context.fileName}');
       await _sendTransferCompleteAck(
         sessionId: context.sessionId,
@@ -1712,7 +1650,6 @@ class TransferController extends Notifier<TransferState> {
         transferId,
         context,
         message: '중복 ACK $chunkIndex 수신',
-        important: true,
       );
       return;
     }
@@ -1775,7 +1712,6 @@ class TransferController extends Notifier<TransferState> {
       transferId,
       context,
       message: 'NACK ${chunkIndexes.join(', ')} 수신',
-      important: true,
     );
     unawaited(_pumpOutgoingWindow(transferId, context));
   }
@@ -1849,7 +1785,6 @@ class TransferController extends Notifier<TransferState> {
         transferId,
         context,
         message: '누락 chunk 재전송을 기다리는 중입니다.',
-        important: true,
       );
       return;
     }
@@ -1915,7 +1850,6 @@ class TransferController extends Notifier<TransferState> {
           windowSize: _receiverWindowSize(context),
         ),
       );
-      _lastMetricLoggedAt.remove(transferId);
       state = state.copyWith(infoMessage: '파일을 수신했습니다: ${context.fileName}');
       await _sendTransferCompleteAck(
         sessionId: context.sessionId,
@@ -1981,14 +1915,6 @@ class TransferController extends Notifier<TransferState> {
     if (context == null || context.completeAck.isCompleted) {
       return;
     }
-    ref
-        .read(appLoggerProvider)
-        .info(
-          AppLogCategory.transferControl,
-          'Received TRANSFER_COMPLETE_ACK ${_safeTransfer(transferId)} '
-          'from=${datagram.address.address}:${datagram.port} '
-          'accepted=${packet.transferAccepted ?? false}',
-        );
     context.completeAck.complete(
       _TransferCompleteAckResult(
         accepted: packet.transferAccepted ?? false,
@@ -2094,15 +2020,6 @@ class TransferController extends Notifier<TransferState> {
       context.pendingAckAddress = address;
       context.pendingAckPort = port;
       _scheduleDataAckRetry(context);
-      ref
-          .read(appLoggerProvider)
-          .warning(
-            AppLogCategory.transferData,
-            'Data ACK flush failed; queued retry '
-            'peer=${context.peerId} chunks=${chunkIndexes.length}',
-            error: error,
-            stackTrace: stackTrace,
-          );
     });
   }
 
@@ -2178,16 +2095,8 @@ class TransferController extends Notifier<TransferState> {
         address: address,
         port: port,
       );
-    } catch (error, stackTrace) {
-      ref
-          .read(appLoggerProvider)
-          .warning(
-            AppLogCategory.transferData,
-            'Data NACK send failed; sender retransmission timeout remains '
-            'available peer=${context.peerId} chunks=${chunkIndexes.length}',
-            error: error,
-            stackTrace: stackTrace,
-          );
+    } catch (_) {
+      return;
     }
   }
 
@@ -2733,15 +2642,8 @@ class TransferController extends Notifier<TransferState> {
   ) async {
     try {
       await writer?.close();
-    } catch (error, stackTrace) {
-      ref
-          .read(appLoggerProvider)
-          .debug(
-            AppLogCategory.transferData,
-            'Ignored incoming writer cleanup failure',
-            error: error,
-            stackTrace: stackTrace,
-          );
+    } catch (_) {
+      // Cleanup is best-effort after rejecting an incoming transfer.
     }
     if (draft == null) {
       return;
@@ -2750,15 +2652,8 @@ class TransferController extends Notifier<TransferState> {
       await ref
           .read(transferFileServiceProvider)
           .discardDraft(draft.tempFilePath);
-    } catch (error, stackTrace) {
-      ref
-          .read(appLoggerProvider)
-          .debug(
-            AppLogCategory.transferData,
-            'Ignored incoming draft cleanup failure',
-            error: error,
-            stackTrace: stackTrace,
-          );
+    } catch (_) {
+      // Cleanup is best-effort after rejecting an incoming transfer.
     }
   }
 
@@ -2822,7 +2717,6 @@ class TransferController extends Notifier<TransferState> {
     String transferId,
     _OutgoingTransferContext context, {
     required String message,
-    bool important = false,
   }) {
     final throughput = _throughputBytesPerSec(
       transferredBytes: context.acknowledgedBytes,
@@ -2844,24 +2738,12 @@ class TransferController extends Notifier<TransferState> {
         message: message,
       ),
     );
-    _logMetricSummary(
-      transferId,
-      message:
-          'outgoing ${context.acknowledgedChunks.length}/${context.preparedFile.chunkCount} '
-          'window=${context.windowSize} retry=${context.retryCount} '
-          'loss=${(lossRate * 100).toStringAsFixed(1)}% '
-          'rate=${throughput.toStringAsFixed(0)}B/s '
-          'rtt=${context.rttEstimator.smoothedRttMs?.toStringAsFixed(0) ?? '-'}ms '
-          'note=$message',
-      important: important,
-    );
   }
 
   void _updateIncomingMetrics(
     String transferId,
     _IncomingTransferContext context, {
     required String message,
-    bool important = false,
   }) {
     final throughput = _throughputBytesPerSec(
       transferredBytes: context.writtenBytes,
@@ -2879,17 +2761,6 @@ class TransferController extends Notifier<TransferState> {
         updatedAt: _now(),
         message: message,
       ),
-    );
-    _logMetricSummary(
-      transferId,
-      message:
-          'incoming written=${context.nextExpectedChunk}/${context.expectedChunkCount} '
-          'acked=${context.acknowledgedChunks.length}/${context.expectedChunkCount} '
-          'route=${context.routeSnapshot.routeLeaseId} '
-          'buffered=${context.bufferedChunks.length} dup=${context.duplicateChunks} '
-          'rate=${throughput.toStringAsFixed(0)}B/s '
-          'window=${_receiverWindowSize(context)} note=$message',
-      important: important,
     );
   }
 
@@ -2940,22 +2811,6 @@ class TransferController extends Notifier<TransferState> {
       );
     }
     _scheduleMissingDataNackRetry(transferId, context);
-  }
-
-  void _logMetricSummary(
-    String transferId, {
-    required String message,
-    required bool important,
-  }) {
-    final now = _now();
-    final lastLoggedAt = _lastMetricLoggedAt[transferId];
-    if (!important &&
-        lastLoggedAt != null &&
-        now.difference(lastLoggedAt) < _metricLogInterval) {
-      return;
-    }
-    _lastMetricLoggedAt[transferId] = now;
-    ref.read(appLoggerProvider).debug(AppLogCategory.transferData, message);
   }
 
   double _lossRateFor(_OutgoingTransferContext context) {
@@ -3047,7 +2902,6 @@ class TransferController extends Notifier<TransferState> {
   }
 
   void _markRejected(String transferId, String message) {
-    _lastMetricLoggedAt.remove(transferId);
     _updateJob(
       transferId,
       (job) => job.copyWith(
@@ -3060,7 +2914,6 @@ class TransferController extends Notifier<TransferState> {
   }
 
   void _markFailed(String transferId, String message) {
-    _lastMetricLoggedAt.remove(transferId);
     _updateJob(
       transferId,
       (job) => job.copyWith(
@@ -3078,17 +2931,6 @@ class TransferController extends Notifier<TransferState> {
     required int port,
     UdpInterfaceEndpoint? localEndpoint,
   }) {
-    final message =
-        'Sending ${packet.type.wireName} ${_safeTransfer(packet.transferId)} '
-        'to ${address.address}:$port '
-        'local=${_endpointLabel(localEndpoint)} '
-        'session=${_safeSession(packet.sessionId)}';
-    final logger = ref.read(appLoggerProvider);
-    if (_isHighVolumeTransferPacket(packet.type)) {
-      logger.debug(AppLogCategory.transferControl, message);
-    } else {
-      logger.info(AppLogCategory.transferControl, message);
-    }
     return ref
         .read(controlTransportProvider)
         .send(
@@ -3253,12 +3095,6 @@ class TransferController extends Notifier<TransferState> {
   String _frameKey(Uint8List transferIdBytes) =>
       base64Url.encode(transferIdBytes);
 
-  bool _isHighVolumeTransferPacket(AuthPacketType type) {
-    return type == AuthPacketType.transferChunk ||
-        type == AuthPacketType.transferChunkAck ||
-        type == AuthPacketType.transferWindowUpdate;
-  }
-
   PeerConnectionPath _requireActiveTransferRoute({
     required String peerId,
     required PeerAuthSession session,
@@ -3341,7 +3177,7 @@ class TransferController extends Notifier<TransferState> {
     required ControlDatagram datagram,
     PeerConnectionPath? currentPath,
   }) {
-    final candidates = <PeerRouteCandidate>[
+    final exactCandidates = <PeerRouteCandidate>[
       if (currentPath != null &&
           _matchesIncomingTransferRoute(currentPath.candidate, datagram))
         currentPath.candidate,
@@ -3353,13 +3189,18 @@ class TransferController extends Notifier<TransferState> {
                 _matchesIncomingTransferRoute(candidate, datagram),
           ),
     ];
-    final observedCandidate = candidates.isEmpty
-        ? _upsertObservedIncomingTransferCandidate(
-            peerId: peerId,
-            datagram: datagram,
-            currentPath: currentPath,
-          )
-        : _upsertReachableIncomingTransferCandidate(candidates.first);
+    final observedCandidate = exactCandidates.isNotEmpty
+        ? _upsertReachableIncomingTransferCandidate(exactCandidates.first)
+        : _observedIncomingTransferCandidateFromAddressMatch(
+                peerId: peerId,
+                datagram: datagram,
+                currentPath: currentPath,
+              ) ??
+              _upsertObservedIncomingTransferCandidate(
+                peerId: peerId,
+                datagram: datagram,
+                currentPath: currentPath,
+              );
     return PeerPathSelectionPolicy()
         .select(candidates: [observedCandidate], selectedAt: _now())
         ?.path;
@@ -3393,6 +3234,66 @@ class TransferController extends Notifier<TransferState> {
             status: RouteCandidateStatus.reachable,
           ),
         );
+  }
+
+  PeerRouteCandidate? _observedIncomingTransferCandidateFromAddressMatch({
+    required String peerId,
+    required ControlDatagram datagram,
+    PeerConnectionPath? currentPath,
+  }) {
+    final addressMatches = <PeerRouteCandidate>[
+      if (currentPath != null &&
+          currentPath.candidate.remoteAddress == datagram.address.address)
+        currentPath.candidate,
+      ...ref
+          .read(peerRouteCandidateStoreProvider)
+          .where(
+            (candidate) =>
+                candidate.peerId == peerId &&
+                candidate.remoteAddress == datagram.address.address,
+          ),
+    ];
+    if (addressMatches.isEmpty) {
+      return null;
+    }
+    final localEndpoint = datagram.localEndpoint;
+    final localMatched = localEndpoint == null || localEndpoint.isWildcardBind
+        ? addressMatches
+        : addressMatches
+              .where(
+                (candidate) =>
+                    candidate.localAddress == localEndpoint.localAddress ||
+                    candidate.bindMode == UdpInterfaceBindMode.any,
+              )
+              .toList(growable: false);
+    final selectable = localMatched.isNotEmpty ? localMatched : addressMatches;
+    final base = PeerPathSelectionPolicy()
+        .select(candidates: selectable, selectedAt: _now())
+        ?.path
+        .candidate;
+    if (base == null) {
+      return null;
+    }
+    final candidate = PeerRouteCandidate.create(
+      peerId: base.peerId,
+      remoteAddress: base.remoteAddress,
+      remotePort: datagram.port,
+      localInterfaceId: base.localInterfaceId,
+      localAddress: base.localAddress,
+      discoveredBy: RouteCandidateDiscoverySource.unicastProbe,
+      seenAt: _now(),
+      status: RouteCandidateStatus.reachable,
+      rttMs: base.rttMs,
+      failureCount: 0,
+      score: base.score,
+      localInterfaceTypeHint: base.localInterfaceTypeHint,
+      bindMode: base.bindMode,
+      compatible: base.compatible,
+      receiveAvailable: base.receiveAvailable,
+    );
+    return ref
+        .read(peerRouteCandidateProjectionProvider.notifier)
+        .upsertCandidate(candidate);
   }
 
   PeerRouteCandidate _upsertObservedIncomingTransferCandidate({

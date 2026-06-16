@@ -454,6 +454,67 @@ void main() {
   );
 
   test(
+    'observed challenge port preserves selected local route interface',
+    () async {
+      final peer = _peerNode(
+        clock.value,
+        port: 40002,
+      ).copyWith(address: '10.20.30.40');
+      final candidate = PeerRouteCandidate.create(
+        peerId: peer.id,
+        remoteAddress: '10.20.30.40',
+        remotePort: 49999,
+        localInterfaceId: const NetworkInterfaceId(name: 'en0', index: 4),
+        localAddress: '10.20.30.5',
+        discoveredBy: RouteCandidateDiscoverySource.broadcast,
+        seenAt: clock.value,
+        localInterfaceTypeHint: InterfaceTypeHint.ethernet,
+      );
+      final selectedPath = PeerConnectionPath.fromCandidate(
+        candidate: candidate,
+        selectedAt: clock.value,
+        selectionReason: PeerPathSelectionReason.sameSubnet,
+      );
+      final harness = await _createNode(
+        clock: clock,
+        loginUserId: 'team',
+        loginPassword: 'shared-secret',
+        localDeviceId: 'device-a',
+        authPort: 40001,
+        candidateStore: [candidate],
+      );
+      addTearDown(harness.dispose);
+
+      await harness.controller.startHandshake(peer, selectedPath: selectedPath);
+      await _flush();
+      final request = harness.transport.sentPackets.single.packet;
+      harness.transport.emit(
+        AuthPacket(
+          type: AuthPacketType.authChallenge,
+          protocolVersion: '1.0',
+          sessionId: request.sessionId,
+          fromUserId: peer.userId,
+          fromDeviceId: peer.deviceId,
+          fromDisplayName: peer.displayName,
+          nonce: 'nonce',
+          sentAtEpochMs: clock.value.millisecondsSinceEpoch,
+        ),
+        address: InternetAddress(candidate.remoteAddress),
+        port: 51018,
+      );
+      await _flush();
+
+      final path = harness.container
+          .read(peerPathRegistryProvider)
+          .selectedForPeer(peer.id)!;
+      expect(path.candidate.remotePort, 51018);
+      expect(path.controlEndpoint.localAddress, '10.20.30.5');
+      expect(path.controlEndpoint.interfaceId?.stableId, 'en0#4');
+      expect(path.pathId, contains('10.20.30.5|10.20.30.40:51018'));
+    },
+  );
+
+  test(
     'selected path stays authenticating during challenge response and becomes active after accept',
     () async {
       final peer = _peerNode(

@@ -249,7 +249,7 @@ class RawUdpDiscoveryTransport
           '$sender ${target.localAddress}->${target.address}:$port ${target.type.name}';
       if (result.success) {
         successCount += 1;
-        _logger.info(
+        _logger.debug(
           AppLogCategory.discovery,
           'Discovery broadcast send OK $endpoint bytes=${result.bytesSent} '
           'packet=${_packetSummary(packet)}',
@@ -309,7 +309,7 @@ class RawUdpDiscoveryTransport
       );
     } else {
       _lastError = null;
-      _logger.info(
+      _logger.debug(
         AppLogCategory.discovery,
         'Discovery broadcast completed with $successCount successful send '
         'attempt(s). packet=${_packetSummary(packet)} '
@@ -338,7 +338,7 @@ class RawUdpDiscoveryTransport
         );
         return;
       }
-      _logger.info(
+      _logger.debug(
         AppLogCategory.discovery,
         'Discovery unicast sent target=${address.address}:$port bytes=$sent '
         'packet=${_packetSummary(packet)}',
@@ -389,7 +389,7 @@ class RawUdpDiscoveryTransport
     Datagram? datagram;
     while ((datagram = socket.receive()) != null) {
       final current = datagram!;
-      _logger.info(
+      _logger.debug(
         AppLogCategory.discovery,
         'Discovery datagram received from '
         '${current.address.address}:${current.port} bytes=${current.data.length}',
@@ -397,7 +397,7 @@ class RawUdpDiscoveryTransport
       try {
         final packet = DiscoveryPacket.decode(current.data);
         _lastReceiveDecisionCode = DiscoveryReceiveDecisionCode.accepted.name;
-        _logger.info(
+        _logger.debug(
           AppLogCategory.discovery,
           'Discovery datagram decoded from '
           '${current.address.address}:${current.port} '
