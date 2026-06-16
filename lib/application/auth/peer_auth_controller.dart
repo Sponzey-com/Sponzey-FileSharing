@@ -271,6 +271,29 @@ class PeerAuthController extends Notifier<PeerAuthState> {
       return;
     }
 
+    if (existing != null && _isHandshakeInProgress(existing.status)) {
+      if (existing.peerAddress != peer.address ||
+          existing.peerPort != peer.port) {
+        ref
+            .read(appLoggerProvider)
+            .debug(
+              AppLogCategory.auth,
+              'Preserved in-progress peer handshake route for ${peer.id}: '
+              '${existing.peerAddress}:${existing.peerPort}; '
+              'ignored discovery endpoint ${peer.address}:${peer.port}',
+            );
+      }
+      _upsertSession(
+        peer.id,
+        existing.copyWith(
+          peerUserId: peer.userId,
+          peerDisplayName: peer.displayName,
+          updatedAt: _now(),
+        ),
+      );
+      return;
+    }
+
     if (existing != null &&
         existing.peerAddress == peer.address &&
         existing.peerPort == peer.port &&
@@ -340,6 +363,10 @@ class PeerAuthController extends Notifier<PeerAuthState> {
     for (final entry in state.sessions.entries) {
       final peer = peersById[entry.key];
       if (peer == null) {
+        if (_isHandshakeInProgress(entry.value.status)) {
+          nextSessions[entry.key] = entry.value.copyWith(updatedAt: _now());
+          continue;
+        }
         _clearPeerPathAndContexts(entry.key);
         continue;
       }
@@ -351,6 +378,10 @@ class PeerAuthController extends Notifier<PeerAuthState> {
       }
 
       if (peer.presence == PeerPresence.stale) {
+        if (_isHandshakeInProgress(entry.value.status)) {
+          nextSessions[entry.key] = entry.value.copyWith(updatedAt: _now());
+          continue;
+        }
         _clearPeerPathAndContexts(entry.key);
         nextSessions[entry.key] = entry.value.copyWith(
           status: PeerAuthStatus.idle,

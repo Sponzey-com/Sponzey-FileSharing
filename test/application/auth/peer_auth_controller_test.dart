@@ -20,6 +20,8 @@ import 'package:sponzey_file_sharing/domain/network/network_interface_models.dar
 import 'package:sponzey_file_sharing/domain/network/peer_connection_path.dart';
 import 'package:sponzey_file_sharing/domain/network/peer_route_candidate.dart';
 import 'package:sponzey_file_sharing/infrastructure/auth/auth_packet.dart';
+import 'package:sponzey_file_sharing/infrastructure/auth/jwt_token_service.dart';
+import 'package:sponzey_file_sharing/infrastructure/auth/shared_verifier_service.dart';
 import 'package:sponzey_file_sharing/infrastructure/control/control_transport.dart';
 import 'package:sponzey_file_sharing/infrastructure/database/app_database.dart';
 import 'package:sponzey_file_sharing/infrastructure/platform/app_secure_storage.dart';
@@ -108,6 +110,202 @@ void main() {
       expect(session?.status, PeerAuthStatus.authenticated);
       expect(session?.peerPort, 49152);
       expect(session?.peerAddress, '127.0.0.1');
+    },
+  );
+
+  test(
+    'discovery refresh does not downgrade an in-progress handshake',
+    () async {
+      final harness = await _createNode(
+        clock: clock,
+        loginUserId: 'team',
+        loginPassword: 'shared-secret',
+        localDeviceId: 'device-a',
+        authPort: 40001,
+      );
+      addTearDown(harness.dispose);
+
+      final peer = _peerNode(clock.value, port: 40002);
+      await harness.controller.startHandshake(peer);
+      await _flush();
+
+      final request = harness.transport.sentPackets.single.packet;
+      harness.controller.syncDiscoveredPeer(
+        peer,
+        message: 'Discovery에서 피어를 발견했습니다.',
+      );
+      await _flush();
+
+      expect(
+        harness.container
+            .read(peerAuthSessionByPeerIdProvider(peer.id))
+            ?.status,
+        PeerAuthStatus.connecting,
+      );
+
+      harness.transport.emit(
+        AuthPacket(
+          type: AuthPacketType.authChallenge,
+          protocolVersion: '1.0',
+          sessionId: request.sessionId,
+          fromUserId: peer.userId,
+          fromDeviceId: peer.deviceId,
+          fromDisplayName: peer.displayName,
+          nonce: 'nonce-after-discovery-refresh',
+          sentAtEpochMs: clock.value.millisecondsSinceEpoch,
+        ),
+        address: InternetAddress(peer.address),
+        port: peer.port,
+      );
+      await _flush();
+
+      expect(
+        harness.transport.sentPackets.last.packet.type,
+        AuthPacketType.authToken,
+      );
+      expect(
+        harness.container
+            .read(peerAuthSessionByPeerIdProvider(peer.id))
+            ?.status,
+        PeerAuthStatus.tokenSent,
+      );
+    },
+  );
+
+  test(
+    'stale presence does not clear an in-progress handshake before auth timeout',
+    () async {
+      final harness = await _createNode(
+        clock: clock,
+        loginUserId: 'team',
+        loginPassword: 'shared-secret',
+        localDeviceId: 'device-a',
+        authPort: 40001,
+      );
+      addTearDown(harness.dispose);
+
+      final peer = _peerNode(clock.value, port: 40002);
+      await harness.controller.startHandshake(peer);
+      await _flush();
+
+      final request = harness.transport.sentPackets.single.packet;
+      harness.controller.syncPeerPresence([
+        peer.copyWith(presence: PeerPresence.stale),
+      ]);
+      await _flush();
+
+      expect(
+        harness.container
+            .read(peerAuthSessionByPeerIdProvider(peer.id))
+            ?.status,
+        PeerAuthStatus.connecting,
+      );
+
+      harness.transport.emit(
+        AuthPacket(
+          type: AuthPacketType.authChallenge,
+          protocolVersion: '1.0',
+          sessionId: request.sessionId,
+          fromUserId: peer.userId,
+          fromDeviceId: peer.deviceId,
+          fromDisplayName: peer.displayName,
+          nonce: 'nonce-after-stale-presence',
+          sentAtEpochMs: clock.value.millisecondsSinceEpoch,
+        ),
+        address: InternetAddress(peer.address),
+        port: peer.port,
+      );
+      await _flush();
+
+      expect(
+        harness.transport.sentPackets.last.packet.type,
+        AuthPacketType.authToken,
+      );
+      expect(
+        harness.container
+            .read(peerAuthSessionByPeerIdProvider(peer.id))
+            ?.status,
+        PeerAuthStatus.tokenSent,
+      );
+    },
+  );
+
+  test(
+    'missing discovery presence does not clear an incoming handshake before auth timeout',
+    () async {
+      final harness = await _createNode(
+        clock: clock,
+        loginUserId: 'team',
+        loginPassword: 'shared-secret',
+        localDeviceId: 'device-a',
+        authPort: 40001,
+      );
+      addTearDown(harness.dispose);
+
+      final peer = _peerNode(clock.value, port: 40002);
+      harness.transport.emit(
+        AuthPacket(
+          type: AuthPacketType.connectRequest,
+          protocolVersion: '1.0',
+          sessionId: 'incoming-before-discovery',
+          fromUserId: peer.userId,
+          fromDeviceId: peer.deviceId,
+          fromDisplayName: peer.displayName,
+          sentAtEpochMs: clock.value.millisecondsSinceEpoch,
+        ),
+        address: InternetAddress(peer.address),
+        port: peer.port,
+      );
+      await _flush();
+
+      expect(
+        harness.container
+            .read(peerAuthSessionByPeerIdProvider(peer.id))
+            ?.status,
+        PeerAuthStatus.challengeIssued,
+      );
+
+      harness.controller.syncPeerPresence(const []);
+      await _flush();
+
+      expect(
+        harness.container
+            .read(peerAuthSessionByPeerIdProvider(peer.id))
+            ?.status,
+        PeerAuthStatus.challengeIssued,
+      );
+
+      final challenge = harness.transport.sentPackets.single.packet;
+      final token = _authTokenForChallenge(
+        sessionId: challenge.sessionId,
+        nonce: challenge.nonce!,
+        subjectUserId: peer.userId,
+        subjectDeviceId: peer.deviceId,
+        peerUserId: 'team',
+        clock: clock,
+      );
+      harness.transport.emit(
+        AuthPacket(
+          type: AuthPacketType.authToken,
+          protocolVersion: '1.0',
+          sessionId: challenge.sessionId,
+          fromUserId: peer.userId,
+          fromDeviceId: peer.deviceId,
+          fromDisplayName: peer.displayName,
+          token: token,
+          sentAtEpochMs: clock.value.millisecondsSinceEpoch,
+        ),
+        address: InternetAddress(peer.address),
+        port: peer.port,
+      );
+      await _flush();
+
+      expect(
+        harness.container
+            .read(peerAuthSessionByPeerIdProvider(peer.id))
+            ?.status,
+        PeerAuthStatus.authenticated,
+      );
     },
   );
 
@@ -1115,6 +1313,44 @@ PeerNode _peerNode(DateTime now, {required int port}) {
     port: port,
     receiveAvailable: true,
     presence: PeerPresence.online,
+  );
+}
+
+String _authTokenForChallenge({
+  required String sessionId,
+  required String nonce,
+  required String subjectUserId,
+  required String subjectDeviceId,
+  required String peerUserId,
+  required _MutableClock clock,
+}) {
+  const password = 'shared-secret';
+  const verifierService = SharedVerifierService();
+  final verifier = verifierService.deriveVerifierBase64(
+    userId: subjectUserId,
+    password: password,
+  );
+  final signingKey = verifierService.deriveSigningKey(
+    verifierBase64: verifier,
+    sessionId: sessionId,
+    nonce: nonce,
+    subjectUserId: subjectUserId,
+    peerUserId: peerUserId,
+  );
+  final nowEpoch = clock.value.millisecondsSinceEpoch ~/ 1000;
+  return const JwtTokenService().createToken(
+    claims: AuthJwtClaims(
+      subjectUserId: subjectUserId,
+      deviceId: subjectDeviceId,
+      peerUserId: peerUserId,
+      nonce: nonce,
+      issuedAtEpochSec: nowEpoch,
+      expiresAtEpochSec: nowEpoch + 20,
+      jti: 'jti-$sessionId',
+      protocolVersion: '1.0',
+      sessionId: sessionId,
+    ),
+    signingKey: signingKey,
   );
 }
 
