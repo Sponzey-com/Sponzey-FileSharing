@@ -19,7 +19,7 @@ void main() {
     final config = AppConfig.production();
 
     expect(config.discoveryBroadcastInterval, const Duration(seconds: 1));
-    expect(config.authHandshakeTimeout, const Duration(seconds: 5));
+    expect(config.authHandshakeTimeout, const Duration(seconds: 2));
     expect(
       config.discoveryStaleAfter,
       greaterThan(config.authHandshakeTimeout),

@@ -38,7 +38,7 @@ class AppConfig {
       dataPortRange: UdpPortRange(start: 38410, end: 38430),
       authTokenLifetime: Duration(seconds: 20),
       authAllowedClockSkew: Duration(seconds: 5),
-      authHandshakeTimeout: Duration(seconds: 5),
+      authHandshakeTimeout: Duration(seconds: 2),
       discoveryBroadcastInterval: Duration(seconds: 1),
       discoveryStaleAfter: Duration(seconds: 10),
       discoveryOfflineAfter: Duration(seconds: 30),

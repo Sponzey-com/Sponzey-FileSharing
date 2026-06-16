@@ -24,6 +24,7 @@ import 'package:sponzey_file_sharing/domain/entities/transfer_job.dart';
 import 'package:sponzey_file_sharing/domain/network/network_interface_models.dart';
 import 'package:sponzey_file_sharing/domain/network/peer_connection_path.dart';
 import 'package:sponzey_file_sharing/domain/network/peer_route_candidate.dart';
+import 'package:sponzey_file_sharing/domain/transfer/transfer_failure_policy.dart';
 import 'package:sponzey_file_sharing/infrastructure/auth/auth_packet.dart';
 import 'package:sponzey_file_sharing/infrastructure/auth/auth_transport.dart';
 import 'package:sponzey_file_sharing/infrastructure/control/control_transport.dart';
@@ -677,6 +678,70 @@ void main() {
         await File(failingFileService.lastTempFilePath!).exists(),
         isFalse,
       );
+    },
+  );
+
+  test(
+    'receiver data chunk write failure notifies sender and classifies storage',
+    () async {
+      final controlNetwork = _LinkedFakeAuthNetwork();
+      final dataNetwork = _LinkedFakeDataNetwork();
+      final failingFileService = _AppendFailingTransferFileService();
+      final alice = await _createNode(
+        network: controlNetwork,
+        dataTransport: dataNetwork.attach(),
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41243,
+        receivePath: '${workspaceDirectory.path}/alice-append-fail',
+      );
+      final bob = await _createNode(
+        network: controlNetwork,
+        dataTransport: dataNetwork.attach(),
+        transferFileService: failingFileService,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-b',
+        authPort: 41244,
+        receivePath: '${workspaceDirectory.path}/bob-append-fail',
+      );
+      addTearDown(alice.dispose);
+      addTearDown(bob.dispose);
+
+      await _prepareAuthenticatedPair(
+        alice: alice,
+        bob: bob,
+        bobReceivePath: '${workspaceDirectory.path}/bob-append-fail',
+        bobPort: 41244,
+        alicePort: 41243,
+        clock: clock,
+      );
+
+      final sourceFile = File(
+        '${workspaceDirectory.path}/alice-append-fail/source.txt',
+      );
+      await sourceFile.parent.create(recursive: true);
+      await sourceFile.writeAsString('receiver cannot append data chunk');
+
+      await alice.transferController.sendFile(
+        peerId: 'team@instance-device-b',
+        filePath: sourceFile.path,
+      );
+
+      final aliceJob = await _waitForTerminalTransfer(alice.container);
+      final bobJob = await _waitForTerminalTransfer(bob.container);
+      expect(aliceJob.status, TransferJobStatus.failed);
+      expect(bobJob.status, TransferJobStatus.failed);
+      expect(aliceJob.message, contains('수신 data chunk'));
+      expect(bobJob.message, contains('저장 경로'));
+      expect(
+        const TransferFailurePolicy().classify(bobJob).category,
+        TransferFailureCategory.storage,
+      );
+      expect(failingFileService.discardedDraftPaths, isNotEmpty);
     },
   );
 
@@ -2340,6 +2405,38 @@ class _FinalizeFailingTransferFileService extends LocalTransferFileService {
   Future<void> discardDraft(String tempFilePath) {
     discardedDraftPaths.add(tempFilePath);
     return super.discardDraft(tempFilePath);
+  }
+}
+
+class _AppendFailingTransferFileService extends LocalTransferFileService {
+  final List<String> discardedDraftPaths = [];
+
+  @override
+  Future<IncomingDigestingTransferWriter> openIncomingDigestingWriter(
+    String tempFilePath,
+  ) async {
+    return _AppendFailingIncomingWriter();
+  }
+
+  @override
+  Future<void> discardDraft(String tempFilePath) {
+    discardedDraftPaths.add(tempFilePath);
+    return super.discardDraft(tempFilePath);
+  }
+}
+
+class _AppendFailingIncomingWriter implements IncomingDigestingTransferWriter {
+  @override
+  Future<void> append(List<int> bytes) {
+    throw const FileSystemException('simulated data chunk write failure');
+  }
+
+  @override
+  Future<void> close() async {}
+
+  @override
+  Future<String> closeWithDigest() async {
+    return '';
   }
 }
 

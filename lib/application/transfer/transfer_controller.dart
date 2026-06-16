@@ -458,7 +458,7 @@ class TransferController extends Notifier<TransferState> {
       case AuthPacketType.transferComplete:
         await _onTransferComplete(packet, datagram);
       case AuthPacketType.transferCompleteAck:
-        _onTransferCompleteAck(packet, datagram);
+        await _onTransferCompleteAck(packet, datagram);
       case AuthPacketType.connectRequest:
       case AuthPacketType.authChallenge:
       case AuthPacketType.authToken:
@@ -1374,7 +1374,9 @@ class TransferController extends Notifier<TransferState> {
             error: error,
             stackTrace: stackTrace,
           );
-      await _failIncomingTransfer(transferId, '수신 data chunk 를 저장하지 못했습니다.');
+      final message = _incomingChunkWriteFailureMessage(error);
+      await _sendIncomingFailureAck(context, transferId, message);
+      await _failIncomingTransfer(transferId, message);
     }
   }
 
@@ -1888,7 +1890,10 @@ class TransferController extends Notifier<TransferState> {
     }
   }
 
-  void _onTransferCompleteAck(AuthPacket packet, ControlDatagram datagram) {
+  Future<void> _onTransferCompleteAck(
+    AuthPacket packet,
+    ControlDatagram datagram,
+  ) async {
     final transferId = packet.transferId;
     if (transferId == null) {
       return;
@@ -1913,6 +1918,12 @@ class TransferController extends Notifier<TransferState> {
         savePath: packet.transferSavePath,
       ),
     );
+    if (packet.transferAccepted != true) {
+      await _failOutgoingTransfer(
+        transferId,
+        packet.rejectMessage ?? '상대가 파일 완료를 거절했습니다.',
+      );
+    }
   }
 
   Future<void> _sendTransferInitAck({
@@ -2188,6 +2199,46 @@ class TransferController extends Notifier<TransferState> {
     }
   }
 
+  Future<void> _sendIncomingFailureAck(
+    _IncomingTransferContext context,
+    String transferId,
+    String message,
+  ) async {
+    try {
+      await _sendTransferCompleteAck(
+        sessionId: context.sessionId,
+        transferId: transferId,
+        address: context.controlAddress,
+        port: context.controlPort,
+        accepted: false,
+        message: message,
+        localEndpoint: context.controlLocalEndpoint,
+      );
+    } catch (error, stackTrace) {
+      ref
+          .read(appLoggerProvider)
+          .warning(
+            AppLogCategory.transferControl,
+            'Failed to notify sender about incoming transfer failure '
+            'transfer=${_safeTransfer(transferId)}',
+            error: error,
+            stackTrace: stackTrace,
+          );
+    }
+  }
+
+  String _incomingChunkWriteFailureMessage(Object error) {
+    final reason = switch (error) {
+      AppException(:final message) => message,
+      FileSystemException(:final message) when message.isNotEmpty => message,
+      StateError(:final message) => message,
+      _ => error.runtimeType.toString(),
+    };
+    return '수신 data chunk 를 저장하지 못했습니다. '
+        '저장 경로 또는 임시 파일 권한을 확인해 주세요. '
+        '원인: $reason';
+  }
+
   Future<void> _sendWindowUpdateIfNeeded(
     _IncomingTransferContext context, {
     required String sessionId,
@@ -2276,10 +2327,34 @@ class TransferController extends Notifier<TransferState> {
   Future<void> _failIncomingTransfer(String transferId, String message) async {
     final context = _incomingTransfers.remove(transferId);
     if (context != null) {
-      await context.closeWriter();
-      await ref
-          .read(transferFileServiceProvider)
-          .discardDraft(context.tempFilePath);
+      try {
+        await context.closeWriter();
+      } catch (error, stackTrace) {
+        ref
+            .read(appLoggerProvider)
+            .warning(
+              AppLogCategory.transferData,
+              'Ignored incoming writer cleanup failure '
+              'transfer=${_safeTransfer(transferId)}',
+              error: error,
+              stackTrace: stackTrace,
+            );
+      }
+      try {
+        await ref
+            .read(transferFileServiceProvider)
+            .discardDraft(context.tempFilePath);
+      } catch (error, stackTrace) {
+        ref
+            .read(appLoggerProvider)
+            .warning(
+              AppLogCategory.storage,
+              'Ignored incoming draft cleanup failure '
+              'transfer=${_safeTransfer(transferId)}',
+              error: error,
+              stackTrace: stackTrace,
+            );
+      }
     }
     _markFailed(transferId, message);
   }

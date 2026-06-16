@@ -76,7 +76,13 @@ class TransferFailurePolicy {
       );
     }
 
-    if (_containsAny(message, const ['수신 임시', 'writer', '저장 경로', '권한'])) {
+    if (_containsAny(message, const [
+      '수신 임시',
+      'writer',
+      '저장 경로',
+      '저장하지 못',
+      '권한',
+    ])) {
       return const TransferFailureDecision(
         category: TransferFailureCategory.storage,
         retryable: true,

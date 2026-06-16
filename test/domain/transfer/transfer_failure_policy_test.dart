@@ -28,6 +28,19 @@ void main() {
     expect(decision.diagnosticCode, 'transfer.failure.verification');
   });
 
+  test('classifies incoming data chunk write failures as storage failures', () {
+    final decision = policy.classify(
+      _job(
+        status: TransferJobStatus.failed,
+        message: '수신 data chunk 를 저장하지 못했습니다. 저장 경로 또는 임시 파일 권한을 확인해 주세요.',
+      ),
+    );
+
+    expect(decision.category, TransferFailureCategory.storage);
+    expect(decision.retryable, isTrue);
+    expect(decision.diagnosticCode, 'transfer.failure.storage');
+  });
+
   test('treats cancelled jobs as terminal and retryable', () {
     final job = _job(status: TransferJobStatus.cancelled, message: '사용자 취소');
     final decision = policy.classify(job);
