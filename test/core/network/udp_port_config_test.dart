@@ -15,6 +15,17 @@ void main() {
     expect(config.appVersion, isNotEmpty);
   });
 
+  test('production config uses short LAN connection retry timings', () {
+    final config = AppConfig.production();
+
+    expect(config.discoveryBroadcastInterval, const Duration(seconds: 1));
+    expect(config.authHandshakeTimeout, const Duration(seconds: 5));
+    expect(
+      config.discoveryStaleAfter,
+      greaterThan(config.authHandshakeTimeout),
+    );
+  });
+
   test('authPort remains a migration alias for controlPort', () {
     const config = AppConfig(
       environment: AppEnvironment.development,

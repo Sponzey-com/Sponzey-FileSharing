@@ -291,6 +291,96 @@ void main() {
     },
   );
 
+  test(
+    'allows wildcard data socket for a verified routed transfer path',
+    () async {
+      final controlNetwork = _LinkedFakeAuthNetwork();
+      final dataNetwork = _LinkedFakeDataNetwork();
+      final aliceDataTransport = dataNetwork.attach();
+      final bobDataTransport = dataNetwork.attach();
+      final alice = await _createNode(
+        network: controlNetwork,
+        dataTransport: aliceDataTransport,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41231,
+        receivePath: '${workspaceDirectory.path}/alice-wildcard-data',
+      );
+      final bob = await _createNode(
+        network: controlNetwork,
+        dataTransport: bobDataTransport,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-b',
+        authPort: 41232,
+        receivePath: '${workspaceDirectory.path}/bob-wildcard-data',
+      );
+      addTearDown(alice.dispose);
+      addTearDown(bob.dispose);
+
+      await _prepareAuthenticatedPair(
+        alice: alice,
+        bob: bob,
+        bobReceivePath: '${workspaceDirectory.path}/bob-wildcard-data',
+        bobPort: 41232,
+        alicePort: 41231,
+        clock: clock,
+      );
+      alice.container
+          .read(peerPathRegistryMutationsProvider)
+          .select(
+            _testActivePath(
+              peerId: 'team@instance-device-b',
+              localAddress: '10.211.55.2',
+              remoteAddress: '10.211.55.3',
+              remotePort: 41232,
+            ),
+          );
+      bob.container
+          .read(peerPathRegistryMutationsProvider)
+          .select(
+            _testActivePath(
+              peerId: 'team@instance-device-a',
+              localAddress: '10.211.55.3',
+              remoteAddress: '10.211.55.2',
+              remotePort: 41231,
+            ),
+          );
+      bobDataTransport.endpoint = const UdpInterfaceEndpoint(
+        role: UdpPortRole.data,
+        localAddress: '0.0.0.0',
+        port: 43020,
+        bindMode: UdpInterfaceBindMode.any,
+      );
+      dataNetwork.register(43020, bobDataTransport);
+
+      final sourceFile = File(
+        '${workspaceDirectory.path}/alice-wildcard-data/source.txt',
+      );
+      await sourceFile.parent.create(recursive: true);
+      await sourceFile.writeAsString('wildcard data sockets are valid');
+
+      await alice.transferController.sendFile(
+        peerId: 'team@instance-device-b',
+        filePath: sourceFile.path,
+      );
+
+      final aliceJob = await _waitForTerminalTransfer(alice.container);
+      final bobJob = await _waitForTerminalTransfer(bob.container);
+      expect(aliceJob.status, TransferJobStatus.completed);
+      expect(bobJob.status, TransferJobStatus.completed);
+      expect(bobJob.routeSnapshot?.controlLocalAddress, '10.211.55.3');
+      expect(bobJob.routeSnapshot?.dataLocalAddress, '0.0.0.0');
+      expect(
+        await File(bobJob.destinationPath!).readAsString(),
+        'wildcard data sockets are valid',
+      );
+    },
+  );
+
   test('fails before data chunks when route lease expires', () async {
     late _TransferHarness alice;
     final dataNetwork = _LinkedFakeDataNetwork();

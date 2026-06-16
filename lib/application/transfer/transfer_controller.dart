@@ -3215,6 +3215,10 @@ class TransferController extends Notifier<TransferState> {
     required TransferRouteSnapshot routeSnapshot,
     required UdpInterfaceEndpoint dataEndpoint,
   }) {
+    if (dataEndpoint.isWildcardBind ||
+        _isWildcardAddress(dataEndpoint.localAddress)) {
+      return;
+    }
     if (_sameAddress(
       dataEndpoint.localAddress,
       routeSnapshot.controlLocalAddress,
@@ -3232,6 +3236,13 @@ class TransferController extends Notifier<TransferState> {
 
   bool _sameAddress(String left, String right) {
     return left.trim().toLowerCase() == right.trim().toLowerCase();
+  }
+
+  bool _isWildcardAddress(String address) {
+    final normalized = address.trim().toLowerCase();
+    return normalized == '0.0.0.0' ||
+        normalized == '::' ||
+        normalized == '0:0:0:0:0:0:0:0';
   }
 
   void _ensureRouteLeaseStillActive(_OutgoingTransferContext context) {
