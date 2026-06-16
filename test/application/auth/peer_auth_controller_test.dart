@@ -551,21 +551,42 @@ void main() {
   );
 
   test(
-    'authenticated peer ignores duplicate connect request without downgrading',
+    'authenticated peer answers duplicate connect request without downgrading',
     () async {
+      final peer = _peerNode(
+        clock.value,
+        port: 56951,
+      ).copyWith(address: '10.211.55.3');
+      final activeCandidate = PeerRouteCandidate.create(
+        peerId: peer.id,
+        remoteAddress: peer.address,
+        remotePort: peer.port,
+        localInterfaceId: const NetworkInterfaceId(name: 'en0', index: 4),
+        localAddress: '10.211.55.2',
+        discoveredBy: RouteCandidateDiscoverySource.broadcast,
+        seenAt: clock.value,
+        localInterfaceTypeHint: InterfaceTypeHint.ethernet,
+      );
+      final activePath = PeerConnectionPath.fromCandidate(
+        candidate: activeCandidate,
+        selectedAt: clock.value,
+        selectionReason: PeerPathSelectionReason.sameSubnet,
+      ).copyWith(status: PeerPathStatus.active);
       final harness = await _createNode(
         clock: clock,
         loginUserId: 'team',
         loginPassword: 'shared-secret',
         localDeviceId: 'device-a',
         authPort: 40001,
+        candidateStore: [activeCandidate],
+        pathRegistry: PeerPathRegistry()..select(activePath),
       );
       addTearDown(harness.dispose);
       final authenticatedPeer = await _authenticatePeerOnRoute(
         harness,
         clock,
-        address: '10.211.55.3',
-        port: 56951,
+        address: peer.address,
+        port: peer.port,
       );
 
       harness.transport.emit(
@@ -584,12 +605,131 @@ void main() {
       );
       await _flush();
 
+      final challenge = harness.transport.sentPackets.last;
       final session = harness.container.read(
         peerAuthSessionByPeerIdProvider(authenticatedPeer.id),
       );
       expect(session?.status, PeerAuthStatus.authenticated);
       expect(session?.sessionId, isNot('late-duplicate-connect'));
-      expect(harness.transport.sentPackets, hasLength(1));
+      expect(harness.transport.sentPackets, hasLength(2));
+      expect(challenge.packet.type, AuthPacketType.authChallenge);
+      expect(challenge.packet.sessionId, 'late-duplicate-connect');
+      expect(
+        harness.container
+            .read(peerPathRegistryProvider)
+            .selectedForPeer(authenticatedPeer.id)
+            ?.status,
+        PeerPathStatus.active,
+      );
+
+      harness.transport.emit(
+        AuthPacket(
+          type: AuthPacketType.authReject,
+          protocolVersion: '1.0',
+          sessionId: 'late-duplicate-connect',
+          fromUserId: authenticatedPeer.userId,
+          fromDeviceId: authenticatedPeer.deviceId,
+          fromInstanceId: authenticatedPeer.instanceId,
+          fromDisplayName: authenticatedPeer.displayName,
+          rejectCode: 'lateFailure',
+          rejectMessage: 'lateFailure',
+          sentAtEpochMs: clock.value.millisecondsSinceEpoch,
+        ),
+        address: InternetAddress('10.211.55.3'),
+        port: 56951,
+      );
+      await _flush();
+
+      final afterRejectSession = harness.container.read(
+        peerAuthSessionByPeerIdProvider(authenticatedPeer.id),
+      );
+      expect(afterRejectSession?.status, PeerAuthStatus.authenticated);
+      expect(
+        harness.container
+            .read(peerPathRegistryProvider)
+            .selectedForPeer(authenticatedPeer.id)
+            ?.status,
+        PeerPathStatus.active,
+      );
+    },
+  );
+
+  test(
+    'authenticated peer with expired path answers connect request for route refresh',
+    () async {
+      final peer = _peerNode(
+        clock.value,
+        port: 56951,
+      ).copyWith(address: '10.211.55.3');
+      final expiredCandidate = PeerRouteCandidate.create(
+        peerId: peer.id,
+        remoteAddress: peer.address,
+        remotePort: peer.port,
+        localInterfaceId: const NetworkInterfaceId(name: 'en0', index: 4),
+        localAddress: '10.211.55.2',
+        discoveredBy: RouteCandidateDiscoverySource.broadcast,
+        seenAt: clock.value,
+        localInterfaceTypeHint: InterfaceTypeHint.ethernet,
+      );
+      final expiredPath =
+          PeerConnectionPath.fromCandidate(
+            candidate: expiredCandidate,
+            selectedAt: clock.value,
+            selectionReason: PeerPathSelectionReason.sameSubnet,
+          ).copyWith(
+            status: PeerPathStatus.failoverRequested,
+            failureReasonCode: 'ttlExceeded',
+          );
+      final harness = await _createNode(
+        clock: clock,
+        loginUserId: 'team',
+        loginPassword: 'shared-secret',
+        localDeviceId: 'device-a',
+        authPort: 40001,
+        candidateStore: [expiredCandidate],
+        pathRegistry: PeerPathRegistry()..select(expiredPath),
+      );
+      addTearDown(harness.dispose);
+      final authenticatedPeer = await _authenticatePeerOnRoute(
+        harness,
+        clock,
+        address: peer.address,
+        port: peer.port,
+      );
+
+      harness.transport.emit(
+        AuthPacket(
+          type: AuthPacketType.connectRequest,
+          protocolVersion: '1.0',
+          sessionId: 'route-refresh-connect',
+          fromUserId: authenticatedPeer.userId,
+          fromDeviceId: authenticatedPeer.deviceId,
+          fromInstanceId: authenticatedPeer.instanceId,
+          fromDisplayName: authenticatedPeer.displayName,
+          sentAtEpochMs: clock.value.millisecondsSinceEpoch,
+        ),
+        address: InternetAddress(peer.address),
+        port: peer.port,
+      );
+      await _flush();
+
+      final challenge = harness.transport.sentPackets.last;
+      expect(harness.transport.sentPackets, hasLength(2));
+      expect(challenge.packet.type, AuthPacketType.authChallenge);
+      expect(challenge.packet.sessionId, 'route-refresh-connect');
+      expect(
+        harness.container
+            .read(peerAuthSessionByPeerIdProvider(authenticatedPeer.id))
+            ?.status,
+        PeerAuthStatus.challengeIssued,
+      );
+      expect(
+        harness.container
+            .read(peerPathRegistryProvider)
+            .selectedForPeer(authenticatedPeer.id)
+            ?.status,
+        PeerPathStatus.authenticating,
+      );
     },
   );
 

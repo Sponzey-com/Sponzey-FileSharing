@@ -500,15 +500,33 @@ class PeerAuthController extends Notifier<PeerAuthState> {
 
     final peerId = _peerIdFromPacket(packet);
     final existingSession = state.sessions[peerId];
+    final selectedAuthenticatedPath = existingSession?.isAuthenticated == true
+        ? _selectedPathForPeer(peerId)
+        : null;
+    final preserveAuthenticatedSession =
+        existingSession?.isAuthenticated == true &&
+        selectedAuthenticatedPath?.status == PeerPathStatus.active;
     if (existingSession?.isAuthenticated == true) {
-      ref
-          .read(appLoggerProvider)
-          .debug(
-            AppLogCategory.auth,
-            'Ignored duplicate connect request for authenticated peer $peerId '
-            'session=${_safeSession(packet.sessionId)}',
-          );
-      return;
+      if (preserveAuthenticatedSession) {
+        ref
+            .read(appLoggerProvider)
+            .debug(
+              AppLogCategory.auth,
+              'Answered connect request for authenticated peer route refresh '
+              'without downgrading session peer=$peerId '
+              'session=${_safeSession(packet.sessionId)} '
+              'pathStatus=${selectedAuthenticatedPath!.status.name}',
+            );
+      } else {
+        ref
+            .read(appLoggerProvider)
+            .debug(
+              AppLogCategory.auth,
+              'Accepted connect request for authenticated peer route refresh '
+              'peer=$peerId session=${_safeSession(packet.sessionId)} '
+              'pathStatus=${selectedAuthenticatedPath?.status.name ?? 'missing'}',
+            );
+      }
     }
 
     final duplicateContext = _contexts[packet.sessionId];
@@ -530,10 +548,12 @@ class PeerAuthController extends Notifier<PeerAuthState> {
       return;
     }
 
-    final selectedPath = _selectObservedPathForIncomingHandshake(
-      peerId: peerId,
-      datagram: datagram,
-    );
+    final selectedPath = preserveAuthenticatedSession
+        ? selectedAuthenticatedPath
+        : _selectObservedPathForIncomingHandshake(
+            peerId: peerId,
+            datagram: datagram,
+          );
     final context = _HandshakeContext(
       sessionId: packet.sessionId,
       peerId: peerId,
@@ -543,9 +563,12 @@ class PeerAuthController extends Notifier<PeerAuthState> {
       peerPort: datagram.port,
       initiatedByMe: false,
       selectedPathId: selectedPath?.pathId,
-      selectedCandidateId: selectedPath?.candidate.candidateId,
+      selectedCandidateId: preserveAuthenticatedSession
+          ? null
+          : selectedPath?.candidate.candidateId,
       selectedLocalEndpoint: datagram.localEndpoint,
       nonce: _randomHex(16),
+      preserveAuthenticatedSession: preserveAuthenticatedSession,
     );
     _contexts[packet.sessionId] = context;
     _cancelTimeout(packet.sessionId);
@@ -553,23 +576,25 @@ class PeerAuthController extends Notifier<PeerAuthState> {
       ref.read(appConfigProvider).authHandshakeTimeout,
       () => _onHandshakeTimeout(packet.sessionId),
     );
-    _upsertSession(
-      context.peerId,
-      _transitionAuthSession(
-        PeerAuthSession(
-          sessionId: packet.sessionId,
-          peerId: context.peerId,
-          peerUserId: packet.fromUserId,
-          peerDisplayName: context.peerDisplayName,
-          peerAddress: datagram.address.address,
-          peerPort: datagram.port,
-          status: PeerAuthStatus.idle,
-          updatedAt: _now(),
+    if (!preserveAuthenticatedSession) {
+      _upsertSession(
+        context.peerId,
+        _transitionAuthSession(
+          PeerAuthSession(
+            sessionId: packet.sessionId,
+            peerId: context.peerId,
+            peerUserId: packet.fromUserId,
+            peerDisplayName: context.peerDisplayName,
+            peerAddress: datagram.address.address,
+            peerPort: datagram.port,
+            status: PeerAuthStatus.idle,
+            updatedAt: _now(),
+          ),
+          PeerAuthEvent.challengeIssued,
+          message: '인증 challenge를 발급했습니다.',
         ),
-        PeerAuthEvent.challengeIssued,
-        message: '인증 challenge를 발급했습니다.',
-      ),
-    );
+      );
+    }
 
     await _sendChallenge(context, address: datagram.address);
   }
@@ -677,16 +702,18 @@ class PeerAuthController extends Notifier<PeerAuthState> {
       return;
     }
 
-    _upsertSession(
-      context.peerId,
-      _transitionAuthSession(
-        _requireSession(context.peerId),
-        PeerAuthEvent.tokenVerificationStarted,
-        peerAddress: datagram.address.address,
-        peerPort: datagram.port,
-        message: '인증 token을 검증하는 중입니다.',
-      ),
-    );
+    if (!context.preserveAuthenticatedSession) {
+      _upsertSession(
+        context.peerId,
+        _transitionAuthSession(
+          _requireSession(context.peerId),
+          PeerAuthEvent.tokenVerificationStarted,
+          peerAddress: datagram.address.address,
+          peerPort: datagram.port,
+          message: '인증 token을 검증하는 중입니다.',
+        ),
+      );
+    }
 
     try {
       final verifier = ref
@@ -778,6 +805,16 @@ class PeerAuthController extends Notifier<PeerAuthState> {
       return;
     }
     _cancelTimeout(packet.sessionId);
+    if (context.preserveAuthenticatedSession) {
+      ref
+          .read(appLoggerProvider)
+          .debug(
+            AppLogCategory.auth,
+            'Ignored auth reject for preserved authenticated peer '
+            '${context.peerId} session=${_safeSession(packet.sessionId)}',
+          );
+      return;
+    }
     _failSelectedPath(
       context,
       reasonCode: packet.rejectCode ?? packet.rejectMessage ?? 'authRejected',
@@ -850,6 +887,10 @@ class PeerAuthController extends Notifier<PeerAuthState> {
       return packetInstanceId == localIdentity.instanceId;
     }
     return packet.fromDeviceId == localIdentity.deviceId;
+  }
+
+  PeerConnectionPath? _selectedPathForPeer(String peerId) {
+    return ref.read(peerPathRegistryProvider).selectedForPeer(peerId);
   }
 
   _HandshakeContext? _inProgressContextForPeer(String peerId) {
@@ -955,14 +996,16 @@ class PeerAuthController extends Notifier<PeerAuthState> {
   }) async {
     _contexts.remove(context.sessionId);
     _cancelTimeout(context.sessionId);
-    _upsertSession(
-      context.peerId,
-      _transitionAuthSession(
-        _requireSession(context.peerId),
-        PeerAuthEvent.authRejected,
-        message: message,
-      ),
-    );
+    if (!context.preserveAuthenticatedSession) {
+      _upsertSession(
+        context.peerId,
+        _transitionAuthSession(
+          _requireSession(context.peerId),
+          PeerAuthEvent.authRejected,
+          message: message,
+        ),
+      );
+    }
     final user = _currentUser();
     final localIdentity = _localIdentity;
     if (user == null || localIdentity == null) {
@@ -1001,7 +1044,7 @@ class PeerAuthController extends Notifier<PeerAuthState> {
   }) {
     final peerId = context.peerId;
     final session = _requireSession(peerId);
-    _cancelTimeout(session.sessionId);
+    _cancelTimeout(context.sessionId);
     _upsertSession(
       peerId,
       _transitionAuthSession(
@@ -1022,6 +1065,16 @@ class PeerAuthController extends Notifier<PeerAuthState> {
       return;
     }
     _timeouts.remove(sessionId)?.cancel();
+    if (context.preserveAuthenticatedSession) {
+      ref
+          .read(appLoggerProvider)
+          .debug(
+            AppLogCategory.auth,
+            'Preserved authenticated peer after route refresh timeout '
+            'peer=${context.peerId} session=${_safeSession(sessionId)}',
+          );
+      return;
+    }
     _failSelectedPath(context, reasonCode: 'handshakeTimeout');
     _upsertSession(
       context.peerId,
@@ -1285,6 +1338,7 @@ class _HandshakeContext {
     this.selectedCandidateId,
     this.selectedLocalEndpoint,
     this.nonce,
+    this.preserveAuthenticatedSession = false,
   });
 
   final String sessionId;
@@ -1297,6 +1351,7 @@ class _HandshakeContext {
   final String? selectedPathId;
   final String? selectedCandidateId;
   final UdpInterfaceEndpoint? selectedLocalEndpoint;
+  final bool preserveAuthenticatedSession;
   String? nonce;
 }
 
