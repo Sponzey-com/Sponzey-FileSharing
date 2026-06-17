@@ -12,13 +12,59 @@ import 'package:sponzey_file_sharing/application/auth/peer_auth_controller.dart'
 import 'package:sponzey_file_sharing/application/discovery/peer_route_candidate_projection.dart';
 import 'package:sponzey_file_sharing/application/network/network_diagnostics_provider.dart';
 import 'package:sponzey_file_sharing/application/network/peer_path_registry.dart';
-import 'package:sponzey_file_sharing/application/transfer/transfer_diagnostics_ring_buffer.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_active_route_validation_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_control_packet_dispatcher.dart';
 import 'package:sponzey_file_sharing/application/transfer/transfer_data_endpoint_resolver.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_data_bind_endpoint_route_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_data_frame_factory.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_data_frame_dispatcher.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_data_frame_key_formatter.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_data_frame_route_context_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_diagnostics_ring_buffer.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_endpoint_label_formatter.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_event_id_formatter.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_frame_trace_mapper.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_incoming_ack_retry_schedule_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_incoming_data_chunk_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_incoming_data_finish_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_incoming_chunk_write_failure_mapper.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_incoming_finalize_failure_mapper.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_incoming_missing_chunks_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_incoming_route_match_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_incoming_window_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_init_receive_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_identity_selection_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_job_event_factory.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_job_list_upsert_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_job_metrics_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_job_terminal_status_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_job_update_lookup_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_log_safe_formatter.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_metric_calculation_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_outgoing_ack_bitmap_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_outgoing_ack_indexes_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_outgoing_chunk_byte_length_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_outgoing_chunk_metric_message_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_outgoing_completion_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_outgoing_data_ack_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_outgoing_data_nack_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_outgoing_data_endpoint_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_outgoing_digest_advance_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_outgoing_next_chunk_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_outgoing_retransmission_scan_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_outgoing_route_lease_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_outgoing_retryable_send_failure_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_outgoing_remote_data_endpoint_route_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_outgoing_send_failure_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_outgoing_window_reduction_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_outgoing_window_growth_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_outgoing_window_update_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_random_hex_formatter.dart';
 import 'package:sponzey_file_sharing/application/transfer/transfer_rtt_estimator.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_session_registry.dart';
 import 'package:sponzey_file_sharing/core/errors/app_exception.dart';
 import 'package:sponzey_file_sharing/core/logger/app_log_category.dart';
 import 'package:sponzey_file_sharing/core/logger/app_logger.dart';
-import 'package:sponzey_file_sharing/core/message_bus/app_event.dart';
 import 'package:sponzey_file_sharing/core/message_bus/message_bus.dart';
 import 'package:sponzey_file_sharing/core/network/udp_port_config.dart';
 import 'package:sponzey_file_sharing/domain/entities/app_settings.dart';
@@ -127,12 +173,24 @@ class TransferController extends Notifier<TransferState> {
       DataTransferTuningPolicy.defaults.maxPayloadBytes;
   static const TransferJobStateMachine _jobStateMachine =
       TransferJobStateMachine();
+  static const TransferControlPacketDispatcher _controlPacketDispatcher =
+      TransferControlPacketDispatcher();
+  static const TransferDataFrameDispatcher _dataFrameDispatcher =
+      TransferDataFrameDispatcher();
 
   bool _didInitialize = false;
   final Random _random = Random.secure();
   StreamSubscription<ControlDatagram>? _packetSubscription;
   StreamSubscription<DataFrameDatagram>? _dataFrameSubscription;
   LocalDeviceIdentity? _localIdentity;
+  final TransferSessionRegistry<_OutgoingTransferContext>
+  _outgoingSessionRegistry = TransferSessionRegistry<_OutgoingTransferContext>(
+    direction: TransferDirection.outgoing,
+  );
+  final TransferSessionRegistry<_IncomingTransferContext>
+  _incomingSessionRegistry = TransferSessionRegistry<_IncomingTransferContext>(
+    direction: TransferDirection.incoming,
+  );
   final Map<String, _OutgoingTransferContext> _outgoingTransfers = {};
   final Map<String, _IncomingTransferContext> _incomingTransfers = {};
   final Map<String, String> _transferIdByFrameKey = {};
@@ -182,7 +240,7 @@ class TransferController extends Notifier<TransferState> {
       return;
     }
 
-    final outgoing = _outgoingTransfers.remove(transferId);
+    final outgoing = _removeOutgoingTransfer(transferId);
     if (outgoing != null) {
       outgoing.hasFailed = true;
       if (!outgoing.initAck.isCompleted) {
@@ -215,7 +273,7 @@ class TransferController extends Notifier<TransferState> {
       await outgoing.dispose();
     }
 
-    final incoming = _incomingTransfers.remove(transferId);
+    final incoming = _removeIncomingTransfer(transferId);
     if (incoming != null) {
       await incoming.closeWriter();
       _transferIdByFrameKey.remove(_frameKey(incoming.transferIdBytes));
@@ -237,6 +295,105 @@ class TransferController extends Notifier<TransferState> {
 
   List<TransferFrameTrace> diagnosticFrameSnapshot(String transferId) {
     return _diagnosticFrameTraces[transferId]?.snapshot() ?? const [];
+  }
+
+  void _registerOutgoingTransfer(
+    String transferId,
+    _OutgoingTransferContext context,
+  ) {
+    final result = _outgoingSessionRegistry.register(
+      _outgoingSessionKey(transferId, context),
+      context,
+    );
+    if (!result.registered) {
+      throw AppException(
+        code: result.issueCode ?? 'transfer_session_register_failed',
+        message: '송신 전송 세션을 등록하지 못했습니다.',
+      );
+    }
+    _outgoingTransfers[transferId] = context;
+  }
+
+  void _registerIncomingTransfer(
+    String transferId,
+    _IncomingTransferContext context,
+  ) {
+    final result = _incomingSessionRegistry.register(
+      _incomingSessionKey(transferId, context),
+      context,
+    );
+    if (!result.registered) {
+      throw AppException(
+        code: result.issueCode ?? 'transfer_session_register_failed',
+        message: '수신 전송 세션을 등록하지 못했습니다.',
+      );
+    }
+    _incomingTransfers[transferId] = context;
+    _transferIdByFrameKey[_frameKey(context.transferIdBytes)] = transferId;
+  }
+
+  _OutgoingTransferContext? _lookupOutgoingTransfer(String transferId) {
+    final context = _outgoingTransfers[transferId];
+    if (context == null) {
+      return null;
+    }
+    return _outgoingSessionRegistry.lookup(
+      _outgoingSessionKey(transferId, context),
+    );
+  }
+
+  _IncomingTransferContext? _lookupIncomingTransfer(String transferId) {
+    final context = _incomingTransfers[transferId];
+    if (context == null) {
+      return null;
+    }
+    return _incomingSessionRegistry.lookup(
+      _incomingSessionKey(transferId, context),
+    );
+  }
+
+  _OutgoingTransferContext? _removeOutgoingTransfer(String transferId) {
+    final context = _outgoingTransfers.remove(transferId);
+    if (context == null) {
+      return null;
+    }
+    _outgoingSessionRegistry.remove(_outgoingSessionKey(transferId, context));
+    _transferIdByFrameKey.remove(_frameKey(context.transferIdBytes));
+    return context;
+  }
+
+  _IncomingTransferContext? _removeIncomingTransfer(String transferId) {
+    final context = _incomingTransfers.remove(transferId);
+    if (context == null) {
+      return null;
+    }
+    _incomingSessionRegistry.remove(_incomingSessionKey(transferId, context));
+    _transferIdByFrameKey.remove(_frameKey(context.transferIdBytes));
+    return context;
+  }
+
+  TransferSessionKey _outgoingSessionKey(
+    String transferId,
+    _OutgoingTransferContext context,
+  ) {
+    return TransferSessionKey(
+      direction: TransferDirection.outgoing,
+      transferId: transferId,
+      peerId: context.session.peerId,
+      authSessionId: context.session.sessionId,
+    );
+  }
+
+  TransferSessionKey _incomingSessionKey(
+    String transferId,
+    _IncomingTransferContext context,
+  ) {
+    return TransferSessionKey(
+      direction: TransferDirection.incoming,
+      transferId: transferId,
+      peerId: context.peerId,
+      authSessionId: context.sessionId,
+    );
   }
 
   Future<void> sendFile({
@@ -287,7 +444,7 @@ class TransferController extends Notifier<TransferState> {
         transferId: transferId,
         routeSnapshot: routeSnapshot,
       );
-      _outgoingTransfers[transferId] = context;
+      _registerOutgoingTransfer(transferId, context);
       ref
           .read(appLoggerProvider)
           .info(
@@ -446,29 +603,24 @@ class TransferController extends Notifier<TransferState> {
 
   Future<void> _handlePacket(ControlDatagram datagram) async {
     final packet = datagram.packet;
-    switch (packet.type) {
-      case AuthPacketType.transferInit:
+    switch (_controlPacketDispatcher.routeFor(packet.type)) {
+      case TransferControlPacketRoute.transferInit:
         await _onTransferInit(packet, datagram);
-      case AuthPacketType.transferInitAck:
+      case TransferControlPacketRoute.transferInitAck:
         _onTransferInitAck(packet, datagram);
-      case AuthPacketType.transferChunk:
+      case TransferControlPacketRoute.transferChunk:
         await _onTransferChunk(packet, datagram);
-      case AuthPacketType.transferChunkAck:
+      case TransferControlPacketRoute.transferChunkAck:
         _onTransferChunkAck(packet);
-      case AuthPacketType.transferChunkNack:
+      case TransferControlPacketRoute.transferChunkNack:
         _onTransferChunkNack(packet);
-      case AuthPacketType.transferWindowUpdate:
+      case TransferControlPacketRoute.transferWindowUpdate:
         _onTransferWindowUpdate(packet);
-      case AuthPacketType.transferComplete:
+      case TransferControlPacketRoute.transferComplete:
         await _onTransferComplete(packet, datagram);
-      case AuthPacketType.transferCompleteAck:
+      case TransferControlPacketRoute.transferCompleteAck:
         await _onTransferCompleteAck(packet, datagram);
-      case AuthPacketType.connectRequest:
-      case AuthPacketType.authChallenge:
-      case AuthPacketType.authToken:
-      case AuthPacketType.authTokenAck:
-      case AuthPacketType.authAccept:
-      case AuthPacketType.authReject:
+      case TransferControlPacketRoute.ignored:
         return;
     }
   }
@@ -477,6 +629,10 @@ class TransferController extends Notifier<TransferState> {
     final frame = datagram.frame;
     final transferId = _transferIdByFrameKey[_frameKey(frame.transferIdBytes)];
     if (transferId == null) {
+      return;
+    }
+    final route = _dataFrameDispatcher.routeFor(frame.type);
+    if (!_hasDataFrameRouteContext(transferId, route)) {
       return;
     }
     _recordFrameTrace(
@@ -488,8 +644,8 @@ class TransferController extends Notifier<TransferState> {
       decisionCode: 'received',
     );
 
-    switch (frame.type) {
-      case DataFrameType.dataStart:
+    switch (route) {
+      case TransferDataFrameRoute.dataStart:
         _updateJob(
           transferId,
           (job) => job.copyWith(
@@ -501,25 +657,36 @@ class TransferController extends Notifier<TransferState> {
           ),
         );
         return;
-      case DataFrameType.dataChunk:
+      case TransferDataFrameRoute.dataChunk:
         await _onDataChunk(transferId, datagram);
         return;
-      case DataFrameType.dataAck:
+      case TransferDataFrameRoute.dataAck:
         _onDataAck(transferId, datagram);
         return;
-      case DataFrameType.dataNack:
+      case TransferDataFrameRoute.dataNack:
         _onDataNack(transferId, datagram);
         return;
-      case DataFrameType.dataWindowUpdate:
+      case TransferDataFrameRoute.dataWindowUpdate:
         _onDataWindowUpdate(transferId, datagram);
         return;
-      case DataFrameType.dataFinish:
+      case TransferDataFrameRoute.dataFinish:
         await _onDataFinish(transferId, datagram);
         return;
-      case DataFrameType.dataAbort:
+      case TransferDataFrameRoute.dataAbort:
         await _failIncomingTransfer(transferId, '상대 노드가 전송을 취소했습니다.');
         return;
     }
+  }
+
+  bool _hasDataFrameRouteContext(
+    String transferId,
+    TransferDataFrameRoute route,
+  ) {
+    return TransferDataFrameRouteContextCommand.allows(
+      expectedDirection: route.expectedDirection,
+      hasIncomingContext: _lookupIncomingTransfer(transferId) != null,
+      hasOutgoingContext: _lookupOutgoingTransfer(transferId) != null,
+    );
   }
 
   Future<void> _runOutgoingTransfer(
@@ -533,7 +700,7 @@ class TransferController extends Notifier<TransferState> {
       }
       if (!initAck.accepted) {
         _markRejected(transferId, initAck.message ?? '상대가 파일 수신을 거절했습니다.');
-        _outgoingTransfers.remove(transferId);
+        _removeOutgoingTransfer(transferId);
         return;
       }
 
@@ -673,7 +840,7 @@ class TransferController extends Notifier<TransferState> {
           );
       await _failOutgoingTransfer(transferId, '파일 전송 중 오류가 발생했습니다: $error');
     } finally {
-      final current = _outgoingTransfers.remove(transferId);
+      final current = _removeOutgoingTransfer(transferId);
       await current?.dispose();
     }
   }
@@ -709,10 +876,12 @@ class TransferController extends Notifier<TransferState> {
         }
       }
 
-      if (!context.allChunksAcked.isCompleted &&
-          context.acknowledgedChunks.length ==
-              context.preparedFile.chunkCount &&
-          context.inFlightChunks.isEmpty) {
+      if (TransferOutgoingCompletionCommand.shouldComplete(
+        isAlreadyCompleted: context.allChunksAcked.isCompleted,
+        acknowledgedChunkCount: context.acknowledgedChunks.length,
+        chunkCount: context.preparedFile.chunkCount,
+        inFlightChunkCount: context.inFlightChunks.length,
+      )) {
         context.allChunksAcked.complete();
       }
     } finally {
@@ -721,28 +890,17 @@ class TransferController extends Notifier<TransferState> {
   }
 
   int? _nextChunkForSend(_OutgoingTransferContext context) {
-    final retransmit = context.nextQueuedRetransmission();
-    if (retransmit != null &&
-        !context.acknowledgedChunks.contains(retransmit) &&
-        !context.inFlightChunks.contains(retransmit)) {
-      return retransmit;
-    }
-
-    final remoteLimit =
-        context.remoteWindowStart + max(1, context.advertisedWindowSize);
-    while (context.nextChunkToSend < context.preparedFile.chunkCount) {
-      final index = context.nextChunkToSend;
-      if (index >= remoteLimit) {
-        return null;
-      }
-      context.nextChunkToSend += 1;
-      if (context.acknowledgedChunks.contains(index) ||
-          context.inFlightChunks.contains(index)) {
-        continue;
-      }
-      return index;
-    }
-    return null;
+    final decision = TransferOutgoingNextChunkCommand.decide(
+      retransmissionCandidate: context.nextQueuedRetransmission(),
+      nextChunkToSend: context.nextChunkToSend,
+      chunkCount: context.preparedFile.chunkCount,
+      remoteWindowStart: context.remoteWindowStart,
+      advertisedWindowSize: context.advertisedWindowSize,
+      acknowledgedChunks: context.acknowledgedChunks,
+      inFlightChunks: context.inFlightChunks,
+    );
+    context.nextChunkToSend = decision.nextChunkToSend;
+    return decision.chunkIndex;
   }
 
   Future<bool> _sendChunk(
@@ -751,20 +909,25 @@ class TransferController extends Notifier<TransferState> {
     int chunkIndex, {
     required bool isRetransmission,
   }) async {
-    final nextAttempts =
-        (context.retransmissionAttempts[chunkIndex] ?? 0) +
-        (isRetransmission ? 1 : 0);
+    final nextAttempts = TransferOutgoingSendFailureCommand.nextSendAttempt(
+      currentAttempts: context.retransmissionAttempts[chunkIndex] ?? 0,
+      isRetransmission: isRetransmission,
+    );
     _ensureRouteLeaseStillActive(context);
     if (nextAttempts > _maxRetransmissions) {
       throw AppException(
         code: 'transfer_retry_exhausted',
-        message: 'chunk $chunkIndex 재전송 한도를 초과했습니다.',
+        message: TransferOutgoingChunkMetricMessageCommand.retryExhausted(
+          chunkIndex: chunkIndex,
+        ),
       );
     }
 
     if (isRetransmission) {
       context.retryCount += 1;
-      context.windowSize = max(1, context.windowSize ~/ 2);
+      context.windowSize = TransferOutgoingWindowReductionCommand.reduce(
+        context.windowSize,
+      );
       context.retransmissionAttempts[chunkIndex] = nextAttempts;
       context.hasRetransmitted.add(chunkIndex);
     }
@@ -773,17 +936,26 @@ class TransferController extends Notifier<TransferState> {
       chunkSize: context.preparedFile.chunkSize,
       chunkIndex: chunkIndex,
     );
-    if (!isRetransmission && chunkIndex == context.nextDigestChunk) {
+    final digestDecision = TransferOutgoingDigestAdvanceCommand.decide(
+      isRetransmission: isRetransmission,
+      chunkIndex: chunkIndex,
+      nextDigestChunk: context.nextDigestChunk,
+    );
+    if (digestDecision.shouldAppendToDigest) {
       context.outgoingDigest.add(bytes);
-      context.nextDigestChunk += 1;
     }
+    context.nextDigestChunk = digestDecision.nextDigestChunk;
     final now = _now();
     context.inFlightChunks.add(chunkIndex);
     context.sentAtByChunk[chunkIndex] = now;
     try {
       final remoteAddress = context.remoteDataAddress;
       final remotePort = context.remoteDataPort;
-      if (remoteAddress == null || remotePort == null) {
+      final endpointDecision = TransferOutgoingDataEndpointCommand.validate(
+        address: remoteAddress?.address,
+        port: remotePort,
+      );
+      if (!endpointDecision.isValid) {
         throw const AppException(
           code: 'transfer_data_endpoint_missing',
           message: '상대 노드의 data endpoint 정보가 없습니다.',
@@ -799,30 +971,41 @@ class TransferController extends Notifier<TransferState> {
           windowSize: context.windowSize,
           payload: Uint8List.fromList(bytes),
         ),
-        address: remoteAddress,
-        port: remotePort,
+        address: InternetAddress(endpointDecision.address!),
+        port: endpointDecision.port!,
       );
     } on AppException catch (error) {
       context.inFlightChunks.remove(chunkIndex);
       context.sentAtByChunk.remove(chunkIndex);
-      if (!_isRetryableDataFrameSendFailure(error)) {
+      if (!TransferOutgoingRetryableSendFailureCommand.isRetryable(
+        error.code,
+      )) {
         rethrow;
       }
-      final attemptsAfterFailure = max(
-        nextAttempts,
-        (context.retransmissionAttempts[chunkIndex] ?? 0) + 1,
-      );
-      if (attemptsAfterFailure > _maxRetransmissions) {
+      final failureDecision =
+          TransferOutgoingSendFailureCommand.onRetryableFailure(
+            nextAttempts: nextAttempts,
+            recordedAttempts: context.retransmissionAttempts[chunkIndex] ?? 0,
+            maxRetransmissions: _maxRetransmissions,
+            isRetransmission: isRetransmission,
+          );
+      if (failureDecision.action ==
+          TransferOutgoingSendFailureAction.exhausted) {
         throw AppException(
           code: 'transfer_retry_exhausted',
-          message: 'chunk $chunkIndex 재전송 한도를 초과했습니다.',
+          message: TransferOutgoingChunkMetricMessageCommand.retryExhausted(
+            chunkIndex: chunkIndex,
+          ),
         );
       }
-      if (!isRetransmission) {
+      if (failureDecision.shouldReduceWindow) {
         context.retryCount += 1;
-        context.windowSize = max(1, context.windowSize ~/ 2);
+        context.windowSize = TransferOutgoingWindowReductionCommand.reduce(
+          context.windowSize,
+        );
       }
-      context.retransmissionAttempts[chunkIndex] = attemptsAfterFailure;
+      context.retransmissionAttempts[chunkIndex] =
+          failureDecision.attemptsAfterFailure;
       context.hasRetransmitted.add(chunkIndex);
       context.queueRetransmission(chunkIndex);
       context.scheduleBackpressureRetry(
@@ -832,7 +1015,9 @@ class TransferController extends Notifier<TransferState> {
       _updateOutgoingMetrics(
         transferId,
         context,
-        message: 'data chunk $chunkIndex 송신 실패, 재전송 대기 중',
+        message: TransferOutgoingChunkMetricMessageCommand.retryQueued(
+          chunkIndex: chunkIndex,
+        ),
       );
       return false;
     } catch (_) {
@@ -847,21 +1032,17 @@ class TransferController extends Notifier<TransferState> {
     _updateOutgoingMetrics(
       transferId,
       context,
-      message: isRetransmission
-          ? 'chunk $chunkIndex 재전송 중'
-          : 'window ${context.windowSize} 기준으로 전송 중',
+      message: TransferOutgoingChunkMetricMessageCommand.sent(
+        chunkIndex: chunkIndex,
+        isRetransmission: isRetransmission,
+        windowSize: context.windowSize,
+      ),
     );
     return true;
   }
 
-  bool _isRetryableDataFrameSendFailure(AppException error) {
-    return error.code == 'sendFailed' ||
-        error.code == 'partialSend' ||
-        error.code == 'data_frame_send_failed';
-  }
-
   void _onRetransmissionScan(String transferId) {
-    final context = _outgoingTransfers[transferId];
+    final context = _lookupOutgoingTransfer(transferId);
     if (context == null || context.hasFailed) {
       return;
     }
@@ -872,30 +1053,34 @@ class TransferController extends Notifier<TransferState> {
 
     final now = _now();
     final timeout = context.rttEstimator.currentTimeout;
-    final timedOutChunks = <int>[];
-    for (final chunkIndex in context.inFlightChunks.toList(growable: false)) {
-      if (context.acknowledgedChunks.contains(chunkIndex)) {
-        context.inFlightChunks.remove(chunkIndex);
-        context.sentAtByChunk.remove(chunkIndex);
-        continue;
-      }
-      final sentAt = context.sentAtByChunk[chunkIndex];
-      if (sentAt == null || now.difference(sentAt) < timeout) {
-        continue;
-      }
+    final scanDecision = TransferOutgoingRetransmissionScanCommand.scan(
+      now: now,
+      timeout: timeout,
+      inFlightChunks: context.inFlightChunks,
+      acknowledgedChunks: context.acknowledgedChunks,
+      sentAtByChunk: context.sentAtByChunk,
+    );
+    for (final chunkIndex in scanDecision.acknowledgedInFlightIndexes) {
+      context.inFlightChunks.remove(chunkIndex);
+      context.sentAtByChunk.remove(chunkIndex);
+    }
+    for (final chunkIndex in scanDecision.timedOutIndexes) {
       context.inFlightChunks.remove(chunkIndex);
       context.sentAtByChunk.remove(chunkIndex);
       context.queueRetransmission(chunkIndex);
-      timedOutChunks.add(chunkIndex);
     }
 
-    if (timedOutChunks.isNotEmpty) {
+    if (scanDecision.timedOutIndexes.isNotEmpty) {
       context.rttEstimator.noteTimeoutBackoff();
-      context.windowSize = max(1, context.windowSize ~/ 2);
+      context.windowSize = TransferOutgoingWindowReductionCommand.reduce(
+        context.windowSize,
+      );
       _updateOutgoingMetrics(
         transferId,
         context,
-        message: 'timeout ${timedOutChunks.length} chunks, 재전송 대기 중',
+        message: TransferOutgoingChunkMetricMessageCommand.timeoutQueued(
+          chunkCount: scanDecision.timedOutIndexes.length,
+        ),
       );
       unawaited(_pumpOutgoingWindow(transferId, context));
     }
@@ -912,19 +1097,18 @@ class TransferController extends Notifier<TransferState> {
     AuthPacket packet,
     ControlDatagram datagram,
   ) async {
-    final transferId = packet.transferId;
-    final fileName = packet.transferFileName;
-    final fileSize = packet.transferFileSize;
-    final sha256 = packet.transferSha256;
-    final chunkCount = packet.transferChunkCount;
-    if (transferId == null ||
-        fileName == null ||
-        fileSize == null ||
-        chunkCount == null) {
+    final commandResult = TransferInitReceiveCommand.fromPacket(packet);
+    final command = commandResult.command;
+    if (command == null) {
       return;
     }
+    final transferId = command.transferId;
+    final fileName = command.fileName;
+    final fileSize = command.fileSize;
+    final sha256 = command.sha256;
+    final chunkCount = command.chunkCount;
 
-    final packetPeerId = _peerIdFromPacket(packet);
+    final packetPeerId = command.packetPeerId;
     ref
         .read(appLoggerProvider)
         .info(
@@ -1007,11 +1191,10 @@ class TransferController extends Notifier<TransferState> {
       );
       final now = _now();
       final transferIdBytes = transferIdBytesFromString(transferId);
-      _transferIdByFrameKey[_frameKey(transferIdBytes)] = transferId;
-      _incomingTransfers[transferId] = _IncomingTransferContext(
+      final incomingContext = _IncomingTransferContext(
         sessionId: packet.sessionId,
         peerId: peerId,
-        peerDisplayName: packet.fromDisplayName ?? packet.fromUserId,
+        peerDisplayName: command.peerDisplayName,
         controlAddress: datagram.address,
         controlPort: datagram.port,
         controlLocalEndpoint: controlLocalEndpoint,
@@ -1027,6 +1210,7 @@ class TransferController extends Notifier<TransferState> {
         sessionHash: 0,
         routeSnapshot: routeSnapshot,
       );
+      _registerIncomingTransfer(transferId, incomingContext);
       ownershipMovedToSession = true;
       ref
           .read(appLoggerProvider)
@@ -1044,7 +1228,7 @@ class TransferController extends Notifier<TransferState> {
           transferId: transferId,
           direction: TransferDirection.incoming,
           peerId: peerId,
-          peerDisplayName: packet.fromDisplayName ?? packet.fromUserId,
+          peerDisplayName: command.peerDisplayName,
           fileName: fileName,
           fileSize: fileSize,
           bytesTransferred: 0,
@@ -1071,10 +1255,10 @@ class TransferController extends Notifier<TransferState> {
         dataAddress: TransferDataEndpointResolver.advertisedReceiverAddress(
           dataEndpoint: dataBind.endpoint,
         ),
-        acceptedChunkSize: packet.transferAcceptedChunkSize ?? _dataChunkSize,
+        acceptedChunkSize: command.acceptedChunkSize ?? _dataChunkSize,
         acceptedWindowSize: _receiverAdvertisedWindow,
         receiverBufferBudget: _receiverAdvertisedWindow * _dataChunkSize,
-        dataAuthContextId: packet.transferDataAuthContextId,
+        dataAuthContextId: command.dataAuthContextId,
         localEndpoint: controlLocalEndpoint,
       );
       _updateJob(
@@ -1141,7 +1325,7 @@ class TransferController extends Notifier<TransferState> {
       return;
     }
 
-    final context = _outgoingTransfers[transferId];
+    final context = _lookupOutgoingTransfer(transferId);
     if (context == null || context.initAck.isCompleted) {
       return;
     }
@@ -1170,7 +1354,7 @@ class TransferController extends Notifier<TransferState> {
       return;
     }
 
-    final context = _incomingTransfers[transferId];
+    final context = _lookupIncomingTransfer(transferId);
     if (context == null) {
       return;
     }
@@ -1203,7 +1387,10 @@ class TransferController extends Notifier<TransferState> {
         address: datagram.address,
         port: datagram.port,
         windowStart: context.nextExpectedChunk,
-        windowSize: _receiverWindowSize(context),
+        windowSize: TransferIncomingWindowCommand.receiverWindowSize(
+          advertisedWindowSize: _receiverAdvertisedWindow,
+          bufferedChunkCount: context.bufferedChunks.length,
+        ),
         localEndpoint: datagram.localEndpoint,
       );
       _updateIncomingMetrics(
@@ -1241,11 +1428,13 @@ class TransferController extends Notifier<TransferState> {
           chunkIndex: chunkIndex,
           localEndpoint: datagram.localEndpoint,
         );
-        final missingIndexes = _missingIndexesUntil(
-          context,
-          chunkIndex,
-          limit: _maxNackIndexesPerPacket,
-        );
+        final missingIndexes =
+            TransferIncomingMissingChunksCommand.untilHighestReceived(
+              nextExpectedChunk: context.nextExpectedChunk,
+              highestReceivedIndex: chunkIndex,
+              acknowledgedChunks: context.acknowledgedChunks,
+              limit: _maxNackIndexesPerPacket,
+            );
         if (missingIndexes.isNotEmpty) {
           await _sendChunkNack(
             sessionId: context.sessionId,
@@ -1292,24 +1481,30 @@ class TransferController extends Notifier<TransferState> {
   ) async {
     final frame = datagram.frame;
     final chunkIndex = frame.chunkIndex;
-    final context = _incomingTransfers[transferId];
+    final context = _lookupIncomingTransfer(transferId);
     if (context == null) {
       return;
     }
     context.lastDataAddress = datagram.address;
     context.lastDataPort = datagram.port;
+    final decision = TransferIncomingDataChunkCommand.decide(
+      chunkIndex: chunkIndex,
+      expectedChunkCount: context.expectedChunkCount,
+      nextExpectedChunk: context.nextExpectedChunk,
+      acknowledgedChunks: context.acknowledgedChunks,
+    );
 
-    if (chunkIndex >= context.expectedChunkCount) {
+    if (decision.action == TransferIncomingDataChunkAction.rejectOutOfRange) {
       await _sendDataNackSafely(
         context,
-        chunkIndexes: [context.nextExpectedChunk],
+        chunkIndexes: [decision.nackChunkIndex ?? context.nextExpectedChunk],
         address: datagram.address,
         port: datagram.port,
       );
       return;
     }
 
-    if (context.acknowledgedChunks.contains(chunkIndex)) {
+    if (decision.action == TransferIncomingDataChunkAction.ackDuplicate) {
       context.duplicateChunks += 1;
       await _queueDataAck(
         context,
@@ -1331,25 +1526,31 @@ class TransferController extends Notifier<TransferState> {
       context.acknowledgedChunks.add(chunkIndex);
       context.acknowledgedBytes += bytes.length;
 
-      if (chunkIndex == context.nextExpectedChunk) {
-        await _appendIncomingChunk(context, bytes);
-        context.nextExpectedChunk += 1;
-        await _flushBufferedChunks(context);
-      } else {
-        context.bufferedChunks[chunkIndex] = bytes;
-        final missingIndexes = _missingIndexesUntil(
-          context,
-          chunkIndex,
-          limit: _maxNackIndexesPerPacket,
-        );
-        if (missingIndexes.isNotEmpty) {
-          await _sendDataNackSafely(
-            context,
-            chunkIndexes: missingIndexes,
-            address: datagram.address,
-            port: datagram.port,
-          );
-        }
+      switch (decision.action) {
+        case TransferIncomingDataChunkAction.appendInOrder:
+          await _appendIncomingChunk(context, bytes);
+          context.nextExpectedChunk += 1;
+          await _flushBufferedChunks(context);
+        case TransferIncomingDataChunkAction.bufferOutOfOrder:
+          context.bufferedChunks[chunkIndex] = bytes;
+          final missingIndexes =
+              TransferIncomingMissingChunksCommand.untilHighestReceived(
+                nextExpectedChunk: context.nextExpectedChunk,
+                highestReceivedIndex: chunkIndex,
+                acknowledgedChunks: context.acknowledgedChunks,
+                limit: _maxNackIndexesPerPacket,
+              );
+          if (missingIndexes.isNotEmpty) {
+            await _sendDataNackSafely(
+              context,
+              chunkIndexes: missingIndexes,
+              address: datagram.address,
+              port: datagram.port,
+            );
+          }
+        case TransferIncomingDataChunkAction.rejectOutOfRange:
+        case TransferIncomingDataChunkAction.ackDuplicate:
+          return;
       }
 
       await _queueDataAck(
@@ -1358,8 +1559,12 @@ class TransferController extends Notifier<TransferState> {
         address: datagram.address,
         port: datagram.port,
         flushImmediately:
-            context.pendingAckChunks.length + 1 >= _ackBatchChunkThreshold ||
-            context.nextExpectedChunk >= context.expectedChunkCount,
+            TransferIncomingAckRetryScheduleCommand.shouldFlushAfterAckEnqueue(
+              pendingAckCountBeforeEnqueue: context.pendingAckChunks.length,
+              ackBatchThreshold: _ackBatchChunkThreshold,
+              nextExpectedChunk: context.nextExpectedChunk,
+              expectedChunkCount: context.expectedChunkCount,
+            ),
       );
       _updateIncomingMetrics(
         transferId,
@@ -1389,27 +1594,25 @@ class TransferController extends Notifier<TransferState> {
   }
 
   void _onDataAck(String transferId, DataFrameDatagram datagram) {
-    final context = _outgoingTransfers[transferId];
+    final context = _lookupOutgoingTransfer(transferId);
     if (context == null || context.hasFailed) {
       return;
     }
-    final chunkIndexes =
-        _chunkIndexesFromAckFrame(datagram.frame)
-            .where(
-              (index) => index >= 0 && index < context.preparedFile.chunkCount,
-            )
-            .toList(growable: false)
-          ..sort();
-    if (chunkIndexes.isEmpty) {
+    final decision = TransferOutgoingDataAckCommand.decide(
+      rawAckIndexes: TransferOutgoingAckIndexesCommand.decode(
+        primaryChunkIndex: datagram.frame.chunkIndex,
+        ackBase: datagram.frame.ackBase,
+        ackBitmapWords: datagram.frame.ackBitmapWords,
+      ),
+      chunkCount: context.preparedFile.chunkCount,
+      acknowledgedChunks: context.acknowledgedChunks,
+    );
+    if (decision.validAckIndexes.isEmpty) {
       return;
     }
-    var newlyAckedCount = 0;
+    context.duplicateAckCount += decision.duplicateAckCount;
     var newlyAckedBytes = 0;
-    for (final chunkIndex in chunkIndexes) {
-      if (context.acknowledgedChunks.contains(chunkIndex)) {
-        context.duplicateAckCount += 1;
-        continue;
-      }
+    for (final chunkIndex in decision.newlyAckedIndexes) {
       context.acknowledgedChunks.add(chunkIndex);
       context.inFlightChunks.remove(chunkIndex);
       final sentAt = context.sentAtByChunk.remove(chunkIndex);
@@ -1417,29 +1620,29 @@ class TransferController extends Notifier<TransferState> {
       if (sentAt != null && retransmissions == 0) {
         context.rttEstimator.recordSample(_now().difference(sentAt));
       }
-      newlyAckedCount += 1;
       newlyAckedBytes += _chunkByteLength(context.preparedFile, chunkIndex);
     }
+    final newlyAckedCount = decision.newlyAckedIndexes.length;
     if (newlyAckedCount == 0) {
       return;
     }
-    context.windowSize =
-        const DataTransferTuningPolicy(
-          initialWindowSize: _initialWindowSize,
-          maximumWindowSize: _maximumWindowSize,
-          receiverAdvertisedWindow: _receiverAdvertisedWindow,
-          windowUpdateChunkInterval: _windowUpdateChunkInterval,
-          ackBatchChunkThreshold: _ackBatchChunkThreshold,
-          maxWindowGrowthPerAck: _maxWindowGrowthPerAck,
-          maxRetransmissions: _maxRetransmissions,
-          maxNackIndexesPerPacket: _maxNackIndexesPerPacket,
-          ackBatchInterval: _ackBatchInterval,
-          metricLogInterval: _metricLogInterval,
-        ).windowAfterAck(
-          currentWindow: context.windowSize,
-          maximumWindow: _maximumWindowSize,
-          newlyAckedChunks: newlyAckedCount,
-        );
+    context.windowSize = TransferOutgoingWindowGrowthCommand.afterDataAck(
+      tuningPolicy: const DataTransferTuningPolicy(
+        initialWindowSize: _initialWindowSize,
+        maximumWindowSize: _maximumWindowSize,
+        receiverAdvertisedWindow: _receiverAdvertisedWindow,
+        windowUpdateChunkInterval: _windowUpdateChunkInterval,
+        ackBatchChunkThreshold: _ackBatchChunkThreshold,
+        maxWindowGrowthPerAck: _maxWindowGrowthPerAck,
+        maxRetransmissions: _maxRetransmissions,
+        maxNackIndexesPerPacket: _maxNackIndexesPerPacket,
+        ackBatchInterval: _ackBatchInterval,
+        metricLogInterval: _metricLogInterval,
+      ),
+      currentWindowSize: context.windowSize,
+      maximumWindowSize: _maximumWindowSize,
+      newlyAckedChunks: newlyAckedCount,
+    );
     context.remoteWindowStart = datagram.frame.windowStart;
     context.advertisedWindowSize = max(1, datagram.frame.windowSize);
     context.acknowledgedBytes += newlyAckedBytes;
@@ -1448,12 +1651,15 @@ class TransferController extends Notifier<TransferState> {
       transferId,
       context,
       message:
-          'DATA_ACK ${chunkIndexes.first}-${chunkIndexes.last} '
+          'DATA_ACK ${decision.validAckIndexes.first}-${decision.validAckIndexes.last} '
           'count=$newlyAckedCount 수신',
     );
-    if (!context.allChunksAcked.isCompleted &&
-        context.acknowledgedChunks.length == context.preparedFile.chunkCount &&
-        context.inFlightChunks.isEmpty) {
+    if (TransferOutgoingCompletionCommand.shouldComplete(
+      isAlreadyCompleted: context.allChunksAcked.isCompleted,
+      acknowledgedChunkCount: context.acknowledgedChunks.length,
+      chunkCount: context.preparedFile.chunkCount,
+      inFlightChunkCount: context.inFlightChunks.length,
+    )) {
       context.allChunksAcked.complete();
     } else {
       unawaited(_pumpOutgoingWindow(transferId, context));
@@ -1461,28 +1667,20 @@ class TransferController extends Notifier<TransferState> {
   }
 
   void _onDataNack(String transferId, DataFrameDatagram datagram) {
-    final context = _outgoingTransfers[transferId];
+    final context = _lookupOutgoingTransfer(transferId);
     if (context == null || context.hasFailed) {
       return;
     }
-    context.windowSize = max(1, context.windowSize ~/ 2);
-    final chunkIndexes = <int>{datagram.frame.chunkIndex};
-    for (
-      var wordIndex = 0;
-      wordIndex < datagram.frame.ackBitmapWords.length;
-      wordIndex += 1
-    ) {
-      final word = datagram.frame.ackBitmapWords[wordIndex];
-      for (var bit = 0; bit < 32; bit += 1) {
-        if ((word & (1 << bit)) != 0) {
-          chunkIndexes.add(datagram.frame.ackBase + wordIndex * 32 + bit);
-        }
-      }
-    }
-    for (final chunkIndex in chunkIndexes) {
-      if (context.acknowledgedChunks.contains(chunkIndex)) {
-        continue;
-      }
+    context.windowSize = TransferOutgoingWindowReductionCommand.reduce(
+      context.windowSize,
+    );
+    final decision = TransferOutgoingDataNackCommand.decide(
+      primaryChunkIndex: datagram.frame.chunkIndex,
+      ackBase: datagram.frame.ackBase,
+      ackBitmapWords: datagram.frame.ackBitmapWords,
+      acknowledgedChunks: context.acknowledgedChunks,
+    );
+    for (final chunkIndex in decision.retransmissionIndexes) {
       context.inFlightChunks.remove(chunkIndex);
       context.sentAtByChunk.remove(chunkIndex);
       context.queueRetransmission(chunkIndex);
@@ -1491,18 +1689,22 @@ class TransferController extends Notifier<TransferState> {
     _updateOutgoingMetrics(
       transferId,
       context,
-      message: 'DATA_NACK ${chunkIndexes.join(', ')} 수신',
+      message: 'DATA_NACK ${decision.retransmissionIndexes.join(', ')} 수신',
     );
     unawaited(_pumpOutgoingWindow(transferId, context));
   }
 
   void _onDataWindowUpdate(String transferId, DataFrameDatagram datagram) {
-    final context = _outgoingTransfers[transferId];
+    final context = _lookupOutgoingTransfer(transferId);
     if (context == null || context.hasFailed) {
       return;
     }
-    context.remoteWindowStart = datagram.frame.windowStart;
-    context.advertisedWindowSize = max(1, datagram.frame.windowSize);
+    final decision = TransferOutgoingWindowUpdateCommand.decide(
+      windowStart: datagram.frame.windowStart,
+      windowSize: datagram.frame.windowSize,
+    );
+    context.remoteWindowStart = decision.remoteWindowStart;
+    context.advertisedWindowSize = decision.advertisedWindowSize;
     unawaited(_pumpOutgoingWindow(transferId, context));
   }
 
@@ -1510,20 +1712,22 @@ class TransferController extends Notifier<TransferState> {
     String transferId,
     DataFrameDatagram datagram,
   ) async {
-    final context = _incomingTransfers[transferId];
+    final context = _lookupIncomingTransfer(transferId);
     if (context == null) {
       return;
     }
-    if (context.nextExpectedChunk != context.expectedChunkCount ||
-        context.bufferedChunks.isNotEmpty) {
-      final missingIndexes = _remainingMissingIndexes(
-        context,
-        limit: _maxNackIndexesPerPacket,
-      );
-      if (missingIndexes.isNotEmpty) {
+    final decision = TransferIncomingDataFinishCommand.decide(
+      nextExpectedChunk: context.nextExpectedChunk,
+      expectedChunkCount: context.expectedChunkCount,
+      acknowledgedChunks: context.acknowledgedChunks,
+      bufferedChunkCount: context.bufferedChunks.length,
+      missingLimit: _maxNackIndexesPerPacket,
+    );
+    if (decision.action == TransferIncomingDataFinishAction.waitForMissing) {
+      if (decision.missingIndexes.isNotEmpty) {
         await _sendDataNackSafely(
           context,
-          chunkIndexes: missingIndexes,
+          chunkIndexes: decision.missingIndexes,
           address: datagram.address,
           port: datagram.port,
         );
@@ -1561,7 +1765,7 @@ class TransferController extends Notifier<TransferState> {
             destinationDirectory: context.saveDirectory,
             fileName: context.fileName,
           );
-      _incomingTransfers.remove(transferId);
+      _removeIncomingTransfer(transferId);
       _transferIdByFrameKey.remove(_frameKey(context.transferIdBytes));
       _updateJob(
         transferId,
@@ -1577,7 +1781,10 @@ class TransferController extends Notifier<TransferState> {
             transferredBytes: context.writtenBytes,
             startedAt: context.startedAt,
           ),
-          windowSize: _receiverWindowSize(context),
+          windowSize: TransferIncomingWindowCommand.receiverWindowSize(
+            advertisedWindowSize: _receiverAdvertisedWindow,
+            bufferedChunkCount: context.bufferedChunks.length,
+          ),
         ),
       );
       state = state.copyWith(infoMessage: '파일을 수신했습니다: ${context.fileName}');
@@ -1592,13 +1799,14 @@ class TransferController extends Notifier<TransferState> {
         localEndpoint: context.controlLocalEndpoint,
       );
     } on AppException catch (error) {
+      final failure = TransferIncomingFinalizeFailureMapper.map(error);
       ref
           .read(appLoggerProvider)
           .warning(
             AppLogCategory.transferData,
             'Incoming data transfer finalize rejected '
             'transfer=${_safeTransfer(transferId)} peer=${context.peerId} '
-            'code=${error.code}',
+            'code=${failure.reasonCode}',
           );
       await _sendTransferCompleteAck(
         sessionId: context.sessionId,
@@ -1606,11 +1814,12 @@ class TransferController extends Notifier<TransferState> {
         address: context.controlAddress,
         port: context.controlPort,
         accepted: false,
-        message: error.message,
+        message: failure.userMessage,
         localEndpoint: context.controlLocalEndpoint,
       );
-      await _failIncomingTransfer(transferId, error.message);
+      await _failIncomingTransfer(transferId, failure.userMessage);
     } catch (error, stackTrace) {
+      final failure = TransferIncomingFinalizeFailureMapper.map(error);
       ref
           .read(appLoggerProvider)
           .error(
@@ -1625,10 +1834,10 @@ class TransferController extends Notifier<TransferState> {
         address: context.controlAddress,
         port: context.controlPort,
         accepted: false,
-        message: '수신 파일을 완료하지 못했습니다.',
+        message: failure.userMessage,
         localEndpoint: context.controlLocalEndpoint,
       );
-      await _failIncomingTransfer(transferId, '수신 파일을 완료하지 못했습니다.');
+      await _failIncomingTransfer(transferId, failure.userMessage);
     }
   }
 
@@ -1639,7 +1848,7 @@ class TransferController extends Notifier<TransferState> {
       return;
     }
 
-    final context = _outgoingTransfers[transferId];
+    final context = _lookupOutgoingTransfer(transferId);
     if (context == null || context.hasFailed) {
       return;
     }
@@ -1661,18 +1870,22 @@ class TransferController extends Notifier<TransferState> {
     if (sentAt != null && retransmissions == 0) {
       context.rttEstimator.recordSample(_now().difference(sentAt));
     }
-    if (context.windowSize < _maximumWindowSize) {
-      context.windowSize += 1;
-    }
+    context.windowSize = TransferOutgoingWindowGrowthCommand.afterLegacyAck(
+      currentWindowSize: context.windowSize,
+      maximumWindowSize: _maximumWindowSize,
+    );
     context.acknowledgedBytes += _chunkByteLength(
       context.preparedFile,
       chunkIndex,
     );
     context.cancelRetransmissionScanIfIdle();
     _updateOutgoingMetrics(transferId, context, message: 'ACK $chunkIndex 수신');
-    if (!context.allChunksAcked.isCompleted &&
-        context.acknowledgedChunks.length == context.preparedFile.chunkCount &&
-        context.inFlightChunks.isEmpty) {
+    if (TransferOutgoingCompletionCommand.shouldComplete(
+      isAlreadyCompleted: context.allChunksAcked.isCompleted,
+      acknowledgedChunkCount: context.acknowledgedChunks.length,
+      chunkCount: context.preparedFile.chunkCount,
+      inFlightChunkCount: context.inFlightChunks.length,
+    )) {
       context.allChunksAcked.complete();
     } else {
       unawaited(_pumpOutgoingWindow(transferId, context));
@@ -1685,7 +1898,7 @@ class TransferController extends Notifier<TransferState> {
       return;
     }
 
-    final context = _outgoingTransfers[transferId];
+    final context = _lookupOutgoingTransfer(transferId);
     if (context == null || context.hasFailed) {
       return;
     }
@@ -1698,7 +1911,9 @@ class TransferController extends Notifier<TransferState> {
       return;
     }
 
-    context.windowSize = max(1, context.windowSize ~/ 2);
+    context.windowSize = TransferOutgoingWindowReductionCommand.reduce(
+      context.windowSize,
+    );
     for (final chunkIndex in chunkIndexes) {
       if (context.acknowledgedChunks.contains(chunkIndex)) {
         continue;
@@ -1722,7 +1937,7 @@ class TransferController extends Notifier<TransferState> {
       return;
     }
 
-    final context = _outgoingTransfers[transferId];
+    final context = _lookupOutgoingTransfer(transferId);
     if (context == null || context.hasFailed) {
       return;
     }
@@ -1751,24 +1966,26 @@ class TransferController extends Notifier<TransferState> {
       return;
     }
 
-    final context = _incomingTransfers[transferId];
+    final context = _lookupIncomingTransfer(transferId);
     if (context == null) {
       return;
     }
 
-    if (context.nextExpectedChunk != context.expectedChunkCount ||
-        context.bufferedChunks.isNotEmpty) {
-      final missingIndexes = _remainingMissingIndexes(
-        context,
-        limit: _maxNackIndexesPerPacket,
-      );
-      if (missingIndexes.isNotEmpty) {
+    final decision = TransferIncomingDataFinishCommand.decide(
+      nextExpectedChunk: context.nextExpectedChunk,
+      expectedChunkCount: context.expectedChunkCount,
+      acknowledgedChunks: context.acknowledgedChunks,
+      bufferedChunkCount: context.bufferedChunks.length,
+      missingLimit: _maxNackIndexesPerPacket,
+    );
+    if (decision.action == TransferIncomingDataFinishAction.waitForMissing) {
+      if (decision.missingIndexes.isNotEmpty) {
         await _sendChunkNack(
           sessionId: context.sessionId,
           transferId: transferId,
           address: datagram.address,
           port: datagram.port,
-          chunkIndexes: missingIndexes,
+          chunkIndexes: decision.missingIndexes,
           localEndpoint: datagram.localEndpoint,
         );
       }
@@ -1778,7 +1995,10 @@ class TransferController extends Notifier<TransferState> {
         address: datagram.address,
         port: datagram.port,
         windowStart: context.nextExpectedChunk,
-        windowSize: _receiverWindowSize(context),
+        windowSize: TransferIncomingWindowCommand.receiverWindowSize(
+          advertisedWindowSize: _receiverAdvertisedWindow,
+          bufferedChunkCount: context.bufferedChunks.length,
+        ),
         localEndpoint: datagram.localEndpoint,
       );
       _updateIncomingMetrics(
@@ -1832,7 +2052,7 @@ class TransferController extends Notifier<TransferState> {
             destinationDirectory: context.saveDirectory,
             fileName: context.fileName,
           );
-      _incomingTransfers.remove(transferId);
+      _removeIncomingTransfer(transferId);
       _updateJob(
         transferId,
         (job) => job.copyWith(
@@ -1847,7 +2067,10 @@ class TransferController extends Notifier<TransferState> {
             transferredBytes: context.writtenBytes,
             startedAt: context.startedAt,
           ),
-          windowSize: _receiverWindowSize(context),
+          windowSize: TransferIncomingWindowCommand.receiverWindowSize(
+            advertisedWindowSize: _receiverAdvertisedWindow,
+            bufferedChunkCount: context.bufferedChunks.length,
+          ),
         ),
       );
       state = state.copyWith(infoMessage: '파일을 수신했습니다: ${context.fileName}');
@@ -1862,13 +2085,14 @@ class TransferController extends Notifier<TransferState> {
         localEndpoint: datagram.localEndpoint,
       );
     } on AppException catch (error) {
+      final failure = TransferIncomingFinalizeFailureMapper.map(error);
       ref
           .read(appLoggerProvider)
           .warning(
             AppLogCategory.transferControl,
             'Incoming transfer finalize rejected '
             'transfer=${_safeTransfer(transferId)} peer=${context.peerId} '
-            'code=${error.code}',
+            'code=${failure.reasonCode}',
           );
       await _sendTransferCompleteAck(
         sessionId: context.sessionId,
@@ -1876,11 +2100,12 @@ class TransferController extends Notifier<TransferState> {
         address: datagram.address,
         port: datagram.port,
         accepted: false,
-        message: error.message,
+        message: failure.userMessage,
         localEndpoint: datagram.localEndpoint,
       );
-      await _failIncomingTransfer(transferId, error.message);
+      await _failIncomingTransfer(transferId, failure.userMessage);
     } catch (error, stackTrace) {
+      final failure = TransferIncomingFinalizeFailureMapper.map(error);
       ref
           .read(appLoggerProvider)
           .error(
@@ -1895,10 +2120,10 @@ class TransferController extends Notifier<TransferState> {
         address: datagram.address,
         port: datagram.port,
         accepted: false,
-        message: '수신 파일을 완료하지 못했습니다.',
+        message: failure.userMessage,
         localEndpoint: datagram.localEndpoint,
       );
-      await _failIncomingTransfer(transferId, '수신 파일을 완료하지 못했습니다.');
+      await _failIncomingTransfer(transferId, failure.userMessage);
     }
   }
 
@@ -1911,7 +2136,7 @@ class TransferController extends Notifier<TransferState> {
       return;
     }
 
-    final context = _outgoingTransfers[transferId];
+    final context = _lookupOutgoingTransfer(transferId);
     if (context == null || context.completeAck.isCompleted) {
       return;
     }
@@ -2024,6 +2249,11 @@ class TransferController extends Notifier<TransferState> {
   }
 
   void _scheduleDataAckRetry(_IncomingTransferContext context) {
+    if (!TransferIncomingAckRetryScheduleCommand.shouldScheduleDataAckRetry(
+      hasAckFlushTimer: context.ackFlushTimer != null,
+    )) {
+      return;
+    }
     context.ackFlushTimer ??= Timer(_ackBatchInterval, () {
       context.ackFlushTimer = null;
       unawaited(_flushDataAck(context));
@@ -2036,8 +2266,10 @@ class TransferController extends Notifier<TransferState> {
     required InternetAddress address,
     required int port,
   }) {
-    final compactIndexes = chunkIndexes.toSet().toList(growable: false)..sort();
-    if (compactIndexes.isEmpty) {
+    final ackBitmap = TransferOutgoingAckBitmapCommand.build(
+      chunkIndexes: chunkIndexes,
+    );
+    if (ackBitmap.primaryChunkIndex == null || ackBitmap.ackBase == null) {
       return Future.value();
     }
     return _sendDataFrame(
@@ -2045,11 +2277,14 @@ class TransferController extends Notifier<TransferState> {
         context,
         type: DataFrameType.dataAck,
         sequence: context.nextSequence(),
-        chunkIndex: compactIndexes.first,
+        chunkIndex: ackBitmap.primaryChunkIndex!,
         windowStart: context.nextExpectedChunk,
-        windowSize: _receiverWindowSize(context),
-        ackBase: compactIndexes.first,
-        ackBitmapWords: _bitmapWordsFor(compactIndexes),
+        windowSize: TransferIncomingWindowCommand.receiverWindowSize(
+          advertisedWindowSize: _receiverAdvertisedWindow,
+          bufferedChunkCount: context.bufferedChunks.length,
+        ),
+        ackBase: ackBitmap.ackBase!,
+        ackBitmapWords: ackBitmap.ackBitmapWords,
       ),
       address: address,
       port: port,
@@ -2062,8 +2297,10 @@ class TransferController extends Notifier<TransferState> {
     required InternetAddress address,
     required int port,
   }) {
-    final compactIndexes = chunkIndexes.toSet().toList(growable: false)..sort();
-    if (compactIndexes.isEmpty) {
+    final ackBitmap = TransferOutgoingAckBitmapCommand.build(
+      chunkIndexes: chunkIndexes,
+    );
+    if (ackBitmap.primaryChunkIndex == null || ackBitmap.ackBase == null) {
       return Future.value();
     }
     return _sendDataFrame(
@@ -2071,11 +2308,14 @@ class TransferController extends Notifier<TransferState> {
         context,
         type: DataFrameType.dataNack,
         sequence: context.nextSequence(),
-        chunkIndex: compactIndexes.first,
-        ackBase: compactIndexes.first,
-        ackBitmapWords: _bitmapWordsFor(compactIndexes),
+        chunkIndex: ackBitmap.primaryChunkIndex!,
+        ackBase: ackBitmap.ackBase!,
+        ackBitmapWords: ackBitmap.ackBitmapWords,
         windowStart: context.nextExpectedChunk,
-        windowSize: _receiverWindowSize(context),
+        windowSize: TransferIncomingWindowCommand.receiverWindowSize(
+          advertisedWindowSize: _receiverAdvertisedWindow,
+          bufferedChunkCount: context.bufferedChunks.length,
+        ),
       ),
       address: address,
       port: port,
@@ -2270,15 +2510,7 @@ class TransferController extends Notifier<TransferState> {
   }
 
   String _incomingChunkWriteFailureMessage(Object error) {
-    final reason = switch (error) {
-      AppException(:final message) => message,
-      FileSystemException(:final message) when message.isNotEmpty => message,
-      StateError(:final message) => message,
-      _ => error.runtimeType.toString(),
-    };
-    return '수신 data chunk 를 저장하지 못했습니다. '
-        '저장 경로 또는 임시 파일 권한을 확인해 주세요. '
-        '원인: $reason';
+    return TransferIncomingChunkWriteFailureMapper.messageFor(error);
   }
 
   Future<void> _sendWindowUpdateIfNeeded(
@@ -2292,7 +2524,10 @@ class TransferController extends Notifier<TransferState> {
   }) {
     final nextStart = context.nextExpectedChunk;
     final movedBy = nextStart - context.lastAdvertisedWindowStart;
-    final receiverWindowSize = _receiverWindowSize(context);
+    final receiverWindowSize = TransferIncomingWindowCommand.receiverWindowSize(
+      advertisedWindowSize: _receiverAdvertisedWindow,
+      bufferedChunkCount: context.bufferedChunks.length,
+    );
     if (!force &&
         movedBy < _windowUpdateChunkInterval &&
         receiverWindowSize > 1) {
@@ -2310,64 +2545,8 @@ class TransferController extends Notifier<TransferState> {
     );
   }
 
-  List<int> _missingIndexesUntil(
-    _IncomingTransferContext context,
-    int highestReceivedIndex, {
-    required int limit,
-  }) {
-    final indexes = <int>[];
-    for (
-      var index = context.nextExpectedChunk;
-      index < highestReceivedIndex && indexes.length < limit;
-      index += 1
-    ) {
-      if (!context.acknowledgedChunks.contains(index)) {
-        indexes.add(index);
-      }
-    }
-    return indexes;
-  }
-
-  List<int> _remainingMissingIndexes(
-    _IncomingTransferContext context, {
-    required int limit,
-  }) {
-    final indexes = <int>[];
-    for (
-      var index = context.nextExpectedChunk;
-      index < context.expectedChunkCount && indexes.length < limit;
-      index += 1
-    ) {
-      if (!context.acknowledgedChunks.contains(index)) {
-        indexes.add(index);
-      }
-    }
-    return indexes;
-  }
-
-  Set<int> _chunkIndexesFromAckFrame(DataFrame frame) {
-    final chunkIndexes = <int>{frame.chunkIndex};
-    for (
-      var wordIndex = 0;
-      wordIndex < frame.ackBitmapWords.length;
-      wordIndex += 1
-    ) {
-      final word = frame.ackBitmapWords[wordIndex];
-      for (var bit = 0; bit < 32; bit += 1) {
-        if ((word & (1 << bit)) != 0) {
-          chunkIndexes.add(frame.ackBase + wordIndex * 32 + bit);
-        }
-      }
-    }
-    return chunkIndexes;
-  }
-
-  int _receiverWindowSize(_IncomingTransferContext context) {
-    return max(1, _receiverAdvertisedWindow - context.bufferedChunks.length);
-  }
-
   Future<void> _failIncomingTransfer(String transferId, String message) async {
-    final context = _incomingTransfers.remove(transferId);
+    final context = _removeIncomingTransfer(transferId);
     if (context != null) {
       try {
         await context.closeWriter();
@@ -2402,7 +2581,7 @@ class TransferController extends Notifier<TransferState> {
   }
 
   Future<void> _failOutgoingTransfer(String transferId, String message) async {
-    final context = _outgoingTransfers[transferId];
+    final context = _removeOutgoingTransfer(transferId);
     if (context == null || context.hasFailed) {
       return;
     }
@@ -2708,9 +2887,11 @@ class TransferController extends Notifier<TransferState> {
   }
 
   int _chunkByteLength(PreparedTransferMetadata file, int chunkIndex) {
-    final start = chunkIndex * file.chunkSize;
-    final remaining = file.fileSize - start;
-    return remaining > file.chunkSize ? file.chunkSize : remaining;
+    return TransferOutgoingChunkByteLengthCommand.calculate(
+      fileSize: file.fileSize,
+      chunkSize: file.chunkSize,
+      chunkIndex: chunkIndex,
+    );
   }
 
   void _updateOutgoingMetrics(
@@ -2725,7 +2906,8 @@ class TransferController extends Notifier<TransferState> {
     final lossRate = _lossRateFor(context);
     _updateJob(
       transferId,
-      (job) => job.copyWith(
+      (job) => TransferJobMetricsCommand.outgoing(
+        job,
         bytesTransferred: context.acknowledgedBytes,
         completedChunks: context.acknowledgedChunks.length,
         retryCount: context.retryCount,
@@ -2749,15 +2931,19 @@ class TransferController extends Notifier<TransferState> {
       transferredBytes: context.writtenBytes,
       startedAt: context.startedAt,
     );
+    final windowSize = TransferIncomingWindowCommand.receiverWindowSize(
+      advertisedWindowSize: _receiverAdvertisedWindow,
+      bufferedChunkCount: context.bufferedChunks.length,
+    );
     _updateJob(
       transferId,
-      (job) => job.copyWith(
-        status: TransferJobStatus.receiving,
+      (job) => TransferJobMetricsCommand.incoming(
+        job,
         bytesTransferred: context.writtenBytes,
         completedChunks: context.nextExpectedChunk,
         duplicateCount: context.duplicateChunks,
         throughputBytesPerSec: throughput,
-        windowSize: _receiverWindowSize(context),
+        windowSize: windowSize,
         updatedAt: _now(),
         message: message,
       ),
@@ -2768,8 +2954,10 @@ class TransferController extends Notifier<TransferState> {
     String transferId,
     _IncomingTransferContext context,
   ) {
-    if (context.bufferedChunks.isEmpty ||
-        context.missingNackRetryTimer != null) {
+    if (!TransferIncomingAckRetryScheduleCommand.shouldScheduleMissingNackRetry(
+      bufferedChunkCount: context.bufferedChunks.length,
+      hasMissingNackRetryTimer: context.missingNackRetryTimer != null,
+    )) {
       return;
     }
     context.missingNackRetryTimer = Timer(_outOfOrderNackRepeatInterval, () {
@@ -2782,7 +2970,7 @@ class TransferController extends Notifier<TransferState> {
     String transferId,
     _IncomingTransferContext context,
   ) async {
-    if (_incomingTransfers[transferId] != context ||
+    if (_lookupIncomingTransfer(transferId) != context ||
         context.bufferedChunks.isEmpty) {
       return;
     }
@@ -2791,8 +2979,10 @@ class TransferController extends Notifier<TransferState> {
     if (address == null || port == null) {
       return;
     }
-    final missingIndexes = _remainingMissingIndexes(
-      context,
+    final missingIndexes = TransferIncomingMissingChunksCommand.remaining(
+      nextExpectedChunk: context.nextExpectedChunk,
+      expectedChunkCount: context.expectedChunkCount,
+      acknowledgedChunks: context.acknowledgedChunks,
       limit: _maxNackIndexesPerPacket,
     );
     if (missingIndexes.isNotEmpty) {
@@ -2814,53 +3004,37 @@ class TransferController extends Notifier<TransferState> {
   }
 
   double _lossRateFor(_OutgoingTransferContext context) {
-    final denominator = context.acknowledgedChunks.length + context.retryCount;
-    if (denominator <= 0) {
-      return 0;
-    }
-    return context.retryCount / denominator;
+    return TransferMetricCalculationCommand.lossRate(
+      acknowledgedChunkCount: context.acknowledgedChunks.length,
+      retryCount: context.retryCount,
+    );
   }
 
   double _throughputBytesPerSec({
     required int transferredBytes,
     required DateTime startedAt,
   }) {
-    final elapsedMs = _now().difference(startedAt).inMilliseconds;
-    if (elapsedMs <= 0 || transferredBytes <= 0) {
-      return 0;
-    }
-    return transferredBytes / (elapsedMs / 1000);
+    return TransferMetricCalculationCommand.throughputBytesPerSec(
+      transferredBytes: transferredBytes,
+      startedAt: startedAt,
+      now: _now(),
+    );
   }
 
   void _upsertJob(TransferJob nextJob) {
-    final jobs = [
-      for (final job in state.jobs)
-        if (job.id != nextJob.id) job,
-      nextJob,
-    ]..sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
+    final jobs = TransferJobListUpsertCommand.upsert(
+      currentJobs: state.jobs,
+      nextJob: nextJob,
+    );
     state = state.copyWith(jobs: jobs, clearError: true);
     ref
         .read(messageBusProvider)
         .publish(
-          TransferSessionAppEvent(
+          TransferJobEventFactory.sessionEvent(
+            nextJob,
             eventId: _eventId('transfer-${nextJob.status.name}'),
             occurredAt: _now(),
-            correlationId: nextJob.transferId,
             source: 'TransferController',
-            severity:
-                nextJob.status == TransferJobStatus.failed ||
-                    nextJob.status == TransferJobStatus.rejected
-                ? AppEventSeverity.product
-                : AppEventSeverity.debug,
-            eventType: 'transfer${nextJob.status.name}',
-            transferId: nextJob.transferId,
-            jobId: nextJob.id,
-            peerId: nextJob.peerId,
-            reasonCode:
-                nextJob.status == TransferJobStatus.failed ||
-                    nextJob.status == TransferJobStatus.rejected
-                ? nextJob.message
-                : null,
           ),
         );
     if (nextJob.isTerminal) {
@@ -2888,24 +3062,22 @@ class TransferController extends Notifier<TransferState> {
     String transferId,
     TransferJob Function(TransferJob currentJob) update,
   ) {
-    TransferJob? currentJob;
-    for (final job in state.jobs) {
-      if (job.id == transferId) {
-        currentJob = job;
-        break;
-      }
-    }
-    if (currentJob == null) {
+    final nextJob = TransferJobUpdateLookupCommand.updateById(
+      jobs: state.jobs,
+      jobId: transferId,
+      update: update,
+    );
+    if (nextJob == null) {
       return;
     }
-    _upsertJob(update(currentJob));
+    _upsertJob(nextJob);
   }
 
   void _markRejected(String transferId, String message) {
     _updateJob(
       transferId,
-      (job) => job.copyWith(
-        status: TransferJobStatus.rejected,
+      (job) => TransferJobTerminalStatusCommand.rejected(
+        job,
         updatedAt: _now(),
         message: message,
       ),
@@ -2916,8 +3088,8 @@ class TransferController extends Notifier<TransferState> {
   void _markFailed(String transferId, String message) {
     _updateJob(
       transferId,
-      (job) => job.copyWith(
-        status: TransferJobStatus.failed,
+      (job) => TransferJobTerminalStatusCommand.failed(
+        job,
         updatedAt: _now(),
         message: message,
       ),
@@ -3004,13 +3176,10 @@ class TransferController extends Notifier<TransferState> {
       ),
     );
     buffer.add(
-      TransferFrameTrace(
+      TransferFrameTraceMapper.fromFrame(
+        frame,
         occurredAt: _now(),
         direction: direction,
-        frameType: frame.type.name,
-        sequence: frame.sequence,
-        chunkIndex: frame.chunkIndex,
-        ackBase: frame.ackBase,
         datagramBytes: datagramBytes,
         endpoint: endpoint,
         decisionCode: decisionCode,
@@ -3029,15 +3198,14 @@ class TransferController extends Notifier<TransferState> {
     List<int> ackBitmapWords = const [],
     Uint8List? payload,
   }) {
-    return DataFrame(
-      version: DataFrameCodec.version,
-      type: type,
-      flags: 0,
+    return TransferDataFrameFactory.outgoing(
       sessionHash: context.authContext.sessionHash,
       transferIdBytes: context.transferIdBytes,
+      type: type,
       sequence: sequence,
       chunkIndex: chunkIndex,
-      windowStart: windowStart ?? context.remoteWindowStart,
+      remoteWindowStart: context.remoteWindowStart,
+      windowStart: windowStart,
       windowSize: windowSize ?? context.windowSize,
       ackBase: ackBase,
       ackBitmapWords: ackBitmapWords,
@@ -3056,44 +3224,27 @@ class TransferController extends Notifier<TransferState> {
     List<int> ackBitmapWords = const [],
     Uint8List? payload,
   }) {
-    return DataFrame(
-      version: DataFrameCodec.version,
-      type: type,
-      flags: 0,
+    return TransferDataFrameFactory.incoming(
       sessionHash: context.sessionHash,
       transferIdBytes: context.transferIdBytes,
+      type: type,
       sequence: sequence,
       chunkIndex: chunkIndex,
-      windowStart: windowStart ?? context.nextExpectedChunk,
-      windowSize: windowSize ?? _receiverWindowSize(context),
+      nextExpectedChunk: context.nextExpectedChunk,
+      receiverWindowSize: TransferIncomingWindowCommand.receiverWindowSize(
+        advertisedWindowSize: _receiverAdvertisedWindow,
+        bufferedChunkCount: context.bufferedChunks.length,
+      ),
+      windowStart: windowStart,
+      windowSize: windowSize,
       ackBase: ackBase,
       ackBitmapWords: ackBitmapWords,
       payload: payload,
     );
   }
 
-  List<int> _bitmapWordsFor(List<int> chunkIndexes) {
-    if (chunkIndexes.isEmpty) {
-      return const [];
-    }
-    final base = chunkIndexes.first;
-    var maxOffset = 0;
-    for (final index in chunkIndexes) {
-      final offset = index - base;
-      if (offset > maxOffset) {
-        maxOffset = offset;
-      }
-    }
-    final words = List<int>.filled(maxOffset ~/ 32 + 1, 0);
-    for (final index in chunkIndexes) {
-      final offset = index - base;
-      words[offset ~/ 32] |= 1 << (offset % 32);
-    }
-    return words;
-  }
-
   String _frameKey(Uint8List transferIdBytes) =>
-      base64Url.encode(transferIdBytes);
+      TransferDataFrameKeyFormatter.format(transferIdBytes);
 
   PeerConnectionPath _requireActiveTransferRoute({
     required String peerId,
@@ -3118,19 +3269,16 @@ class TransferController extends Notifier<TransferState> {
         message: '검증된 연결 경로가 없어 파일을 전송할 수 없습니다.',
       );
     }
-    if (path.controlEndpoint.localAddress.trim().isEmpty ||
-        path.candidate.remoteAddress.trim().isEmpty ||
-        path.candidate.remotePort <= 0) {
-      throw const AppException(
-        code: 'transfer_active_route_invalid',
-        message: '연결 경로의 endpoint 정보가 올바르지 않습니다.',
-      );
-    }
-    if (_isLoopbackAddress(path.candidate.remoteAddress) &&
-        !_isLoopbackAddress(session.peerAddress)) {
-      throw const AppException(
-        code: 'transfer_loopback_route_mismatch',
-        message: '외부 피어 전송에는 loopback 경로를 사용할 수 없습니다.',
+    final routeDecision = TransferActiveRouteValidationCommand.validate(
+      controlLocalAddress: path.controlEndpoint.localAddress,
+      routeRemoteAddress: path.candidate.remoteAddress,
+      routeRemotePort: path.candidate.remotePort,
+      sessionPeerAddress: session.peerAddress,
+    );
+    if (!routeDecision.isValid) {
+      throw AppException(
+        code: routeDecision.code!,
+        message: routeDecision.message!,
       );
     }
     return path;
@@ -3210,16 +3358,17 @@ class TransferController extends Notifier<TransferState> {
     PeerRouteCandidate candidate,
     ControlDatagram datagram,
   ) {
-    if (candidate.remoteAddress != datagram.address.address ||
-        candidate.remotePort != datagram.port) {
-      return false;
-    }
     final localEndpoint = datagram.localEndpoint;
-    if (localEndpoint == null || localEndpoint.isWildcardBind) {
-      return true;
-    }
-    return candidate.localAddress == localEndpoint.localAddress ||
-        candidate.bindMode == UdpInterfaceBindMode.any;
+    return TransferIncomingRouteMatchCommand.matches(
+      candidateRemoteAddress: candidate.remoteAddress,
+      candidateRemotePort: candidate.remotePort,
+      datagramRemoteAddress: datagram.address.address,
+      datagramRemotePort: datagram.port,
+      candidateLocalAddress: candidate.localAddress,
+      datagramLocalAddress: localEndpoint?.localAddress,
+      datagramIsWildcardBind: localEndpoint?.isWildcardBind ?? false,
+      candidateIsAnyBind: candidate.bindMode == UdpInterfaceBindMode.any,
+    );
   }
 
   PeerRouteCandidate _upsertReachableIncomingTransferCandidate(
@@ -3355,18 +3504,16 @@ class TransferController extends Notifier<TransferState> {
     required TransferRouteSnapshot routeSnapshot,
     required InternetAddress remoteAddress,
   }) {
-    if (_sameAddress(
-      remoteAddress.address,
-      routeSnapshot.controlRemoteAddress,
-    )) {
+    final decision = TransferOutgoingRemoteDataEndpointRouteCommand.validate(
+      routeRemoteAddress: routeSnapshot.controlRemoteAddress,
+      dataRemoteAddress: remoteAddress.address,
+    );
+    if (decision.isValid) {
       return;
     }
     throw AppException(
       code: 'transfer_route_mismatch',
-      message:
-          'Data endpoint가 검증된 연결 경로와 다릅니다. '
-          'route=${routeSnapshot.controlRemoteAddress}, '
-          'data=${remoteAddress.address}',
+      message: decision.message!,
     );
   }
 
@@ -3374,42 +3521,30 @@ class TransferController extends Notifier<TransferState> {
     required TransferRouteSnapshot routeSnapshot,
     required UdpInterfaceEndpoint dataEndpoint,
   }) {
-    if (dataEndpoint.isWildcardBind ||
-        _isWildcardAddress(dataEndpoint.localAddress)) {
-      return;
-    }
-    if (_sameAddress(
-      dataEndpoint.localAddress,
-      routeSnapshot.controlLocalAddress,
-    )) {
+    final decision = TransferDataBindEndpointRouteCommand.validate(
+      routeLocalAddress: routeSnapshot.controlLocalAddress,
+      bindLocalAddress: dataEndpoint.localAddress,
+      isWildcardBind: dataEndpoint.isWildcardBind,
+    );
+    if (decision.isValid) {
       return;
     }
     throw AppException(
       code: 'transfer_data_bind_mismatch',
-      message:
-          'Data socket local address가 검증된 연결 경로와 다릅니다. '
-          'route=${routeSnapshot.controlLocalAddress}, '
-          'data=${dataEndpoint.localAddress}',
+      message: decision.message!,
     );
-  }
-
-  bool _sameAddress(String left, String right) {
-    return left.trim().toLowerCase() == right.trim().toLowerCase();
-  }
-
-  bool _isWildcardAddress(String address) {
-    final normalized = address.trim().toLowerCase();
-    return normalized == '0.0.0.0' ||
-        normalized == '::' ||
-        normalized == '0:0:0:0:0:0:0:0';
   }
 
   void _ensureRouteLeaseStillActive(_OutgoingTransferContext context) {
     final current = ref
         .read(peerPathRegistryProvider)
         .selectedForPeer(context.session.peerId);
-    if (current?.pathId == context.routeSnapshot.routeLeaseId &&
-        current?.status == PeerPathStatus.active) {
+    final decision = TransferOutgoingRouteLeaseCommand.validate(
+      expectedRouteLeaseId: context.routeSnapshot.routeLeaseId,
+      currentRouteLeaseId: current?.pathId,
+      currentStatus: current?.status,
+    );
+    if (decision.isValid) {
       return;
     }
     throw AppException(
@@ -3420,109 +3555,74 @@ class TransferController extends Notifier<TransferState> {
     );
   }
 
-  bool _isLoopbackAddress(String address) {
-    final normalized = address.trim().toLowerCase();
-    return normalized == 'localhost' ||
-        normalized == '::1' ||
-        normalized.startsWith('127.');
-  }
-
   String _endpointLabel(UdpInterfaceEndpoint? endpoint) {
-    if (endpoint == null) {
-      return 'any';
-    }
-    return '${endpoint.localAddress}:${endpoint.port}/${endpoint.bindMode.name}';
+    return TransferEndpointLabelFormatter.format(
+      localAddress: endpoint?.localAddress,
+      port: endpoint?.port,
+      bindModeName: endpoint?.bindMode.name,
+    );
   }
 
   String _safeSession(String sessionId) {
-    return sessionId.length <= 8 ? sessionId : sessionId.substring(0, 8);
+    return TransferLogSafeFormatter.session(sessionId);
   }
 
   String _safeTransfer(String? transferId) {
-    if (transferId == null || transferId.isEmpty) {
-      return '-';
-    }
-    return transferId.length <= 8 ? transferId : transferId.substring(0, 8);
+    return TransferLogSafeFormatter.transfer(transferId);
   }
 
   String _safeFileNameForLog(String fileName) {
-    final trimmed = fileName.trim();
-    if (trimmed.isEmpty) {
-      return '-';
-    }
-    final posixBase = trimmed.split('/').last;
-    final basename = posixBase.split('\\').last;
-    if (basename.length <= 80) {
-      return basename;
-    }
-    return '${basename.substring(0, 77)}...';
+    return TransferLogSafeFormatter.fileName(fileName);
   }
 
   DateTime _now() => ref.read(transferNowProvider)();
 
-  String _eventId(String prefix) => '$prefix-${_now().microsecondsSinceEpoch}';
+  String _eventId(String prefix) {
+    return TransferEventIdFormatter.format(prefix: prefix, now: _now());
+  }
 
   String _currentUserId() {
     final user = ref.read(authControllerProvider).currentUser;
-    if (user == null) {
-      throw const AppException(
-        code: 'transfer_no_session',
-        message: '로그인 세션이 없어 전송할 수 없습니다.',
-      );
-    }
-    return user.userId;
+    return TransferIdentitySelectionCommand.requiredUserId(user?.userId);
   }
 
   String _currentDisplayName() {
     final user = ref.read(authControllerProvider).currentUser;
-    return user?.displayName ?? _currentUserId();
+    return TransferIdentitySelectionCommand.displayName(
+      displayName: user?.displayName,
+      userId: _currentUserId(),
+    );
   }
 
   String _currentDeviceId() {
-    final deviceId = _localIdentity?.deviceId;
-    if (deviceId == null || deviceId.trim().isEmpty) {
-      throw const AppException(
-        code: 'transfer_local_device_missing',
-        message: '로컬 장치 식별 정보를 찾지 못했습니다.',
-      );
-    }
-    return deviceId;
+    return TransferIdentitySelectionCommand.requiredDeviceId(
+      _localIdentity?.deviceId,
+    );
   }
 
   String _currentInstanceId() {
-    final instanceId = _localIdentity?.instanceId;
-    if (instanceId == null || instanceId.trim().isEmpty) {
-      throw const AppException(
-        code: 'transfer_local_instance_missing',
-        message: '로컬 실행 인스턴스 식별 정보를 찾지 못했습니다.',
-      );
-    }
-    return instanceId;
-  }
-
-  String _peerIdFromPacket(AuthPacket packet) {
-    final instanceId = packet.fromInstanceId;
-    return '${packet.fromUserId}@${instanceId == null || instanceId.isEmpty ? packet.fromDeviceId : instanceId}';
+    return TransferIdentitySelectionCommand.requiredInstanceId(
+      _localIdentity?.instanceId,
+    );
   }
 
   String _randomHex(int bytes) {
-    return List<int>.generate(
-      bytes,
-      (_) => _random.nextInt(256),
-    ).map((value) => value.toRadixString(16).padLeft(2, '0')).join();
+    return TransferRandomHexFormatter.formatBytes(
+      List<int>.generate(bytes, (_) => _random.nextInt(256)),
+    );
   }
 
   Future<void> _dispose() async {
     await _packetSubscription?.cancel();
     await _dataFrameSubscription?.cancel();
-    for (final context in _outgoingTransfers.values) {
-      await context.dispose();
+    for (final transferId in _outgoingTransfers.keys.toList(growable: false)) {
+      final context = _removeOutgoingTransfer(transferId);
+      await context?.dispose();
     }
-    for (final context in _incomingTransfers.values) {
-      await context.closeWriter();
+    for (final transferId in _incomingTransfers.keys.toList(growable: false)) {
+      final context = _removeIncomingTransfer(transferId);
+      await context?.closeWriter();
     }
-    _outgoingTransfers.clear();
-    _incomingTransfers.clear();
     _diagnosticFrameTraces.clear();
   }
 }

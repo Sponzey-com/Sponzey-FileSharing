@@ -251,6 +251,68 @@ void main() {
   });
 
   test(
+    'ignores unknown Data channel frames without creating transfer job',
+    () async {
+      final network = _LinkedFakeAuthNetwork();
+      final dataTransport = network.attachDataTransport() as _FakeDataTransport;
+      final logger = _MemoryAppLogger(minimumLevel: AppLogLevel.info);
+      final node = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41151,
+        receivePath: '${workspaceDirectory.path}/unknown-frame',
+        dataTransport: dataTransport,
+        logger: logger,
+      );
+      addTearDown(node.dispose);
+
+      await dataTransport.bind(
+        localEndpoint: const UdpInterfaceEndpoint(
+          role: UdpPortRole.data,
+          localAddress: '127.0.0.1',
+          port: 0,
+          bindMode: UdpInterfaceBindMode.any,
+        ),
+        portRange: const UdpPortRange(start: 49151, end: 49151),
+      );
+
+      dataTransport.emitFrame(
+        DataFrame(
+          version: DataFrameCodec.version,
+          type: DataFrameType.dataChunk,
+          flags: 0,
+          sessionHash: 1,
+          transferIdBytes: Uint8List.fromList(
+            List<int>.generate(16, (index) => index + 1),
+          ),
+          sequence: 1,
+          chunkIndex: 0,
+          windowStart: 0,
+          windowSize: 1,
+          ackBase: 0,
+          payload: Uint8List.fromList([1, 2, 3]),
+        ),
+        address: InternetAddress.loopbackIPv4,
+        port: 49150,
+      );
+      await _flush();
+
+      expect(node.container.read(transferJobsProvider), isEmpty);
+      expect(
+        logger.entries.where(
+          (entry) =>
+              entry.category == AppLogCategory.transferData ||
+              entry.category == AppLogCategory.transferControl,
+        ),
+        isEmpty,
+      );
+    },
+  );
+
+  test(
     'uses active route remote address instead of stale session loopback target',
     () async {
       String? transferInitTargetAddress;
