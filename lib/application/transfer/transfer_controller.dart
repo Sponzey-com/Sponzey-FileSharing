@@ -19,6 +19,7 @@ import 'package:sponzey_file_sharing/application/transfer/transfer_data_bind_end
 import 'package:sponzey_file_sharing/application/transfer/transfer_data_frame_factory.dart';
 import 'package:sponzey_file_sharing/application/transfer/transfer_data_frame_dispatcher.dart';
 import 'package:sponzey_file_sharing/application/transfer/transfer_data_frame_key_formatter.dart';
+import 'package:sponzey_file_sharing/application/transfer/transfer_data_frame_key_registry.dart';
 import 'package:sponzey_file_sharing/application/transfer/transfer_data_frame_route_context_command.dart';
 import 'package:sponzey_file_sharing/application/transfer/transfer_diagnostics_ring_buffer.dart';
 import 'package:sponzey_file_sharing/application/transfer/transfer_endpoint_label_formatter.dart';
@@ -193,7 +194,8 @@ class TransferController extends Notifier<TransferState> {
   );
   final Map<String, _OutgoingTransferContext> _outgoingTransfers = {};
   final Map<String, _IncomingTransferContext> _incomingTransfers = {};
-  final Map<String, String> _transferIdByFrameKey = {};
+  final TransferDataFrameKeyRegistry _frameKeyRegistry =
+      TransferDataFrameKeyRegistry();
   final Map<String, TransferDiagnosticsRingBuffer> _diagnosticFrameTraces = {};
 
   @override
@@ -269,14 +271,12 @@ class TransferController extends Notifier<TransferState> {
           ),
         );
       }
-      _transferIdByFrameKey.remove(_frameKey(outgoing.transferIdBytes));
       await outgoing.dispose();
     }
 
     final incoming = _removeIncomingTransfer(transferId);
     if (incoming != null) {
       await incoming.closeWriter();
-      _transferIdByFrameKey.remove(_frameKey(incoming.transferIdBytes));
       await ref
           .read(transferFileServiceProvider)
           .discardDraft(incoming.tempFilePath);
@@ -329,7 +329,11 @@ class TransferController extends Notifier<TransferState> {
       );
     }
     _incomingTransfers[transferId] = context;
-    _transferIdByFrameKey[_frameKey(context.transferIdBytes)] = transferId;
+    _registerFrameKey(
+      direction: TransferDirection.incoming,
+      transferId: transferId,
+      transferIdBytes: context.transferIdBytes,
+    );
   }
 
   _OutgoingTransferContext? _lookupOutgoingTransfer(String transferId) {
@@ -358,7 +362,11 @@ class TransferController extends Notifier<TransferState> {
       return null;
     }
     _outgoingSessionRegistry.remove(_outgoingSessionKey(transferId, context));
-    _transferIdByFrameKey.remove(_frameKey(context.transferIdBytes));
+    _removeFrameKey(
+      direction: TransferDirection.outgoing,
+      transferId: transferId,
+      transferIdBytes: context.transferIdBytes,
+    );
     return context;
   }
 
@@ -368,7 +376,11 @@ class TransferController extends Notifier<TransferState> {
       return null;
     }
     _incomingSessionRegistry.remove(_incomingSessionKey(transferId, context));
-    _transferIdByFrameKey.remove(_frameKey(context.transferIdBytes));
+    _removeFrameKey(
+      direction: TransferDirection.incoming,
+      transferId: transferId,
+      transferIdBytes: context.transferIdBytes,
+    );
     return context;
   }
 
@@ -627,11 +639,14 @@ class TransferController extends Notifier<TransferState> {
 
   Future<void> _handleDataFrame(DataFrameDatagram datagram) async {
     final frame = datagram.frame;
-    final transferId = _transferIdByFrameKey[_frameKey(frame.transferIdBytes)];
+    final route = _dataFrameDispatcher.routeFor(frame.type);
+    final transferId = _transferIdForFrame(
+      frame,
+      direction: route.expectedDirection,
+    );
     if (transferId == null) {
       return;
     }
-    final route = _dataFrameDispatcher.routeFor(frame.type);
     if (!_hasDataFrameRouteContext(transferId, route)) {
       return;
     }
@@ -749,7 +764,11 @@ class TransferController extends Notifier<TransferState> {
         transferId,
         (job) => job.copyWith(routeSnapshot: context.routeSnapshot),
       );
-      _transferIdByFrameKey[_frameKey(context.transferIdBytes)] = transferId;
+      _registerFrameKey(
+        direction: TransferDirection.outgoing,
+        transferId: transferId,
+        transferIdBytes: context.transferIdBytes,
+      );
       await _sendDataFrame(
         _dataFrame(
           context,
@@ -1766,7 +1785,6 @@ class TransferController extends Notifier<TransferState> {
             fileName: context.fileName,
           );
       _removeIncomingTransfer(transferId);
-      _transferIdByFrameKey.remove(_frameKey(context.transferIdBytes));
       _updateJob(
         transferId,
         (job) => job.copyWith(
@@ -3142,7 +3160,10 @@ class TransferController extends Notifier<TransferState> {
     final result = await ref
         .read(dataTransportProvider)
         .sendFrame(frame, address: address, port: port);
-    final transferId = _transferIdByFrameKey[_frameKey(frame.transferIdBytes)];
+    final transferId = _transferIdForFrame(
+      frame,
+      direction: _sentFrameOwnerDirection(frame.type),
+    );
     if (transferId != null) {
       _recordFrameTrace(
         transferId: transferId,
@@ -3245,6 +3266,52 @@ class TransferController extends Notifier<TransferState> {
 
   String _frameKey(Uint8List transferIdBytes) =>
       TransferDataFrameKeyFormatter.format(transferIdBytes);
+
+  void _registerFrameKey({
+    required TransferDirection direction,
+    required String transferId,
+    required Uint8List transferIdBytes,
+  }) {
+    _frameKeyRegistry.register(
+      direction: direction,
+      frameKey: _frameKey(transferIdBytes),
+      transferId: transferId,
+    );
+  }
+
+  void _removeFrameKey({
+    required TransferDirection direction,
+    required String transferId,
+    required Uint8List transferIdBytes,
+  }) {
+    _frameKeyRegistry.remove(
+      direction: direction,
+      frameKey: _frameKey(transferIdBytes),
+      transferId: transferId,
+    );
+  }
+
+  String? _transferIdForFrame(
+    DataFrame frame, {
+    required TransferDirection direction,
+  }) {
+    return _frameKeyRegistry.lookup(
+      direction: direction,
+      frameKey: _frameKey(frame.transferIdBytes),
+    );
+  }
+
+  TransferDirection _sentFrameOwnerDirection(DataFrameType type) {
+    final remoteExpectedDirection = _dataFrameDispatcher
+        .routeFor(type)
+        .expectedDirection;
+    switch (remoteExpectedDirection) {
+      case TransferDirection.incoming:
+        return TransferDirection.outgoing;
+      case TransferDirection.outgoing:
+        return TransferDirection.incoming;
+    }
+  }
 
   PeerConnectionPath _requireActiveTransferRoute({
     required String peerId,
