@@ -81,7 +81,10 @@ abstract interface class DataChannelSessionRegistry {
 
   List<TcpDataPeerSessionSnapshot> snapshot();
 
-  TcpDataPeerSessionSnapshot? remove(DataChannelSessionKey key);
+  TcpDataPeerSessionSnapshot? remove(
+    DataChannelSessionKey key, {
+    bool allowReregister = false,
+  });
 }
 
 class InMemoryDataChannelSessionRegistry implements DataChannelSessionRegistry {
@@ -168,9 +171,16 @@ class InMemoryDataChannelSessionRegistry implements DataChannelSessionRegistry {
   }
 
   @override
-  TcpDataPeerSessionSnapshot? remove(DataChannelSessionKey key) {
+  TcpDataPeerSessionSnapshot? remove(
+    DataChannelSessionKey key, {
+    bool allowReregister = false,
+  }) {
     final entry = _entries.remove(key);
-    _removedKeys.add(key);
+    if (allowReregister) {
+      _removedKeys.remove(key);
+    } else {
+      _removedKeys.add(key);
+    }
     return entry?.session;
   }
 

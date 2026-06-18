@@ -85,6 +85,24 @@ void main() {
     expect(registry.lookup(outgoingKey), isNull);
   });
 
+  test('allows explicit re-registration for negotiated channel recovery', () {
+    final registry = InMemoryDataChannelSessionRegistry(
+      mode: DataChannelMode.tcp,
+    );
+    registry.register(outgoingKey, outgoingSession);
+
+    expect(
+      registry.remove(outgoingKey, allowReregister: true),
+      outgoingSession,
+    );
+    expect(registry.statusOf(outgoingKey), isNull);
+
+    final result = registry.register(outgoingKey, outgoingSession);
+
+    expect(result.registered, isTrue);
+    expect(registry.lookup(outgoingKey), outgoingSession);
+  });
+
   test('rejects key and session direction mismatch', () {
     final registry = InMemoryDataChannelSessionRegistry(
       mode: DataChannelMode.tcp,

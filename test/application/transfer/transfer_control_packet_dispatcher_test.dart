@@ -57,15 +57,18 @@ void main() {
     }
   });
 
-  test('routes TCP data channel negotiation packets to ignored for now', () {
+  test('routes TCP data channel negotiation packets explicitly', () {
     const dispatcher = TransferControlPacketDispatcher();
 
     expect(
       dispatcher.routeFor(AuthPacketType.dataChannelOffer),
       TransferControlPacketRoute.dataChannelOffer,
     );
+    expect(
+      dispatcher.routeFor(AuthPacketType.dataChannelConnect),
+      TransferControlPacketRoute.dataChannelConnect,
+    );
     for (final type in const [
-      AuthPacketType.dataChannelConnect,
       AuthPacketType.dataChannelAccept,
       AuthPacketType.dataChannelReject,
     ]) {

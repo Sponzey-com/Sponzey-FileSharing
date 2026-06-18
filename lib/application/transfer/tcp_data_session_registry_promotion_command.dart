@@ -48,7 +48,12 @@ class TcpDataSessionRegistryPromotionCommand {
       authSessionId: expectation.authSessionId,
       direction: promotion.state.direction,
     );
-    final registration = registry.register(key, promotion.state);
+    var registration = registry.register(key, promotion.state);
+    if (!registration.registered &&
+        registration.issueCode == 'duplicate_data_channel_session') {
+      registry.remove(key, allowReregister: true);
+      registration = registry.register(key, promotion.state);
+    }
     return TcpDataSessionRegistryPromotionResult(
       registered: registration.registered,
       session: promotion.state,

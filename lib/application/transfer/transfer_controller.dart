@@ -12,6 +12,7 @@ import 'package:sponzey_file_sharing/application/auth/peer_auth_controller.dart'
 import 'package:sponzey_file_sharing/application/discovery/peer_route_candidate_projection.dart';
 import 'package:sponzey_file_sharing/application/network/network_diagnostics_provider.dart';
 import 'package:sponzey_file_sharing/application/network/peer_path_registry.dart';
+import 'package:sponzey_file_sharing/application/transfer/data_channel_session_registry.dart';
 import 'package:sponzey_file_sharing/application/transfer/transfer_active_route_validation_command.dart';
 import 'package:sponzey_file_sharing/application/transfer/transfer_control_packet_dispatcher.dart';
 import 'package:sponzey_file_sharing/application/transfer/transfer_data_endpoint_resolver.dart';
@@ -454,63 +455,87 @@ class TransferController extends Notifier<TransferState> {
       final tcpTransferId = _randomHex(12);
       pendingTcpTransferId = tcpTransferId;
       DateTime? tcpStartedAt;
-      final tcpSendResult = await ref
-          .read(tcpTransferSendUseCaseProvider)
-          .send(
-            TcpTransferSendUseCaseInput(
-              peerId: peerId,
-              authSessionId: session.sessionId,
-              transferId: tcpTransferId,
-              filePath: filePath,
-              chunkSize: _dataChunkSize,
-              onPrepared: (metadata) {
-                final now = _now();
-                tcpStartedAt = now;
-                _upsertJob(
-                  TransferJob(
-                    id: tcpTransferId,
-                    transferId: tcpTransferId,
-                    direction: TransferDirection.outgoing,
-                    peerId: peerId,
-                    peerDisplayName: session.peerDisplayName,
-                    fileName: metadata.fileName,
-                    fileSize: metadata.fileSize,
-                    bytesTransferred: 0,
-                    totalChunks: metadata.chunkCount,
-                    completedChunks: 0,
-                    status: TransferJobStatus.sending,
-                    createdAt: now,
-                    updatedAt: now,
-                    localFilePath: metadata.filePath,
-                    message: 'TCP data channel 전송 중',
-                    dataCapability: DataTransferCapability.tcpDataStreamV1,
-                  ),
-                );
-              },
-              onProgress: (progress) {
-                _updateJob(tcpTransferId, (job) {
+      Future<TcpTransferSendUseCaseResult> sendOverTcp() {
+        return ref
+            .read(tcpTransferSendUseCaseProvider)
+            .send(
+              TcpTransferSendUseCaseInput(
+                peerId: peerId,
+                authSessionId: session.sessionId,
+                transferId: tcpTransferId,
+                filePath: filePath,
+                chunkSize: _dataChunkSize,
+                onPrepared: (metadata) {
                   final now = _now();
-                  final startedAt = tcpStartedAt ?? job.createdAt;
-                  final elapsedMs = max(
-                    1,
-                    now.difference(startedAt).inMilliseconds,
-                  );
-                  return job.copyWith(
-                    status: TransferJobStatus.sending,
-                    bytesTransferred: min(job.fileSize, progress.bytesSent),
-                    completedChunks: min(
-                      job.totalChunks,
-                      progress.completedChunks,
+                  tcpStartedAt = now;
+                  _upsertJob(
+                    TransferJob(
+                      id: tcpTransferId,
+                      transferId: tcpTransferId,
+                      direction: TransferDirection.outgoing,
+                      peerId: peerId,
+                      peerDisplayName: session.peerDisplayName,
+                      fileName: metadata.fileName,
+                      fileSize: metadata.fileSize,
+                      bytesTransferred: 0,
+                      totalChunks: metadata.chunkCount,
+                      completedChunks: 0,
+                      status: TransferJobStatus.sending,
+                      createdAt: now,
+                      updatedAt: now,
+                      localFilePath: metadata.filePath,
+                      message: 'TCP data channel 전송 중',
+                      dataCapability: DataTransferCapability.tcpDataStreamV1,
                     ),
-                    throughputBytesPerSec:
-                        progress.bytesSent * 1000 / elapsedMs,
-                    updatedAt: now,
-                    message: 'TCP data channel 전송 중',
                   );
-                });
-              },
-            ),
-          );
+                },
+                onProgress: (progress) {
+                  _updateJob(tcpTransferId, (job) {
+                    final now = _now();
+                    final startedAt = tcpStartedAt ?? job.createdAt;
+                    final elapsedMs = max(
+                      1,
+                      now.difference(startedAt).inMilliseconds,
+                    );
+                    return job.copyWith(
+                      status: TransferJobStatus.sending,
+                      bytesTransferred: min(job.fileSize, progress.bytesSent),
+                      completedChunks: min(
+                        job.totalChunks,
+                        progress.completedChunks,
+                      ),
+                      throughputBytesPerSec:
+                          progress.bytesSent * 1000 / elapsedMs,
+                      updatedAt: now,
+                      message: 'TCP data channel 전송 중',
+                    );
+                  });
+                },
+              ),
+            );
+      }
+
+      var tcpSendResult = await sendOverTcp();
+      if (!tcpSendResult.sent &&
+          _tcpSendFailureInvalidatesOutboundChannel(tcpSendResult.issueCode)) {
+        _removeOutboundTcpDataSession(session);
+      }
+      if (!tcpSendResult.sent &&
+          !ref.read(appConfigProvider).allowLegacyUdpDataFallback &&
+          _tcpSendFailureCanNegotiateOutboundChannel(tcpSendResult.issueCode)) {
+        final negotiated = await _requestAndWaitForOutboundTcpDataChannel(
+          session,
+        );
+        if (negotiated) {
+          tcpSendResult = await sendOverTcp();
+          if (!tcpSendResult.sent &&
+              _tcpSendFailureInvalidatesOutboundChannel(
+                tcpSendResult.issueCode,
+              )) {
+            _removeOutboundTcpDataSession(session);
+          }
+        }
+      }
       if (tcpSendResult.sent) {
         final now = _now();
         _upsertJob(
@@ -825,6 +850,8 @@ class TransferController extends Notifier<TransferState> {
         await _onTransferCompleteAck(packet, datagram);
       case TransferControlPacketRoute.dataChannelOffer:
         await _onDataChannelOffer(packet, datagram);
+      case TransferControlPacketRoute.dataChannelConnect:
+        await _onDataChannelConnect(packet, datagram);
       case TransferControlPacketRoute.ignored:
         return;
     }
@@ -1760,6 +1787,27 @@ class TransferController extends Notifier<TransferState> {
     }
   }
 
+  Future<void> _onDataChannelConnect(
+    AuthPacket packet,
+    ControlDatagram datagram,
+  ) async {
+    final packetPeerId = PeerIdentity.resolve(
+      userId: packet.fromUserId,
+      instanceId: packet.fromInstanceId,
+      deviceId: packet.fromDeviceId,
+    ).id;
+    final session = _authenticatedSessionForControlPacket(
+      packet,
+      datagram,
+      packetPeerId: packetPeerId,
+      packetLabel: 'DATA_CHANNEL_CONNECT',
+    );
+    if (session == null) {
+      return;
+    }
+    await _sendTcpDataChannelOffer(session, force: true);
+  }
+
   Future<void> _sendTcpDataChannelOffersToAuthenticatedPeers() async {
     if (!ref.mounted) {
       return;
@@ -1775,7 +1823,10 @@ class TransferController extends Notifier<TransferState> {
     }
   }
 
-  Future<void> _sendTcpDataChannelOffer(PeerAuthSession session) async {
+  Future<void> _sendTcpDataChannelOffer(
+    PeerAuthSession session, {
+    bool force = false,
+  }) async {
     if (!ref.mounted) {
       return;
     }
@@ -1785,7 +1836,7 @@ class TransferController extends Notifier<TransferState> {
       return;
     }
     final offerKey = '${session.peerId}:${session.sessionId}';
-    if (_offeredTcpDataPeers.contains(offerKey)) {
+    if (!force && _offeredTcpDataPeers.contains(offerKey)) {
       return;
     }
     final path = ref
@@ -1832,6 +1883,77 @@ class TransferController extends Notifier<TransferState> {
           .debug(
             AppLogCategory.transferControl,
             'Failed to send DATA_CHANNEL_OFFER peer=${session.peerId}',
+            error: error,
+            stackTrace: stackTrace,
+          );
+    }
+  }
+
+  Future<bool> _requestAndWaitForOutboundTcpDataChannel(
+    PeerAuthSession session,
+  ) async {
+    await _requestTcpDataChannelOffer(session);
+    final elapsed = Stopwatch()..start();
+    while (elapsed.elapsed < const Duration(seconds: 2)) {
+      if (!ref.mounted) {
+        return false;
+      }
+      final existing = ref
+          .read(tcpDataChannelSessionRegistryProvider)
+          .lookup(
+            DataChannelSessionKey(
+              peerId: session.peerId,
+              authSessionId: session.sessionId,
+              direction: TcpDataChannelDirection.outbound,
+            ),
+          );
+      if (existing?.status == TcpDataPeerSessionStatus.connected) {
+        return true;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+    }
+    return false;
+  }
+
+  Future<void> _requestTcpDataChannelOffer(PeerAuthSession session) async {
+    if (!ref.mounted || !session.isAuthenticated) {
+      return;
+    }
+    final localIdentity = _localIdentity;
+    if (localIdentity == null) {
+      return;
+    }
+    final path = ref
+        .read(peerPathRegistryProvider)
+        .selectedForPeer(session.peerId);
+    if (path == null || path.status != PeerPathStatus.active) {
+      return;
+    }
+    try {
+      await _send(
+        AuthPacket(
+          type: AuthPacketType.dataChannelConnect,
+          protocolVersion: ref.read(appConfigProvider).protocolVersion,
+          sessionId: session.sessionId,
+          fromUserId: _currentUserId(),
+          fromDeviceId: localIdentity.deviceId,
+          fromInstanceId: localIdentity.instanceId,
+          fromDisplayName: _currentDisplayName(),
+          sentAtEpochMs: _now().millisecondsSinceEpoch,
+        ),
+        address: InternetAddress(path.candidate.remoteAddress),
+        port: path.candidate.remotePort,
+        localEndpoint: path.controlEndpoint,
+      );
+    } catch (error, stackTrace) {
+      if (!ref.mounted) {
+        return;
+      }
+      ref
+          .read(appLoggerProvider)
+          .debug(
+            AppLogCategory.transferControl,
+            'Failed to send DATA_CHANNEL_CONNECT peer=${session.peerId}',
             error: error,
             stackTrace: stackTrace,
           );
@@ -3669,6 +3791,29 @@ class TransferController extends Notifier<TransferState> {
       return;
     }
     state = state.copyWith(jobs: jobs);
+  }
+
+  bool _tcpSendFailureCanNegotiateOutboundChannel(String? issueCode) {
+    return issueCode == 'missing_tcp_outgoing_data_channel' ||
+        issueCode == 'tcp_outgoing_data_channel_not_connected';
+  }
+
+  bool _tcpSendFailureInvalidatesOutboundChannel(String? issueCode) {
+    return issueCode == 'tcp_outgoing_data_channel_not_connected' ||
+        issueCode == 'tcp_outgoing_stream_send_failed';
+  }
+
+  void _removeOutboundTcpDataSession(PeerAuthSession session) {
+    ref
+        .read(tcpDataChannelSessionRegistryProvider)
+        .remove(
+          DataChannelSessionKey(
+            peerId: session.peerId,
+            authSessionId: session.sessionId,
+            direction: TcpDataChannelDirection.outbound,
+          ),
+          allowReregister: true,
+        );
   }
 
   void _markRejected(String transferId, String message) {

@@ -84,7 +84,7 @@ void main() {
     );
   });
 
-  test('returns duplicate registration issue without replacing session', () {
+  test('replaces duplicate registration during negotiated recovery', () {
     final registry = InMemoryDataChannelSessionRegistry(
       mode: DataChannelMode.tcp,
     );
@@ -101,8 +101,8 @@ void main() {
       expectation: expectation,
     );
 
-    expect(duplicate.registered, isFalse);
-    expect(duplicate.issueCode, 'duplicate_data_channel_session');
+    expect(duplicate.registered, isTrue);
+    expect(duplicate.issueCode, isNull);
     expect(
       registry
           .lookup(
@@ -113,7 +113,7 @@ void main() {
             ),
           )
           ?.channelId,
-      const TcpDataChannelId('channel-1'),
+      const TcpDataChannelId('channel-2'),
     );
   });
 }

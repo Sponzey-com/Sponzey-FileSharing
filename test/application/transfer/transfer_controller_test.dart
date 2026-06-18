@@ -1390,6 +1390,294 @@ void main() {
   );
 
   test(
+    'sends files in both directions over established TCP data channels',
+    () async {
+      final network = _LinkedFakeAuthNetwork();
+      final aliceReceivePath =
+          '${workspaceDirectory.path}/alice-tcp-bidirectional';
+      final bobReceivePath = '${workspaceDirectory.path}/bob-tcp-bidirectional';
+      final aliceSourceFile = File(
+        '${workspaceDirectory.path}/tcp-bidirectional/alice-source.txt',
+      );
+      final bobSourceFile = File(
+        '${workspaceDirectory.path}/tcp-bidirectional/bob-source.txt',
+      );
+      await aliceSourceFile.parent.create(recursive: true);
+      await aliceSourceFile.writeAsString('alice to bob over tcp');
+      await bobSourceFile.writeAsString('bob to alice over tcp');
+      final alice = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41217,
+        receivePath: aliceReceivePath,
+      );
+      final bob = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-b',
+        authPort: 41218,
+        receivePath: bobReceivePath,
+      );
+      final aliceTcpResults = <TcpIncomingStreamFrameEventCoordinatorResult>[];
+      final bobTcpResults = <TcpIncomingStreamFrameEventCoordinatorResult>[];
+      final aliceTcpResultSubscription = alice.container
+          .read(tcpIncomingListenerSubscriptionProvider(aliceReceivePath))
+          .results
+          .listen(aliceTcpResults.add);
+      final bobTcpResultSubscription = bob.container
+          .read(tcpIncomingListenerSubscriptionProvider(bobReceivePath))
+          .results
+          .listen(bobTcpResults.add);
+      addTearDown(() async {
+        await aliceTcpResultSubscription.cancel();
+        await bobTcpResultSubscription.cancel();
+        await alice.container.read(tcpDataConnectorProvider).close();
+        await bob.container.read(tcpDataConnectorProvider).close();
+        await alice.dispose();
+        await bob.dispose();
+      });
+
+      await _prepareAuthenticatedPair(
+        alice: alice,
+        bob: bob,
+        bobReceivePath: bobReceivePath,
+        bobPort: 41218,
+        alicePort: 41217,
+        clock: clock,
+      );
+      alice.container
+          .read(peerPathRegistryMutationsProvider)
+          .select(
+            _testActivePath(
+              peerId: 'team@instance-device-b',
+              localAddress: '127.0.0.1',
+              remoteAddress: '127.0.0.1',
+              remotePort: 41218,
+            ),
+          );
+      bob.container
+          .read(peerPathRegistryMutationsProvider)
+          .select(
+            _testActivePath(
+              peerId: 'team@instance-device-a',
+              localAddress: '127.0.0.1',
+              remoteAddress: '127.0.0.1',
+              remotePort: 41217,
+            ),
+          );
+      final aliceSession = alice.container.read(
+        peerAuthSessionByPeerIdProvider('team@instance-device-b'),
+      )!;
+      final bobSession = bob.container.read(
+        peerAuthSessionByPeerIdProvider('team@instance-device-a'),
+      )!;
+      await _waitForTcpDataSession(
+        alice.container,
+        DataChannelSessionKey(
+          peerId: 'team@instance-device-b',
+          authSessionId: aliceSession.sessionId,
+          direction: TcpDataChannelDirection.outbound,
+        ),
+      );
+      await _waitForTcpDataSession(
+        bob.container,
+        DataChannelSessionKey(
+          peerId: 'team@instance-device-a',
+          authSessionId: bobSession.sessionId,
+          direction: TcpDataChannelDirection.outbound,
+        ),
+      );
+
+      await alice.transferController.sendFile(
+        peerId: 'team@instance-device-b',
+        filePath: aliceSourceFile.path,
+      );
+      await bob.transferController.sendFile(
+        peerId: 'team@instance-device-a',
+        filePath: bobSourceFile.path,
+      );
+
+      final bobReceivedFile = await _waitForFile(
+        '$bobReceivePath/alice-source.txt',
+        diagnostics: () => bobTcpResults
+            .map(
+              (result) =>
+                  '${result.applied}:${result.state?.name}:'
+                  '${result.issueCode}',
+            )
+            .join(', '),
+      );
+      final aliceReceivedFile = await _waitForFile(
+        '$aliceReceivePath/bob-source.txt',
+        diagnostics: () => aliceTcpResults
+            .map(
+              (result) =>
+                  '${result.applied}:${result.state?.name}:'
+                  '${result.issueCode}',
+            )
+            .join(', '),
+      );
+
+      expect(await bobReceivedFile.readAsString(), 'alice to bob over tcp');
+      expect(await aliceReceivedFile.readAsString(), 'bob to alice over tcp');
+      expect(
+        alice.container
+            .read(transferJobsProvider)
+            .where((job) => job.status == TransferJobStatus.failed),
+        isEmpty,
+      );
+      expect(
+        bob.container
+            .read(transferJobsProvider)
+            .where((job) => job.status == TransferJobStatus.failed),
+        isEmpty,
+      );
+    },
+  );
+
+  test(
+    'renegotiates missing outbound TCP channel before sending file',
+    () async {
+      var dataChannelConnectCount = 0;
+      final network = _LinkedFakeAuthNetwork(
+        interceptor:
+            ({
+              required packet,
+              required address,
+              required sourcePort,
+              required targetPort,
+              required deliver,
+            }) async {
+              if (packet.type == AuthPacketType.dataChannelConnect) {
+                dataChannelConnectCount += 1;
+              }
+              deliver(packet, address: address, port: sourcePort);
+            },
+      );
+      final aliceReceivePath =
+          '${workspaceDirectory.path}/alice-tcp-renegotiate';
+      final bobReceivePath = '${workspaceDirectory.path}/bob-tcp-renegotiate';
+      final sourceFile = File(
+        '${workspaceDirectory.path}/tcp-renegotiate/source.txt',
+      );
+      await sourceFile.parent.create(recursive: true);
+      await sourceFile.writeAsString('renegotiated tcp payload');
+      final alice = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41219,
+        receivePath: aliceReceivePath,
+        allowLegacyUdpDataFallback: false,
+      );
+      final bob = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-b',
+        authPort: 41220,
+        receivePath: bobReceivePath,
+        allowLegacyUdpDataFallback: false,
+      );
+      final bobTcpResults = <TcpIncomingStreamFrameEventCoordinatorResult>[];
+      final bobTcpResultSubscription = bob.container
+          .read(tcpIncomingListenerSubscriptionProvider(bobReceivePath))
+          .results
+          .listen(bobTcpResults.add);
+      addTearDown(() async {
+        await bobTcpResultSubscription.cancel();
+        await alice.container.read(tcpDataConnectorProvider).close();
+        await bob.container.read(tcpDataConnectorProvider).close();
+        await alice.dispose();
+        await bob.dispose();
+      });
+
+      await _prepareAuthenticatedPair(
+        alice: alice,
+        bob: bob,
+        bobReceivePath: bobReceivePath,
+        bobPort: 41220,
+        alicePort: 41219,
+        clock: clock,
+      );
+      alice.container
+          .read(peerPathRegistryMutationsProvider)
+          .select(
+            _testActivePath(
+              peerId: 'team@instance-device-b',
+              localAddress: '127.0.0.1',
+              remoteAddress: '127.0.0.1',
+              remotePort: 41220,
+            ),
+          );
+      bob.container
+          .read(peerPathRegistryMutationsProvider)
+          .select(
+            _testActivePath(
+              peerId: 'team@instance-device-a',
+              localAddress: '127.0.0.1',
+              remoteAddress: '127.0.0.1',
+              remotePort: 41219,
+            ),
+          );
+      final aliceSession = alice.container.read(
+        peerAuthSessionByPeerIdProvider('team@instance-device-b'),
+      )!;
+      await _waitForTcpDataSession(
+        alice.container,
+        DataChannelSessionKey(
+          peerId: 'team@instance-device-b',
+          authSessionId: aliceSession.sessionId,
+          direction: TcpDataChannelDirection.outbound,
+        ),
+      );
+      alice.container
+          .read(tcpDataChannelSessionRegistryProvider)
+          .remove(
+            DataChannelSessionKey(
+              peerId: 'team@instance-device-b',
+              authSessionId: aliceSession.sessionId,
+              direction: TcpDataChannelDirection.outbound,
+            ),
+            allowReregister: true,
+          );
+
+      await alice.transferController.sendFile(
+        peerId: 'team@instance-device-b',
+        filePath: sourceFile.path,
+      );
+
+      final receivedFile = await _waitForFile(
+        '$bobReceivePath/source.txt',
+        diagnostics: () => bobTcpResults
+            .map(
+              (result) =>
+                  '${result.applied}:${result.state?.name}:'
+                  '${result.issueCode}',
+            )
+            .join(', '),
+      );
+      final aliceJobs = alice.container.read(transferJobsProvider);
+
+      expect(dataChannelConnectCount, greaterThanOrEqualTo(1));
+      expect(await receivedFile.readAsString(), 'renegotiated tcp payload');
+      expect(aliceJobs.single.status, TransferJobStatus.completed);
+      expect(
+        aliceJobs.single.dataCapability,
+        DataTransferCapability.tcpDataStreamV1,
+      );
+    },
+  );
+
+  test(
     'fails before data chunks when data bind local address differs from route lease',
     () async {
       final controlNetwork = _LinkedFakeAuthNetwork();
