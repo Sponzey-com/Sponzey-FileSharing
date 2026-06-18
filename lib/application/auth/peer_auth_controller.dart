@@ -14,6 +14,7 @@ import 'package:sponzey_file_sharing/application/discovery/peer_route_candidate_
 import 'package:sponzey_file_sharing/application/network/network_diagnostics_provider.dart';
 import 'package:sponzey_file_sharing/application/network/peer_path_registry.dart';
 import 'package:sponzey_file_sharing/domain/entities/peer_auth_session.dart';
+import 'package:sponzey_file_sharing/domain/entities/peer_identity.dart';
 import 'package:sponzey_file_sharing/domain/entities/peer_node.dart';
 import 'package:sponzey_file_sharing/domain/entities/user_account.dart';
 import 'package:sponzey_file_sharing/domain/network/network_interface_models.dart';
@@ -912,8 +913,11 @@ class PeerAuthController extends Notifier<PeerAuthState> {
   }
 
   String _peerIdFromPacket(AuthPacket packet) {
-    final instanceId = packet.fromInstanceId;
-    return '${packet.fromUserId}@${instanceId == null || instanceId.isEmpty ? packet.fromDeviceId : instanceId}';
+    return PeerIdentity.resolve(
+      userId: packet.fromUserId,
+      instanceId: packet.fromInstanceId,
+      deviceId: packet.fromDeviceId,
+    ).id;
   }
 
   bool _isPacketFromLocalIdentity(
@@ -1123,7 +1127,7 @@ class PeerAuthController extends Notifier<PeerAuthState> {
 
   void _selectPathForAuth(PeerConnectionPath path) {
     final mutations = ref.read(peerPathRegistryMutationsProvider);
-    mutations.select(path);
+    mutations.selectForHandshake(path);
     mutations.applyEvent(peerId: path.peerId, event: PeerPathEvent.authStarted);
   }
 

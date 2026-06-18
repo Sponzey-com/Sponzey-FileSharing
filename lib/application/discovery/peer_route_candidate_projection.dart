@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:sponzey_file_sharing/domain/entities/peer_identity.dart';
 import 'package:sponzey_file_sharing/domain/entities/peer_node.dart';
 import 'package:sponzey_file_sharing/domain/network/connectable_interface_policy.dart';
 import 'package:sponzey_file_sharing/domain/network/network_interface_models.dart';
@@ -149,7 +150,11 @@ class PeerRouteCandidateProjection {
     required String instanceId,
     required String deviceId,
   }) {
-    return '$userId@${instanceId.isEmpty ? deviceId : instanceId}';
+    return PeerIdentity.resolve(
+      userId: userId,
+      instanceId: instanceId,
+      deviceId: deviceId,
+    ).id;
   }
 
   List<PeerRouteCandidate> expire({

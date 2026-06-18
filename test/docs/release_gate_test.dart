@@ -14,6 +14,18 @@ void main() {
     expect(doc, contains('Parallels Windows VM to macOS host'));
     expect(doc, contains('Ubuntu 22.04'));
     expect(doc, contains('100 MB'));
+    expect(doc, contains('same UID appears as one peer'));
+    expect(
+      doc,
+      contains('route candidates remain separate from the active route lease'),
+    );
+    expect(
+      doc,
+      contains(
+        'active route lease must not change during transfer unless explicit disconnect, timeout, or socket failure occurs',
+      ),
+    );
+    expect(doc, contains('route switch count'));
     expect(doc, contains('.tasks/release_runs/<tag>.md'));
     expect(doc, contains('Do not reuse or force-move a published tag'));
   });
@@ -28,5 +40,7 @@ void main() {
     expect(script, contains('flutter build linux --release'));
     expect(script, contains('scripts\\\\build_windows.ps1 -AppVersion'));
     expect(script, contains('Manual release gate still required'));
+    expect(script, contains('same UID one peer'));
+    expect(script, contains('active route lease stability'));
   });
 }

@@ -58,6 +58,8 @@ Manual release gate still required:
 - Parallels Windows VM -> macOS host discovery/auth/transfer/digest
 - macOS host -> Ubuntu 22.04 discovery/auth/transfer/digest
 - Ubuntu 22.04 -> macOS host discovery/auth/transfer/digest
+- same UID one peer product UI check for every scenario
+- active route lease stability check for every transfer
 - diagnostics export redaction review for every scenario
 - 100 MB benchmark record in .tasks/release_runs/<tag>.md
 

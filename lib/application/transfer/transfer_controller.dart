@@ -3366,7 +3366,7 @@ class TransferController extends Notifier<TransferState> {
     }
 
     final mutations = ref.read(peerPathRegistryMutationsProvider);
-    mutations.select(observedPath);
+    mutations.selectForTransferRecovery(observedPath);
     mutations.applyEvent(peerId: peerId, event: PeerPathEvent.authStarted);
     mutations.applyEvent(peerId: peerId, event: PeerPathEvent.authSucceeded);
     final activePath = ref
@@ -3610,14 +3610,22 @@ class TransferController extends Notifier<TransferState> {
       expectedRouteLeaseId: context.routeSnapshot.routeLeaseId,
       currentRouteLeaseId: current?.pathId,
       currentStatus: current?.status,
+      expectedLocalInterfaceId: context.routeSnapshot.localInterfaceId,
+      currentLocalInterfaceId: current?.candidate.localInterfaceId.stableId,
+      expectedLocalAddress: context.routeSnapshot.controlLocalAddress,
+      currentLocalAddress: current?.controlEndpoint.localAddress,
+      expectedRemoteAddress: context.routeSnapshot.controlRemoteAddress,
+      currentRemoteAddress: current?.candidate.remoteAddress,
     );
     if (decision.isValid) {
       return;
     }
     throw AppException(
-      code: 'transfer_route_lease_expired',
+      code: decision.reasonCode == 'routeChanged'
+          ? 'transfer_route_changed'
+          : 'transfer_route_lease_expired',
       message:
-          '전송 중 연결 경로가 만료되어 전송을 중단했습니다. '
+          '${decision.message ?? '전송 중 연결 경로를 검증하지 못했습니다.'} '
           'route=${context.routeSnapshot.routeLeaseId}',
     );
   }

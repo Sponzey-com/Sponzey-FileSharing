@@ -1,3 +1,5 @@
+import 'package:sponzey_file_sharing/domain/entities/peer_identity.dart';
+
 enum PeerPresence { online, stale, offline, incompatible }
 
 class PeerNode {
@@ -29,7 +31,11 @@ class PeerNode {
   final bool receiveAvailable;
   final PeerPresence presence;
 
-  String get id => '$userId@${instanceId ?? deviceId}';
+  String get id => PeerIdentity.resolve(
+    userId: userId,
+    instanceId: instanceId,
+    deviceId: deviceId,
+  ).id;
 
   String get statusLabel {
     switch (presence) {

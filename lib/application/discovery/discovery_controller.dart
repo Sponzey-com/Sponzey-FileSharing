@@ -16,6 +16,7 @@ import 'package:sponzey_file_sharing/core/message_bus/message_bus.dart';
 import 'package:sponzey_file_sharing/core/logger/app_log_category.dart';
 import 'package:sponzey_file_sharing/core/logger/app_logger.dart';
 import 'package:sponzey_file_sharing/domain/discovery/discovery_receive_decision.dart';
+import 'package:sponzey_file_sharing/domain/entities/peer_identity.dart';
 import 'package:sponzey_file_sharing/domain/entities/peer_node.dart';
 import 'package:sponzey_file_sharing/domain/entities/user_account.dart';
 import 'package:sponzey_file_sharing/domain/network/connectable_interface_policy.dart';
@@ -531,7 +532,7 @@ class DiscoveryController extends Notifier<DiscoveryState> {
         code: DiscoveryReceiveDecisionCode.ignoredSelf,
         remoteAddress: datagram.address.address,
         remotePort: datagram.port,
-        peerId: '${packet.userId}@${packet.instanceId}',
+        peerId: _peerIdFromPacket(packet),
         reason: 'same instance id',
       );
       logger.debug(
@@ -553,7 +554,7 @@ class DiscoveryController extends Notifier<DiscoveryState> {
         code: DiscoveryReceiveDecisionCode.groupMismatch,
         remoteAddress: datagram.address.address,
         remotePort: datagram.port,
-        peerId: '${packet.userId}@${packet.instanceId}',
+        peerId: _peerIdFromPacket(packet),
         reason: 'pairing group mismatch',
       );
       logger.debug(
@@ -937,7 +938,7 @@ class DiscoveryController extends Notifier<DiscoveryState> {
       candidates: candidates,
       previousCandidateIds: previousCandidateIds,
       correlationId: packet.messageId.isEmpty
-          ? '${packet.userId}@${packet.deviceId}'
+          ? _peerIdFromPacket(packet)
           : packet.messageId,
       foundEventType: 'PeerRouteCandidateFound',
       updatedEventType: 'PeerRouteCandidateUpdated',
@@ -953,10 +954,26 @@ class DiscoveryController extends Notifier<DiscoveryState> {
     _publishRouteCandidateEvents(
       candidates: [candidate],
       previousCandidateIds: previousCandidateIds,
-      correlationId: '${entry.userId}@${entry.deviceId}',
+      correlationId: _peerIdFromLocalRegistry(entry),
       foundEventType: 'PeerRouteCandidateFound',
       updatedEventType: 'PeerRouteCandidateUpdated',
     );
+  }
+
+  String _peerIdFromPacket(DiscoveryPacket packet) {
+    return PeerIdentity.resolve(
+      userId: packet.userId,
+      instanceId: packet.instanceId,
+      deviceId: packet.deviceId,
+    ).id;
+  }
+
+  String _peerIdFromLocalRegistry(LocalInstancePresence entry) {
+    return PeerIdentity.resolve(
+      userId: entry.userId,
+      instanceId: entry.instanceId,
+      deviceId: entry.deviceId,
+    ).id;
   }
 
   void _expireRouteCandidates() {

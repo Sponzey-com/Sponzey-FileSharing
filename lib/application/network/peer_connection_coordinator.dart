@@ -138,7 +138,7 @@ class PeerConnectionCoordinator
     }
 
     final path = selection.path;
-    ref.read(peerPathRegistryMutationsProvider).select(path);
+    ref.read(peerPathRegistryMutationsProvider).selectForHandshake(path);
     state = state.withSelectedPath(path);
     _publishPathEvent(
       eventType: 'PeerPathSelected',

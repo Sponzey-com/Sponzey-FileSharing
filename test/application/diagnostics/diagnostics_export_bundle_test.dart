@@ -18,111 +18,121 @@ import 'package:sponzey_file_sharing/domain/network/peer_route_candidate.dart';
 import 'package:sponzey_file_sharing/domain/transfer/transfer_route_snapshot.dart';
 
 void main() {
-  test('builds redacted product, debug, environment and development sections', () {
-    final now = DateTime.utc(2026, 6, 15, 1, 2, 3);
-    final candidate = _candidate(status: RouteCandidateStatus.expired);
-    final activePath = PeerConnectionPath.fromCandidate(
-      candidate: _candidate(),
-      selectedAt: now,
-      selectionReason: PeerPathSelectionReason.sameSubnet,
-      dataPort: 38410,
-    ).copyWith(status: PeerPathStatus.active);
-    final bundle = DiagnosticsExportBundleBuilder().build(
-      DiagnosticsExportInput(
-        generatedAt: now,
-        appName: 'Sponzey FileSharing',
-        protocolVersion: '1.0',
-        operatingSystem: 'macos',
-        logLevel: AppLogLevel.debug,
-        logFilePath: '/Users/dongwooshin/Library/Logs/private.log',
-        authState: const AuthState(
-          status: AuthStatus.authenticated,
-          currentUser: UserAccount(
-            userId: 'admin',
-            displayName: 'admin',
-            deviceName: 'mac',
-          ),
-          sessionPassword: 'plain-password',
-        ),
-        peerAuthState: PeerAuthState(
-          sessions: {
-            'peer-a': PeerAuthSession(
-              sessionId: 'session-id-with-secret-key',
-              peerId: 'peer-a',
-              peerUserId: 'admin',
-              peerDisplayName: 'admin',
-              peerAddress: '10.0.1.20',
-              peerPort: 38401,
-              status: PeerAuthStatus.authenticated,
-              updatedAt: now,
-              message:
-                  'token=aaaaaaaabbbbbbbb.ccccccccdddddddd.eeeeeeeeffffffff',
+  test(
+    'builds redacted product, debug, environment and development sections',
+    () {
+      final now = DateTime.utc(2026, 6, 15, 1, 2, 3);
+      final candidate = _candidate(status: RouteCandidateStatus.expired);
+      final activePath = PeerConnectionPath.fromCandidate(
+        candidate: _candidate(),
+        selectedAt: now,
+        selectionReason: PeerPathSelectionReason.sameSubnet,
+        dataPort: 38410,
+      ).copyWith(status: PeerPathStatus.active);
+      final bundle = DiagnosticsExportBundleBuilder().build(
+        DiagnosticsExportInput(
+          generatedAt: now,
+          appName: 'Sponzey FileSharing',
+          protocolVersion: '1.0',
+          operatingSystem: 'macos',
+          logLevel: AppLogLevel.debug,
+          logFilePath: '/Users/dongwooshin/Library/Logs/private.log',
+          authState: const AuthState(
+            status: AuthStatus.authenticated,
+            currentUser: UserAccount(
+              userId: 'admin',
+              displayName: 'admin',
+              deviceName: 'mac',
             ),
-          },
-          isListening: true,
-          localPort: 38401,
-        ),
-        discoveryState: const DiscoveryState(
-          peers: [],
-          isRunning: true,
-          receivedPacketCount: 4,
-          discoveryBroadcastAttemptCount: 7,
-          discoveryMalformedPacketCount: 2,
-          lastDecisionCode: 'ignoredSelf',
-          discoveryLastReceiveDecisionCode: 'groupMismatch',
-        ),
-        transferState: TransferState(
-          jobs: [
-            _job(
-              status: TransferJobStatus.failed,
-              message:
-                  'route_probe_failed at /Users/dongwooshin/Downloads/file.zip',
-            ),
-          ],
-        ),
-        settingsState: SettingsState(
-          settings: const AppSettings(
-            defaultSavePath: '/Users/dongwooshin/Downloads/Sponzey FileSharing',
-            autoReceiveEnabled: true,
-            receivePolicy: ReceivePolicy.autoReceiveAll,
-            logLevel: AppLogLevel.debug,
+            sessionPassword: 'plain-password',
           ),
-          errorMessage: 'sessionKey=do-not-export',
+          peerAuthState: PeerAuthState(
+            sessions: {
+              'peer-a': PeerAuthSession(
+                sessionId: 'session-id-with-secret-key',
+                peerId: 'peer-a',
+                peerUserId: 'admin',
+                peerDisplayName: 'admin',
+                peerAddress: '10.0.1.20',
+                peerPort: 38401,
+                status: PeerAuthStatus.authenticated,
+                updatedAt: now,
+                message:
+                    'token=aaaaaaaabbbbbbbb.ccccccccdddddddd.eeeeeeeeffffffff',
+              ),
+            },
+            isListening: true,
+            localPort: 38401,
+          ),
+          discoveryState: const DiscoveryState(
+            peers: [],
+            isRunning: true,
+            receivedPacketCount: 4,
+            discoveryBroadcastAttemptCount: 7,
+            discoveryMalformedPacketCount: 2,
+            lastDecisionCode: 'ignoredSelf',
+            discoveryLastReceiveDecisionCode: 'groupMismatch',
+          ),
+          transferState: TransferState(
+            jobs: [
+              _job(
+                status: TransferJobStatus.failed,
+                message:
+                    'route_probe_failed at /Users/dongwooshin/Downloads/file.zip',
+              ),
+            ],
+          ),
+          settingsState: SettingsState(
+            settings: const AppSettings(
+              defaultSavePath:
+                  '/Users/dongwooshin/Downloads/Sponzey FileSharing',
+              autoReceiveEnabled: true,
+              receivePolicy: ReceivePolicy.autoReceiveAll,
+              logLevel: AppLogLevel.debug,
+            ),
+            errorMessage: 'sessionKey=do-not-export',
+          ),
+          routeCandidates: [candidate],
+          activePaths: [activePath],
         ),
-        routeCandidates: [candidate],
-        activePaths: [activePath],
-      ),
-    );
+      );
 
-    final jsonText = const JsonEncoder.withIndent('  ').convert(
-      bundle.toJson(),
-    );
+      final jsonText = const JsonEncoder.withIndent(
+        '  ',
+      ).convert(bundle.toJson());
 
-    expect(bundle.toJson(), containsPair('product', isA<Map<String, Object?>>()));
-    expect(bundle.toJson(), containsPair('debug', isA<Map<String, Object?>>()));
-    expect(
-      bundle.toJson(),
-      containsPair('environment', isA<Map<String, Object?>>()),
-    );
-    expect(
-      bundle.toJson(),
-      containsPair('development', isA<Map<String, Object?>>()),
-    );
-    expect(jsonText, contains('peer-a'));
-    expect(jsonText, contains('routeLeaseId'));
-    expect(jsonText, contains('ROUTE_PROBE_FAILED'));
-    expect(jsonText, contains('ignoredSelf'));
-    expect(jsonText, contains('groupMismatch'));
-    expect(jsonText, contains('stale'));
-    expect(jsonText, contains('routeProbeFailure'));
-    expect(jsonText, contains('packetDetailsExcluded'));
-    expect(jsonText, isNot(contains('plain-password')));
-    expect(jsonText, isNot(contains('session-key-value')));
-    expect(jsonText, isNot(contains('do-not-export')));
-    expect(jsonText, isNot(contains('aaaaaaaabbbbbbbb.ccccccccdddddddd')));
-    expect(jsonText, isNot(contains('/Users/dongwooshin')));
-    expect(jsonText, contains('.../file.zip'));
-  });
+      expect(
+        bundle.toJson(),
+        containsPair('product', isA<Map<String, Object?>>()),
+      );
+      expect(
+        bundle.toJson(),
+        containsPair('debug', isA<Map<String, Object?>>()),
+      );
+      expect(
+        bundle.toJson(),
+        containsPair('environment', isA<Map<String, Object?>>()),
+      );
+      expect(
+        bundle.toJson(),
+        containsPair('development', isA<Map<String, Object?>>()),
+      );
+      expect(jsonText, contains('peer-a'));
+      expect(jsonText, contains('routeLeaseId'));
+      expect(jsonText, contains('ROUTE_PROBE_FAILED'));
+      expect(jsonText, contains('ignoredSelf'));
+      expect(jsonText, contains('groupMismatch'));
+      expect(jsonText, contains('stale'));
+      expect(jsonText, contains('routeProbeFailure'));
+      expect(jsonText, contains('packetDetailsExcluded'));
+      expect(jsonText, isNot(contains('plain-password')));
+      expect(jsonText, isNot(contains('session-key-value')));
+      expect(jsonText, isNot(contains('do-not-export')));
+      expect(jsonText, isNot(contains('aaaaaaaabbbbbbbb.ccccccccdddddddd')));
+      expect(jsonText, isNot(contains('/Users/dongwooshin')));
+      expect(jsonText, contains('.../file.zip'));
+    },
+  );
 
   test('packet decision summary distinguishes route decisions', () {
     final now = DateTime.utc(2026);
@@ -157,6 +167,53 @@ void main() {
     expect(summary.routePromoted, 1);
     expect(summary.routeProbeFailure, 1);
   });
+
+  test('transfer error code distinguishes route and storage failures', () {
+    expect(
+      _errorCodeForJobMessage('전송 중 연결 경로가 변경되어 전송을 중단했습니다.'),
+      'TRANSFER_ROUTE_CHANGED',
+    );
+    expect(
+      _errorCodeForJobMessage('전송 중 연결 경로가 만료되어 전송을 중단했습니다.'),
+      'TRANSFER_ROUTE_EXPIRED',
+    );
+    expect(
+      _errorCodeForJobMessage('기본 수신 경로를 준비하지 못했습니다.'),
+      'STORAGE_PATH_FAILED',
+    );
+  });
+}
+
+String _errorCodeForJobMessage(String message) {
+  final bundle = DiagnosticsExportBundleBuilder().build(
+    DiagnosticsExportInput(
+      generatedAt: DateTime.utc(2026),
+      appName: 'Sponzey FileSharing',
+      protocolVersion: '1.0',
+      operatingSystem: 'macos',
+      logLevel: AppLogLevel.debug,
+      authState: const AuthState(status: AuthStatus.unauthenticated),
+      peerAuthState: const PeerAuthState(sessions: {}),
+      discoveryState: const DiscoveryState(peers: []),
+      transferState: TransferState(
+        jobs: [_job(status: TransferJobStatus.failed, message: message)],
+      ),
+      settingsState: SettingsState(
+        settings: const AppSettings(
+          defaultSavePath: '/Users/dongwooshin/Downloads/Sponzey FileSharing',
+          autoReceiveEnabled: true,
+          receivePolicy: ReceivePolicy.autoReceiveAll,
+          logLevel: AppLogLevel.debug,
+        ),
+      ),
+      routeCandidates: const [],
+      activePaths: const [],
+    ),
+  );
+  final debug = bundle.toJson()['debug'] as Map<String, Object?>;
+  final errors = debug['recentTransferErrors'] as List<Object?>;
+  final firstError = errors.single as Map<String, Object?>;
+  return firstError['errorCode'] as String;
 }
 
 PeerRouteCandidate _candidate({
@@ -180,10 +237,7 @@ PeerRouteCandidate _candidate({
   );
 }
 
-TransferJob _job({
-  required TransferJobStatus status,
-  required String message,
-}) {
+TransferJob _job({required TransferJobStatus status, required String message}) {
   return TransferJob(
     id: 'job-a',
     transferId: 'transfer-a',

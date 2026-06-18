@@ -629,6 +629,103 @@ void main() {
   });
 
   test(
+    'fails before data chunks when active route switches to another remote',
+    () async {
+      late _TransferHarness alice;
+      final dataNetwork = _LinkedFakeDataNetwork();
+      final network = _LinkedFakeAuthNetwork(
+        interceptor:
+            ({
+              required packet,
+              required address,
+              required sourcePort,
+              required targetPort,
+              required deliver,
+            }) async {
+              if (packet.type == AuthPacketType.transferInitAck &&
+                  sourcePort == 41242 &&
+                  targetPort == 41241) {
+                alice.container
+                    .read(peerPathRegistryMutationsProvider)
+                    .selectForHandshake(
+                      _testActivePath(
+                        peerId: 'team@instance-device-b',
+                        localAddress: '10.211.55.2',
+                        remoteAddress: '192.168.0.236',
+                        remotePort: 41242,
+                      ),
+                    );
+              }
+              deliver(packet, address: address, port: sourcePort);
+            },
+      );
+      alice = await _createNode(
+        network: network,
+        dataTransport: dataNetwork.attach(),
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41241,
+        receivePath: '${workspaceDirectory.path}/alice-route-switched',
+      );
+      final bob = await _createNode(
+        network: network,
+        dataTransport: dataNetwork.attach(),
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-b',
+        authPort: 41242,
+        receivePath: '${workspaceDirectory.path}/bob-route-switched',
+      );
+      addTearDown(alice.dispose);
+      addTearDown(bob.dispose);
+
+      await _prepareAuthenticatedPair(
+        alice: alice,
+        bob: bob,
+        bobReceivePath: '${workspaceDirectory.path}/bob-route-switched',
+        bobPort: 41242,
+        alicePort: 41241,
+        clock: clock,
+      );
+      alice.container
+          .read(peerPathRegistryMutationsProvider)
+          .selectForHandshake(
+            _testActivePath(
+              peerId: 'team@instance-device-b',
+              localAddress: '10.211.55.2',
+              remoteAddress: '10.211.55.3',
+              remotePort: 41242,
+            ),
+          );
+
+      final sourceFile = File(
+        '${workspaceDirectory.path}/alice-route-switched/source.txt',
+      );
+      await sourceFile.parent.create(recursive: true);
+      await sourceFile.writeAsString('route must not switch during transfer');
+
+      await alice.transferController.sendFile(
+        peerId: 'team@instance-device-b',
+        filePath: sourceFile.path,
+      );
+
+      final aliceJob = await _waitForTerminalTransfer(alice.container);
+      expect(aliceJob.status, TransferJobStatus.failed);
+      expect(aliceJob.message, contains('연결 경로가 변경'));
+      expect(aliceJob.routeSnapshot?.controlRemoteAddress, '10.211.55.3');
+      expect(
+        dataNetwork.sentFrames.where(
+          (frame) => frame.type == DataFrameType.dataChunk,
+        ),
+        isEmpty,
+      );
+    },
+  );
+
+  test(
     'receiver recovers failover route from authenticated transfer init',
     () async {
       final controlNetwork = _LinkedFakeAuthNetwork();

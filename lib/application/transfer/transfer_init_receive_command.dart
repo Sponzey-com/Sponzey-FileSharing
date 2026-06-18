@@ -1,3 +1,4 @@
+import 'package:sponzey_file_sharing/domain/entities/peer_identity.dart';
 import 'package:sponzey_file_sharing/infrastructure/auth/auth_packet.dart';
 
 class TransferInitReceiveCommand {
@@ -39,10 +40,11 @@ class TransferInitReceiveCommand {
       );
     }
 
-    final instanceId = packet.fromInstanceId;
-    final peerNodeId = instanceId == null || instanceId.isEmpty
-        ? packet.fromDeviceId
-        : instanceId;
+    final peerId = PeerIdentity.resolve(
+      userId: packet.fromUserId,
+      instanceId: packet.fromInstanceId,
+      deviceId: packet.fromDeviceId,
+    ).id;
     return TransferInitReceiveCommandResult.valid(
       TransferInitReceiveCommand(
         sessionId: packet.sessionId,
@@ -51,7 +53,7 @@ class TransferInitReceiveCommand {
         fileSize: fileSize,
         sha256: packet.transferSha256,
         chunkCount: chunkCount,
-        packetPeerId: '${packet.fromUserId}@$peerNodeId',
+        packetPeerId: peerId,
         peerDisplayName: packet.fromDisplayName ?? packet.fromUserId,
         acceptedChunkSize: packet.transferAcceptedChunkSize,
         dataAuthContextId: packet.transferDataAuthContextId,

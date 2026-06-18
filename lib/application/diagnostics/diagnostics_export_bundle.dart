@@ -116,7 +116,9 @@ class PacketDecisionSummary {
           .length,
       malformed: discoveryState.discoveryMalformedPacketCount,
       stale: candidates
-          .where((candidate) => candidate.status == RouteCandidateStatus.expired)
+          .where(
+            (candidate) => candidate.status == RouteCandidateStatus.expired,
+          )
           .length,
       routePromoted: paths
           .where((path) => path.status == PeerPathStatus.active)
@@ -246,9 +248,7 @@ class DiagnosticsExportBundleBuilder {
     List<PeerRouteCandidate> candidates,
     List<PeerConnectionPath> activePaths,
   ) {
-    final activeByPeer = {
-      for (final path in activePaths) path.peerId: path,
-    };
+    final activeByPeer = {for (final path in activePaths) path.peerId: path};
     final peerIds = <String>{
       for (final candidate in candidates) candidate.peerId,
       for (final path in activePaths) path.peerId,
@@ -273,9 +273,7 @@ class DiagnosticsExportBundleBuilder {
     };
   }
 
-  static Map<String, Object?> _candidateSnapshot(
-    PeerRouteCandidate candidate,
-  ) {
+  static Map<String, Object?> _candidateSnapshot(PeerRouteCandidate candidate) {
     return {
       'candidateId': candidate.candidateId,
       'peerId': candidate.peerId,
@@ -397,6 +395,16 @@ class DiagnosticsExportBundleBuilder {
       final message = job.message?.toLowerCase() ?? '';
       if (message.contains('route_probe_failed')) {
         return 'ROUTE_PROBE_FAILED';
+      }
+      if (message.contains('연결 경로가 변경') ||
+          message.contains('route_changed') ||
+          message.contains('route changed')) {
+        return 'TRANSFER_ROUTE_CHANGED';
+      }
+      if (message.contains('연결 경로가 만료') ||
+          message.contains('route_expired') ||
+          message.contains('route expired')) {
+        return 'TRANSFER_ROUTE_EXPIRED';
       }
       if (message.contains('timeout') || message.contains('시간 초과')) {
         return 'TRANSFER_TIMEOUT';

@@ -14,6 +14,11 @@ digest, and diagnostics redaction.
 - Do not publish a final release when only the sender reports success.
 - Do not publish a final release without receiver digest verification.
 - Do not publish a final release without diagnostics export redaction review.
+- Do not publish a final release if the same UID appears as more than one peer
+  in the product UI.
+- Do not publish a final release if route candidates replace an active route
+  lease during transfer without an explicit disconnect, timeout, or socket
+  failure.
 - If any required scenario fails, hold the tag and keep the release draft.
 
 ## Required Local Commands
@@ -55,6 +60,15 @@ used in manual transfer scenarios.
 Each scenario must use the same ID/password group on both peers and must create
 a diagnostics export on both ends after the transfer.
 
+Each scenario must also prove the UID active-route model:
+
+- same UID appears as one peer in product UI, even when multiple network paths
+  are discovered.
+- route candidates remain separate from the active route lease in diagnostics.
+- active route lease must not change during transfer unless explicit disconnect, timeout, or socket failure occurs.
+- port changes or additional discovery packets must not change the selected
+  transfer target while the active route lease is still valid.
+
 | Scenario | Required result |
 | --- | --- |
 | macOS host to macOS second instance | discovery, auth, active route, transfer, receiver digest |
@@ -77,6 +91,9 @@ match the benchmark record:
 - OS and build mode
 - peer id or safe peer label
 - route lease id
+- active route lease status
+- route candidate count
+- route switch count
 - selected route address family and route type
 - transfer id
 - session id or safe session reference
@@ -97,9 +114,10 @@ The export must not contain:
 
 ## Benchmark Template
 
-Copy this table into `.tasks/release_runs/<tag>.md` for local records. The
-`.tasks` directory is intentionally local and ignored by Git. If a release is
-published, attach or summarize the redacted result in the GitHub Release notes.
+Copy this table into `.tasks/release_runs/<tag>.md` for local records.
+`.tasks/release_runs/` is intentionally local and ignored by Git; markdown task
+and plan files under `.tasks` remain tracked. If a release is published, attach
+or summarize the redacted result in the GitHub Release notes.
 
 | Field | Value |
 | --- | --- |
@@ -109,6 +127,11 @@ published, attach or summarize the redacted result in the GitHub Release notes.
 | source artifact |  |
 | target artifact |  |
 | route type | same host / VM bridge / wired LAN / other |
+| same UID one peer | pass / fail |
+| route candidate count |  |
+| active route lease id |  |
+| active route lease stable during transfer | pass / fail |
+| route switch count | 0 required unless explicit disconnect, timeout, or socket failure |
 | file size | 100 MB required for benchmark |
 | average speed |  |
 | peak speed |  |
@@ -126,6 +149,10 @@ published, attach or summarize the redacted result in the GitHub Release notes.
 Hold the tag and keep the GitHub Release draft when:
 
 - host to VM succeeds but VM to host fails
+- same UID appears as multiple product peers
+- route candidates overwrite an active route lease during transfer
+- active route lease changes during transfer without explicit disconnect,
+  timeout, or socket failure
 - sender completes but receiver digest is missing or failed
 - receiver saved file cannot be found in the expected receive directory
 - diagnostics export is missing or contains unredacted sensitive values

@@ -12,6 +12,22 @@ class PeerPathRegistry {
     _pathsByPeerId[path.peerId] = path;
   }
 
+  void selectForHandshake(PeerConnectionPath path) {
+    _pathsByPeerId[path.peerId] = path;
+  }
+
+  void selectForTransferRecovery(PeerConnectionPath path) {
+    _pathsByPeerId[path.peerId] = path;
+  }
+
+  bool selectIfAbsent(PeerConnectionPath path) {
+    if (_pathsByPeerId.containsKey(path.peerId)) {
+      return false;
+    }
+    _pathsByPeerId[path.peerId] = path;
+    return true;
+  }
+
   PeerConnectionPath? selectedForPeer(String peerId) => _pathsByPeerId[peerId];
 
   List<PeerConnectionPath> snapshot() {
@@ -100,6 +116,24 @@ class PeerPathRegistryMutations {
   void select(PeerConnectionPath path) {
     _ref.read(peerPathRegistryProvider).select(path);
     _bump();
+  }
+
+  void selectForHandshake(PeerConnectionPath path) {
+    _ref.read(peerPathRegistryProvider).selectForHandshake(path);
+    _bump();
+  }
+
+  void selectForTransferRecovery(PeerConnectionPath path) {
+    _ref.read(peerPathRegistryProvider).selectForTransferRecovery(path);
+    _bump();
+  }
+
+  bool selectIfAbsent(PeerConnectionPath path) {
+    final selected = _ref.read(peerPathRegistryProvider).selectIfAbsent(path);
+    if (selected) {
+      _bump();
+    }
+    return selected;
   }
 
   TransitionResult<PeerConnectionPath>? applyEvent({
