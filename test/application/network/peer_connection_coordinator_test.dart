@@ -159,7 +159,7 @@ void main() {
   });
 
   test(
-    'authenticated peer with expired active path reselects a route and handshakes',
+    'authenticated peer keeps active path when matching candidate expires',
     () async {
       final harness = await _createHarness(clock);
       addTearDown(harness.dispose);
@@ -209,7 +209,7 @@ void main() {
           .singleWhere(
             (candidate) => candidate.candidateId == first.candidateId,
           );
-      harness.container
+      final expired = harness.container
           .read(peerPathRegistryMutationsProvider)
           .expireLeaseForCandidate(
             candidate: expiredFirst,
@@ -221,15 +221,19 @@ void main() {
       await _flush();
 
       expect(firstResult.path!.candidate.candidateId, first.candidateId);
-      expect(retryResult.status, PeerConnectionAttemptStatus.started);
-      expect(retryResult.path!.candidate.candidateId, second.candidateId);
-      expect(harness.transport.sentPackets, hasLength(2));
+      expect(expired, isFalse);
       expect(
-        harness.container
-            .read(peerPathRegistryProvider)
-            .selectedForPeer(peer.id)!
-            .status,
-        PeerPathStatus.authenticating,
+        retryResult.status,
+        PeerConnectionAttemptStatus.skippedAuthenticated,
+      );
+      expect(harness.transport.sentPackets, hasLength(1));
+      final selected = harness.container
+          .read(peerPathRegistryProvider)
+          .selectedForPeer(peer.id);
+      expect(selected?.candidate.candidateId, first.candidateId);
+      expect(
+        selected?.status,
+        PeerPathStatus.active,
       );
     },
   );

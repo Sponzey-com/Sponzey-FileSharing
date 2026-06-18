@@ -1220,7 +1220,7 @@ void main() {
   );
 
   test(
-    'offline presence clears authenticated session and active path',
+    'offline presence preserves authenticated session and active path',
     () async {
       final harness = await _createNode(
         clock: clock,
@@ -1271,15 +1271,16 @@ void main() {
       ]);
       await _flush();
 
-      expect(
-        harness.container.read(peerAuthSessionByPeerIdProvider(peer.id)),
-        isNull,
+      final session = harness.container.read(
+        peerAuthSessionByPeerIdProvider(peer.id),
       );
+      expect(session?.status, PeerAuthStatus.authenticated);
       expect(
         harness.container
             .read(peerPathRegistryProvider)
-            .selectedForPeer(peer.id),
-        isNull,
+            .selectedForPeer(peer.id)
+            ?.status,
+        PeerPathStatus.active,
       );
     },
   );

@@ -368,7 +368,27 @@ class PeerAuthController extends Notifier<PeerAuthState> {
           nextSessions[entry.key] = entry.value.copyWith(updatedAt: _now());
           continue;
         }
+        if (entry.value.isAuthenticated) {
+          nextSessions[entry.key] = entry.value.copyWith(updatedAt: _now());
+          continue;
+        }
         _clearPeerPathAndContexts(entry.key);
+        continue;
+      }
+
+      if (entry.value.isAuthenticated) {
+        if (entry.value.peerAddress != peer.address ||
+            entry.value.peerPort != peer.port) {
+          ref
+              .read(appLoggerProvider)
+              .debug(
+                AppLogCategory.auth,
+                'Preserved authenticated peer route for ${entry.key}: '
+                '${entry.value.peerAddress}:${entry.value.peerPort}; '
+                'ignored presence endpoint ${peer.address}:${peer.port}',
+              );
+        }
+        nextSessions[entry.key] = entry.value.copyWith(updatedAt: _now());
         continue;
       }
 
@@ -391,22 +411,6 @@ class PeerAuthController extends Notifier<PeerAuthState> {
           updatedAt: _now(),
           message: '피어 응답을 다시 기다리는 중입니다.',
         );
-        continue;
-      }
-
-      if (entry.value.isAuthenticated) {
-        if (entry.value.peerAddress != peer.address ||
-            entry.value.peerPort != peer.port) {
-          ref
-              .read(appLoggerProvider)
-              .debug(
-                AppLogCategory.auth,
-                'Preserved authenticated peer route for ${entry.key}: '
-                '${entry.value.peerAddress}:${entry.value.peerPort}; '
-                'ignored presence endpoint ${peer.address}:${peer.port}',
-              );
-        }
-        nextSessions[entry.key] = entry.value.copyWith(updatedAt: _now());
         continue;
       }
 

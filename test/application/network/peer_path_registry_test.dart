@@ -5,7 +5,7 @@ import 'package:sponzey_file_sharing/domain/network/peer_connection_path.dart';
 import 'package:sponzey_file_sharing/domain/network/peer_route_candidate.dart';
 
 void main() {
-  test('expired route candidate downgrades the active route lease', () {
+  test('expired route candidate does not downgrade the active route lease', () {
     final candidate = _candidate(peerId: 'team@peer-a', id: 'en0');
     final path = PeerConnectionPath.fromCandidate(
       candidate: candidate,
@@ -19,10 +19,10 @@ void main() {
       reasonCode: 'ttlExceeded',
     );
 
-    expect(changed, isTrue);
+    expect(changed, isFalse);
     final selected = registry.selectedForPeer('team@peer-a');
-    expect(selected?.status, PeerPathStatus.failoverRequested);
-    expect(selected?.failureReasonCode, 'ttlExceeded');
+    expect(selected?.status, PeerPathStatus.active);
+    expect(selected?.failureReasonCode, isNull);
   });
 
   test('expired non-selected candidate does not change active route lease', () {

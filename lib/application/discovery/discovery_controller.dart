@@ -10,7 +10,6 @@ import 'package:sponzey_file_sharing/application/discovery/discovery_startup_fai
 import 'package:sponzey_file_sharing/application/discovery/peer_route_candidate_projection.dart';
 import 'package:sponzey_file_sharing/application/discovery/discovery_sorting.dart';
 import 'package:sponzey_file_sharing/application/network/peer_connection_coordinator.dart';
-import 'package:sponzey_file_sharing/application/network/peer_path_registry.dart';
 import 'package:sponzey_file_sharing/core/message_bus/app_event.dart';
 import 'package:sponzey_file_sharing/core/message_bus/message_bus.dart';
 import 'package:sponzey_file_sharing/core/logger/app_log_category.dart';
@@ -990,21 +989,6 @@ class DiscoveryController extends Notifier<DiscoveryState> {
         correlationId: candidate.peerId,
         reasonCode: 'ttlExceeded',
       );
-      final leaseExpired = ref
-          .read(peerPathRegistryMutationsProvider)
-          .expireLeaseForCandidate(
-            candidate: candidate,
-            reasonCode: 'routeCandidateExpired',
-          );
-      if (leaseExpired) {
-        ref
-            .read(appLoggerProvider)
-            .info(
-              AppLogCategory.discovery,
-              'Active route lease downgraded after candidate expired '
-              'peer=${candidate.peerId} candidate=${candidate.candidateId}',
-            );
-      }
     }
   }
 

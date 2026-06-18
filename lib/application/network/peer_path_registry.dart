@@ -69,6 +69,9 @@ class PeerPathRegistry {
     required PeerRouteCandidate candidate,
     required String reasonCode,
   }) {
+    if (candidate.status == RouteCandidateStatus.expired) {
+      return false;
+    }
     final current = _pathsByPeerId[candidate.peerId];
     if (current == null ||
         current.candidate.candidateId != candidate.candidateId) {

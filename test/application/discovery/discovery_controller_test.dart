@@ -121,7 +121,7 @@ void main() {
         container
             .read(peerAuthSessionByPeerIdProvider('admin@instance-ops'))
             ?.status,
-        PeerAuthStatus.idle,
+        PeerAuthStatus.authenticated,
       );
 
       clock.advance(const Duration(seconds: 25));
@@ -133,8 +133,10 @@ void main() {
         PeerPresence.offline,
       );
       expect(
-        container.read(peerAuthSessionByPeerIdProvider('admin@instance-ops')),
-        isNull,
+        container
+            .read(peerAuthSessionByPeerIdProvider('admin@instance-ops'))
+            ?.status,
+        PeerAuthStatus.authenticated,
       );
     },
   );
@@ -1116,7 +1118,7 @@ void main() {
   );
 
   test(
-    'expired active route lease is downgraded without removing peer identity',
+    'expired route candidate does not downgrade active route lease',
     () async {
       final container = _createContainer(
         database: database,
@@ -1186,8 +1188,8 @@ void main() {
         diagnostics.candidates.single.status,
         RouteCandidateStatus.expired,
       );
-      expect(diagnostics.activePath?.status, isNot(PeerPathStatus.active));
-      expect(diagnostics.productSummary, isNot('연결 경로 정상'));
+      expect(diagnostics.activePath?.status, PeerPathStatus.active);
+      expect(diagnostics.productSummary, '연결 경로 정상');
     },
   );
 
