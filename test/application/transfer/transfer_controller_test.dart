@@ -562,6 +562,126 @@ void main() {
   );
 
   test(
+    'throttles TCP incoming chunk progress while preserving accumulated bytes',
+    () async {
+      final subscription = _RecordingTcpIncomingListenerSubscription();
+      final node = await _createNode(
+        network: _LinkedFakeAuthNetwork(),
+        tcpIncomingSubscription: subscription,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41196,
+        receivePath: '${workspaceDirectory.path}/tcp-incoming-throttle',
+      );
+      addTearDown(node.dispose);
+
+      subscription.emitResult(
+        const TcpIncomingStreamFrameEventCoordinatorResult(
+          applied: true,
+          peerId: 'team@instance-device-b',
+          authSessionId: 'auth-session-b',
+          transferId: 'tcp-transfer-throttle-1',
+          route: TcpDataStreamFrameRoute.metadata,
+          metadata: TcpIncomingMetadataProjection(
+            fileName: 'large.bin',
+            fileSize: 1000,
+            chunkCount: 10,
+            destinationDirectory: '/tmp/sponzey-test',
+          ),
+        ),
+      );
+      await _waitForTransferJobMatching(
+        node.container,
+        (job) =>
+            job.transferId == 'tcp-transfer-throttle-1' &&
+            job.status == TransferJobStatus.receiving,
+      );
+
+      subscription.emitResult(
+        const TcpIncomingStreamFrameEventCoordinatorResult(
+          applied: true,
+          peerId: 'team@instance-device-b',
+          authSessionId: 'auth-session-b',
+          transferId: 'tcp-transfer-throttle-1',
+          route: TcpDataStreamFrameRoute.chunk,
+          payloadBytes: 100,
+        ),
+      );
+      await _flush();
+      var job = node.container
+          .read(transferJobsProvider)
+          .singleWhere((job) => job.transferId == 'tcp-transfer-throttle-1');
+      expect(job.bytesTransferred, 100);
+      expect(job.completedChunks, 1);
+
+      subscription.emitResult(
+        const TcpIncomingStreamFrameEventCoordinatorResult(
+          applied: true,
+          peerId: 'team@instance-device-b',
+          authSessionId: 'auth-session-b',
+          transferId: 'tcp-transfer-throttle-1',
+          route: TcpDataStreamFrameRoute.chunk,
+          payloadBytes: 100,
+        ),
+      );
+      subscription.emitResult(
+        const TcpIncomingStreamFrameEventCoordinatorResult(
+          applied: true,
+          peerId: 'team@instance-device-b',
+          authSessionId: 'auth-session-b',
+          transferId: 'tcp-transfer-throttle-1',
+          route: TcpDataStreamFrameRoute.chunk,
+          payloadBytes: 100,
+        ),
+      );
+      await _flush();
+      job = node.container
+          .read(transferJobsProvider)
+          .singleWhere((job) => job.transferId == 'tcp-transfer-throttle-1');
+      expect(job.bytesTransferred, 100);
+      expect(job.completedChunks, 1);
+
+      clock.value = clock.value.add(const Duration(milliseconds: 100));
+      subscription.emitResult(
+        const TcpIncomingStreamFrameEventCoordinatorResult(
+          applied: true,
+          peerId: 'team@instance-device-b',
+          authSessionId: 'auth-session-b',
+          transferId: 'tcp-transfer-throttle-1',
+          route: TcpDataStreamFrameRoute.chunk,
+          payloadBytes: 100,
+        ),
+      );
+      await _flush();
+      job = node.container
+          .read(transferJobsProvider)
+          .singleWhere((job) => job.transferId == 'tcp-transfer-throttle-1');
+      expect(job.bytesTransferred, 400);
+      expect(job.completedChunks, 4);
+
+      subscription.emitResult(
+        const TcpIncomingStreamFrameEventCoordinatorResult(
+          applied: true,
+          peerId: 'team@instance-device-b',
+          authSessionId: 'auth-session-b',
+          transferId: 'tcp-transfer-throttle-1',
+          route: TcpDataStreamFrameRoute.complete,
+        ),
+      );
+      final completedJob = await _waitForTransferJobMatching(
+        node.container,
+        (job) =>
+            job.transferId == 'tcp-transfer-throttle-1' &&
+            job.status == TransferJobStatus.completed,
+      );
+      expect(completedJob.bytesTransferred, 1000);
+      expect(completedJob.completedChunks, 10);
+    },
+  );
+
+  test(
     'reports initialization failure when TCP data listener bind fails',
     () async {
       final listener = _RecordingTcpDataListener(failBind: true);

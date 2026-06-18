@@ -39,6 +39,40 @@ void main() {
     expect(registry.lookup(key), isNotNull);
   });
 
+  test('yields periodically while writing many incoming chunks', () async {
+    final registry = InMemoryTcpIncomingTransferPayloadWriterSessionRegistry();
+    final writer = _RecordingDigestingWriter(digest: 'expected-digest');
+    final service = _RecordingTransferFileService();
+    var yieldCount = 0;
+    registry.register(
+      TcpIncomingTransferPayloadWriterSession(
+        key: key,
+        tempFilePath: '/tmp/transfer-1.part',
+        destinationDirectory: '/downloads',
+        fileName: 'sample.txt',
+        expectedSha256: 'expected-digest',
+        writer: writer,
+      ),
+    );
+    final adapter = TcpIncomingTransferPayloadWriterAdapter(
+      registry: registry,
+      fileService: service,
+      yieldEveryChunks: 2,
+      yieldAfterBytes: 1024 * 1024,
+      yieldScheduler: () async {
+        yieldCount += 1;
+      },
+    );
+
+    await adapter.writeChunk(key, utf8.encode('chunk-1'));
+    await adapter.writeChunk(key, utf8.encode('chunk-2'));
+    await adapter.writeChunk(key, utf8.encode('chunk-3'));
+    await adapter.writeChunk(key, utf8.encode('chunk-4'));
+
+    expect(writer.appendedPayloads, hasLength(4));
+    expect(yieldCount, 2);
+  });
+
   test('verifies digest and finalizes through transfer file service', () async {
     final registry = InMemoryTcpIncomingTransferPayloadWriterSessionRegistry();
     final writer = _RecordingDigestingWriter(digest: 'expected-digest');

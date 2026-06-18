@@ -3,6 +3,8 @@ import 'package:sponzey_file_sharing/application/transfer/tcp_incoming_transfer_
 import 'package:sponzey_file_sharing/core/errors/app_exception.dart';
 import 'package:sponzey_file_sharing/infrastructure/transfer/transfer_file_service.dart';
 
+typedef TcpIncomingPayloadYieldScheduler = Future<void> Function();
+
 class TcpIncomingTransferPayloadWriterSession {
   TcpIncomingTransferPayloadWriterSession({
     required this.key,
@@ -22,6 +24,8 @@ class TcpIncomingTransferPayloadWriterSession {
 
   String? actualSha256;
   String? finalPath;
+  int chunksWritten = 0;
+  int bytesWrittenSinceYield = 0;
   bool writerClosed = false;
   bool finalized = false;
 }
@@ -84,10 +88,16 @@ class TcpIncomingTransferPayloadWriterAdapter
   const TcpIncomingTransferPayloadWriterAdapter({
     required this.registry,
     required this.fileService,
+    this.yieldEveryChunks = 32,
+    this.yieldAfterBytes = 2 * 1024 * 1024,
+    this.yieldScheduler = _defaultYieldScheduler,
   });
 
   final TcpIncomingTransferPayloadWriterSessionRegistry registry;
   final TransferFileService fileService;
+  final int yieldEveryChunks;
+  final int yieldAfterBytes;
+  final TcpIncomingPayloadYieldScheduler yieldScheduler;
 
   @override
   Future<void> open(TcpIncomingTransferFrameContextKey key) async {
@@ -102,6 +112,12 @@ class TcpIncomingTransferPayloadWriterAdapter
     final session = _requireSession(key);
     try {
       await session.writer.append(payload);
+      session.chunksWritten += 1;
+      session.bytesWrittenSinceYield += payload.length;
+      if (_shouldYield(session)) {
+        session.bytesWrittenSinceYield = 0;
+        await yieldScheduler();
+      }
     } catch (_) {
       throw const AppException(
         code: 'tcp_incoming_payload_write_failed',
@@ -176,6 +192,15 @@ class TcpIncomingTransferPayloadWriterAdapter
     return session;
   }
 
+  bool _shouldYield(TcpIncomingTransferPayloadWriterSession session) {
+    final chunkThresholdReached =
+        yieldEveryChunks > 0 && session.chunksWritten % yieldEveryChunks == 0;
+    final byteThresholdReached =
+        yieldAfterBytes > 0 &&
+        session.bytesWrittenSinceYield >= yieldAfterBytes;
+    return chunkThresholdReached || byteThresholdReached;
+  }
+
   Future<String> _closeWithDigest(
     TcpIncomingTransferPayloadWriterSession session,
   ) async {
@@ -218,4 +243,8 @@ class TcpIncomingTransferPayloadWriterAdapter
       }
     }
   }
+}
+
+Future<void> _defaultYieldScheduler() {
+  return Future<void>.delayed(const Duration(milliseconds: 1));
 }

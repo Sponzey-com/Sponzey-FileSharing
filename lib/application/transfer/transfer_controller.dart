@@ -180,6 +180,9 @@ class TransferController extends Notifier<TransferState> {
   static const Duration _outOfOrderNackRepeatInterval = Duration(
     milliseconds: 120,
   );
+  static const Duration _tcpIncomingUiProgressInterval = Duration(
+    milliseconds: 100,
+  );
   static final int _dataChunkSize =
       DataTransferTuningPolicy.defaults.maxPayloadBytes;
   static const TransferJobStateMachine _jobStateMachine =
@@ -211,6 +214,8 @@ class TransferController extends Notifier<TransferState> {
   );
   final Map<String, _OutgoingTransferContext> _outgoingTransfers = {};
   final Map<String, _IncomingTransferContext> _incomingTransfers = {};
+  final Map<String, _TcpIncomingProgressBuffer> _tcpIncomingProgressBuffers =
+      {};
   final TransferDataFrameKeyRegistry _frameKeyRegistry =
       TransferDataFrameKeyRegistry();
   final Map<String, TransferDiagnosticsRingBuffer> _diagnosticFrameTraces = {};
@@ -961,6 +966,8 @@ class TransferController extends Notifier<TransferState> {
     }
     final session = ref.read(peerAuthSessionByPeerIdProvider(peerId));
     final now = _now();
+    _tcpIncomingProgressBuffers[result.transferId!] =
+        _TcpIncomingProgressBuffer();
     _upsertJob(
       TransferJob(
         id: result.transferId!,
@@ -990,17 +997,42 @@ class TransferController extends Notifier<TransferState> {
     if (transferId == null) {
       return;
     }
+    final now = _now();
+    final progress = _tcpIncomingProgressBuffers.putIfAbsent(
+      transferId,
+      _TcpIncomingProgressBuffer.new,
+    );
+    progress.add(payloadBytes: result.payloadBytes, chunks: 1);
+    final lastFlushedAt = progress.lastFlushedAt;
+    if (lastFlushedAt != null &&
+        now.difference(lastFlushedAt) < _tcpIncomingUiProgressInterval) {
+      return;
+    }
+    _flushTcpIncomingProgress(transferId, now: now);
+  }
+
+  void _flushTcpIncomingProgress(String transferId, {required DateTime now}) {
+    final progress = _tcpIncomingProgressBuffers[transferId];
+    if (progress == null || !progress.hasPending) {
+      return;
+    }
+    final pendingBytes = progress.pendingBytes;
+    final pendingChunks = progress.pendingChunks;
+    progress.clearPending(flushedAt: now);
     _updateJob(transferId, (job) {
       final bytesTransferred = min(
         job.fileSize,
-        job.bytesTransferred + result.payloadBytes,
+        job.bytesTransferred + pendingBytes,
       );
-      final completedChunks = min(job.totalChunks, job.completedChunks + 1);
+      final completedChunks = min(
+        job.totalChunks,
+        job.completedChunks + pendingChunks,
+      );
       return job.copyWith(
         status: TransferJobStatus.receiving,
         bytesTransferred: bytesTransferred,
         completedChunks: completedChunks,
-        updatedAt: _now(),
+        updatedAt: now,
         message: 'TCP data channel 수신 중',
         throughputBytesPerSec: _throughputBytesPerSec(
           transferredBytes: bytesTransferred,
@@ -1017,13 +1049,16 @@ class TransferController extends Notifier<TransferState> {
     if (transferId == null) {
       return;
     }
+    final now = _now();
+    _flushTcpIncomingProgress(transferId, now: now);
+    _tcpIncomingProgressBuffers.remove(transferId);
     _updateJob(
       transferId,
       (job) => job.copyWith(
         status: TransferJobStatus.completed,
         bytesTransferred: job.fileSize,
         completedChunks: job.totalChunks,
-        updatedAt: _now(),
+        updatedAt: now,
         message: 'TCP data channel 수신 완료',
         throughputBytesPerSec: _throughputBytesPerSec(
           transferredBytes: job.fileSize,
@@ -1034,6 +1069,9 @@ class TransferController extends Notifier<TransferState> {
   }
 
   void _markTcpIncomingIssue(String transferId, String? issueCode) {
+    final now = _now();
+    _flushTcpIncomingProgress(transferId, now: now);
+    _tcpIncomingProgressBuffers.remove(transferId);
     final message = issueCode == null
         ? 'TCP data channel 수신 중 오류가 발생했습니다.'
         : 'TCP data channel 수신 중 오류가 발생했습니다: $issueCode';
@@ -1042,7 +1080,7 @@ class TransferController extends Notifier<TransferState> {
       jobId: transferId,
       update: (job) => TransferJobTerminalStatusCommand.failed(
         job,
-        updatedAt: _now(),
+        updatedAt: now,
         message: message,
       ),
     );
@@ -4666,6 +4704,25 @@ class _IncomingTransferContext {
     }
     missingNackRetryTimer?.cancel();
     missingNackRetryTimer = null;
+  }
+}
+
+class _TcpIncomingProgressBuffer {
+  int pendingBytes = 0;
+  int pendingChunks = 0;
+  DateTime? lastFlushedAt;
+
+  bool get hasPending => pendingBytes > 0 || pendingChunks > 0;
+
+  void add({required int payloadBytes, required int chunks}) {
+    pendingBytes += payloadBytes;
+    pendingChunks += chunks;
+  }
+
+  void clearPending({required DateTime flushedAt}) {
+    pendingBytes = 0;
+    pendingChunks = 0;
+    lastFlushedAt = flushedAt;
   }
 }
 
