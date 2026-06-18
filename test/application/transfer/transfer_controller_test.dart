@@ -10,6 +10,15 @@ import 'package:sponzey_file_sharing/app/app_config.dart';
 import 'package:sponzey_file_sharing/application/auth/auth_controller.dart';
 import 'package:sponzey_file_sharing/application/auth/peer_auth_controller.dart';
 import 'package:sponzey_file_sharing/application/network/peer_path_registry.dart';
+import 'package:sponzey_file_sharing/application/transfer/data_channel_session_registry.dart';
+import 'package:sponzey_file_sharing/application/transfer/tcp_data_channel_ports.dart';
+import 'package:sponzey_file_sharing/application/transfer/tcp_data_outbound_channel_open_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/tcp_data_session_handshake_command.dart';
+import 'package:sponzey_file_sharing/application/transfer/tcp_data_stream_frame_dispatcher.dart';
+import 'package:sponzey_file_sharing/application/transfer/tcp_incoming_listener_stream_subscription_coordinator.dart';
+import 'package:sponzey_file_sharing/application/transfer/tcp_incoming_metadata_frame_prepare_port.dart';
+import 'package:sponzey_file_sharing/application/transfer/tcp_incoming_stream_frame_event_coordinator.dart';
+import 'package:sponzey_file_sharing/application/transfer/tcp_transfer_send_use_case.dart';
 import 'package:sponzey_file_sharing/application/transfer/transfer_controller.dart';
 import 'package:sponzey_file_sharing/application/transfer/transfer_history_repository.dart';
 import 'package:sponzey_file_sharing/application/transfer/transfer_overview_provider.dart';
@@ -24,6 +33,9 @@ import 'package:sponzey_file_sharing/domain/entities/transfer_job.dart';
 import 'package:sponzey_file_sharing/domain/network/network_interface_models.dart';
 import 'package:sponzey_file_sharing/domain/network/peer_connection_path.dart';
 import 'package:sponzey_file_sharing/domain/network/peer_route_candidate.dart';
+import 'package:sponzey_file_sharing/domain/transfer/tcp_data_peer_session_state_machine.dart';
+import 'package:sponzey_file_sharing/domain/transfer/tcp_data_stream_frame.dart';
+import 'package:sponzey_file_sharing/domain/transfer/data_transfer_protocol.dart';
 import 'package:sponzey_file_sharing/domain/transfer/transfer_failure_policy.dart';
 import 'package:sponzey_file_sharing/infrastructure/auth/auth_packet.dart';
 import 'package:sponzey_file_sharing/infrastructure/auth/auth_transport.dart';
@@ -34,7 +46,9 @@ import 'package:sponzey_file_sharing/infrastructure/platform/app_storage_path_pr
 import 'package:sponzey_file_sharing/infrastructure/platform/local_device_identity_service.dart';
 import 'package:sponzey_file_sharing/infrastructure/repositories/settings_repository.dart';
 import 'package:sponzey_file_sharing/infrastructure/repositories/transfer_history_repository.dart';
+import 'package:sponzey_file_sharing/infrastructure/transfer/tcp_peer_file_send_command.dart';
 import 'package:sponzey_file_sharing/infrastructure/transfer/transfer_file_service.dart';
+import 'package:sponzey_file_sharing/infrastructure/transfer/tcp_transfer_pipeline_providers.dart';
 import 'package:sponzey_file_sharing/infrastructure/transfer_data/data_frame_codec.dart';
 import 'package:sponzey_file_sharing/infrastructure/transfer_data/data_frame.dart';
 import 'package:sponzey_file_sharing/infrastructure/transfer_data/data_packet.dart';
@@ -313,6 +327,291 @@ void main() {
   );
 
   test(
+    'starts TCP incoming listener subscription during initialization',
+    () async {
+      final subscription = _RecordingTcpIncomingListenerSubscription();
+      final node = await _createNode(
+        network: _LinkedFakeAuthNetwork(),
+        tcpIncomingSubscription: subscription,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41191,
+        receivePath: '${workspaceDirectory.path}/tcp-listener-start',
+      );
+      addTearDown(node.dispose);
+
+      final state = node.container.read(transferControllerProvider);
+      expect(subscription.startCount, 1);
+      expect(subscription.isRunning, isTrue);
+      expect(state.isListening, isTrue);
+      expect(state.errorMessage, isNull);
+    },
+  );
+
+  test('stops TCP incoming listener subscription on dispose', () async {
+    final subscription = _RecordingTcpIncomingListenerSubscription();
+    final node = await _createNode(
+      network: _LinkedFakeAuthNetwork(),
+      tcpIncomingSubscription: subscription,
+      clock: clock,
+      loginUserId: _sharedUserId,
+      loginPassword: _sharedPassword,
+      localDeviceId: 'device-a',
+      authPort: 41192,
+      receivePath: '${workspaceDirectory.path}/tcp-listener-stop',
+    );
+
+    await node.dispose();
+    await _flush();
+
+    expect(subscription.startCount, 1);
+    expect(subscription.stopCount, 1);
+    expect(subscription.isRunning, isFalse);
+  });
+
+  test(
+    'reports initialization failure when TCP incoming subscription fails',
+    () async {
+      final subscription = _RecordingTcpIncomingListenerSubscription(
+        failStart: true,
+      );
+      final node = await _createNode(
+        network: _LinkedFakeAuthNetwork(),
+        tcpIncomingSubscription: subscription,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41193,
+        receivePath: '${workspaceDirectory.path}/tcp-listener-fails',
+      );
+      addTearDown(node.dispose);
+
+      final state = node.container.read(transferControllerProvider);
+      expect(subscription.startCount, 1);
+      expect(subscription.stopCount, 0);
+      expect(state.isListening, isFalse);
+      expect(state.isLoading, isFalse);
+      expect(state.errorMessage, '전송 엔진을 시작하지 못했습니다.');
+    },
+  );
+
+  test(
+    'keeps transfer controller listening when TCP incoming receive path is unavailable',
+    () async {
+      final node = await _createNode(
+        network: _LinkedFakeAuthNetwork(),
+        storagePathProvider: const _ThrowingStoragePathProvider(),
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41194,
+        receivePath: '${workspaceDirectory.path}/tcp-listener-no-path',
+      );
+      addTearDown(node.dispose);
+
+      final state = node.container.read(transferControllerProvider);
+      expect(state.isListening, isTrue);
+      expect(state.isLoading, isFalse);
+      expect(state.errorMessage, isNull);
+    },
+  );
+
+  test('binds TCP data listener before incoming subscription starts', () async {
+    final events = <String>[];
+    final listener = _RecordingTcpDataListener(events: events);
+    final subscription = _RecordingTcpIncomingListenerSubscription(
+      events: events,
+    );
+    final node = await _createNode(
+      network: _LinkedFakeAuthNetwork(),
+      tcpDataListener: listener,
+      tcpIncomingSubscription: subscription,
+      clock: clock,
+      loginUserId: _sharedUserId,
+      loginPassword: _sharedPassword,
+      localDeviceId: 'device-a',
+      authPort: 41195,
+      receivePath: '${workspaceDirectory.path}/tcp-listener-bind',
+    );
+    addTearDown(node.dispose);
+
+    expect(listener.bindRequests, hasLength(1));
+    expect(listener.bindRequests.single.host, '0.0.0.0');
+    expect(listener.bindRequests.single.port, 0);
+    expect(subscription.startCount, 1);
+    expect(events.take(2), ['listener.bind', 'subscription.start']);
+  });
+
+  test('closes TCP data listener on dispose', () async {
+    final events = <String>[];
+    final listener = _RecordingTcpDataListener(events: events);
+    final subscription = _RecordingTcpIncomingListenerSubscription(
+      events: events,
+    );
+    final node = await _createNode(
+      network: _LinkedFakeAuthNetwork(),
+      tcpDataListener: listener,
+      tcpIncomingSubscription: subscription,
+      clock: clock,
+      loginUserId: _sharedUserId,
+      loginPassword: _sharedPassword,
+      localDeviceId: 'device-a',
+      authPort: 41196,
+      receivePath: '${workspaceDirectory.path}/tcp-listener-close',
+    );
+
+    await node.dispose();
+    await _flush();
+
+    expect(subscription.stopCount, 1);
+    expect(listener.closeCount, 1);
+    expect(events, containsAllInOrder(['subscription.stop', 'listener.close']));
+  });
+
+  test('closes TCP data connector on dispose', () async {
+    final connector = _RecordingTcpDataConnector();
+    final node = await _createNode(
+      network: _LinkedFakeAuthNetwork(),
+      tcpDataConnector: connector,
+      clock: clock,
+      loginUserId: _sharedUserId,
+      loginPassword: _sharedPassword,
+      localDeviceId: 'device-a',
+      authPort: 41199,
+      receivePath: '${workspaceDirectory.path}/tcp-connector-close',
+    );
+
+    await node.dispose();
+    await _flush();
+
+    expect(connector.closeCount, 1);
+  });
+
+  test(
+    'marks existing TCP incoming job failed from preserved failure result',
+    () async {
+      final subscription = _RecordingTcpIncomingListenerSubscription();
+      final node = await _createNode(
+        network: _LinkedFakeAuthNetwork(),
+        tcpIncomingSubscription: subscription,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41198,
+        receivePath: '${workspaceDirectory.path}/tcp-incoming-failure-result',
+      );
+      addTearDown(node.dispose);
+
+      subscription.emitResult(
+        const TcpIncomingStreamFrameEventCoordinatorResult(
+          applied: true,
+          peerId: 'team@instance-device-b',
+          authSessionId: 'auth-session-b',
+          transferId: 'tcp-transfer-fail-1',
+          route: TcpDataStreamFrameRoute.metadata,
+          metadata: TcpIncomingMetadataProjection(
+            fileName: 'broken.bin',
+            fileSize: 64,
+            chunkCount: 1,
+            destinationDirectory: '/tmp/sponzey-test',
+          ),
+        ),
+      );
+
+      final receivingJob = await _waitForTransferJobMatching(
+        node.container,
+        (job) =>
+            job.transferId == 'tcp-transfer-fail-1' &&
+            job.status == TransferJobStatus.receiving,
+      );
+      expect(
+        receivingJob.dataCapability,
+        DataTransferCapability.tcpDataStreamV1,
+      );
+
+      subscription.emitResult(
+        const TcpIncomingStreamFrameEventCoordinatorResult(
+          applied: false,
+          peerId: 'team@instance-device-b',
+          authSessionId: 'auth-session-b',
+          transferId: 'tcp-transfer-fail-1',
+          route: TcpDataStreamFrameRoute.chunk,
+          issueCode: 'tcp_incoming_payload_write_failed',
+        ),
+      );
+
+      final failedJob = await _waitForTransferJobMatching(
+        node.container,
+        (job) =>
+            job.transferId == 'tcp-transfer-fail-1' &&
+            job.status == TransferJobStatus.failed,
+      );
+      expect(failedJob.message, contains('tcp_incoming_payload_write_failed'));
+      expect(failedJob.dataCapability, DataTransferCapability.tcpDataStreamV1);
+      expect(
+        node.container.read(transferControllerProvider).errorMessage,
+        isNull,
+      );
+    },
+  );
+
+  test(
+    'reports initialization failure when TCP data listener bind fails',
+    () async {
+      final listener = _RecordingTcpDataListener(failBind: true);
+      final subscription = _RecordingTcpIncomingListenerSubscription();
+      final node = await _createNode(
+        network: _LinkedFakeAuthNetwork(),
+        tcpDataListener: listener,
+        tcpIncomingSubscription: subscription,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41197,
+        receivePath: '${workspaceDirectory.path}/tcp-listener-bind-fails',
+      );
+      addTearDown(node.dispose);
+
+      final state = node.container.read(transferControllerProvider);
+      expect(listener.bindRequests, hasLength(1));
+      expect(subscription.startCount, 0);
+      expect(state.isListening, isFalse);
+      expect(state.isLoading, isFalse);
+      expect(state.errorMessage, '전송 엔진을 시작하지 못했습니다.');
+    },
+  );
+
+  test(
+    'does not bind TCP data listener when incoming receive path is unavailable',
+    () async {
+      final listener = _RecordingTcpDataListener();
+      final node = await _createNode(
+        network: _LinkedFakeAuthNetwork(),
+        tcpDataListener: listener,
+        storagePathProvider: const _ThrowingStoragePathProvider(),
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41198,
+        receivePath: '${workspaceDirectory.path}/tcp-listener-bind-no-path',
+      );
+      addTearDown(node.dispose);
+
+      final state = node.container.read(transferControllerProvider);
+      expect(listener.bindRequests, isEmpty);
+      expect(state.isListening, isTrue);
+      expect(state.errorMessage, isNull);
+    },
+  );
+
+  test(
     'uses active route remote address instead of stale session loopback target',
     () async {
       String? transferInitTargetAddress;
@@ -388,6 +687,615 @@ void main() {
       final aliceJob = await _waitForTerminalTransfer(alice.container);
       expect(aliceJob.routeSnapshot?.controlRemoteAddress, '10.211.55.3');
       expect(aliceJob.routeSnapshot?.dataRemoteAddress, '10.211.55.3');
+    },
+  );
+
+  test(
+    'uses TCP send path without UDP transfer init when TCP channel is connected',
+    () async {
+      var transferInitCount = 0;
+      final network = _LinkedFakeAuthNetwork(
+        interceptor:
+            ({
+              required packet,
+              required address,
+              required sourcePort,
+              required targetPort,
+              required deliver,
+            }) async {
+              if (packet.type == AuthPacketType.transferInit) {
+                transferInitCount += 1;
+              }
+              deliver(packet, address: address, port: sourcePort);
+            },
+      );
+      final sourceFile = File(
+        '${workspaceDirectory.path}/tcp-success/source.txt',
+      );
+      await sourceFile.parent.create(recursive: true);
+      await sourceFile.writeAsString('tcp send path should bypass udp init');
+      final tcpSendUseCase = _RecordingTcpTransferSendUseCase(
+        result: TcpTransferSendUseCaseResult(
+          sent: true,
+          filePath: sourceFile.path,
+          fileName: 'source.txt',
+          fileSize: await sourceFile.length(),
+          chunkSize: 8192,
+          chunkCount: 1,
+          framesSent: 3,
+          bytesSent: await sourceFile.length(),
+        ),
+      );
+      final alice = await _createNode(
+        network: network,
+        tcpTransferSendUseCase: tcpSendUseCase,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41205,
+        receivePath: '${workspaceDirectory.path}/alice-tcp-success',
+      );
+      final bob = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-b',
+        authPort: 41206,
+        receivePath: '${workspaceDirectory.path}/bob-tcp-success',
+      );
+      addTearDown(alice.dispose);
+      addTearDown(bob.dispose);
+
+      await _prepareAuthenticatedPair(
+        alice: alice,
+        bob: bob,
+        bobReceivePath: '${workspaceDirectory.path}/bob-tcp-success',
+        bobPort: 41206,
+        alicePort: 41205,
+        clock: clock,
+      );
+
+      await alice.transferController.sendFile(
+        peerId: 'team@instance-device-b',
+        filePath: sourceFile.path,
+      );
+
+      expect(tcpSendUseCase.calls, hasLength(1));
+      expect(tcpSendUseCase.calls.single.peerId, 'team@instance-device-b');
+      expect(tcpSendUseCase.calls.single.filePath, sourceFile.path);
+      expect(transferInitCount, 0);
+      final jobs = alice.container.read(transferJobsProvider);
+      expect(jobs, hasLength(1));
+      expect(jobs.single.status, TransferJobStatus.completed);
+      expect(jobs.single.direction, TransferDirection.outgoing);
+      expect(jobs.single.fileName, 'source.txt');
+      expect(jobs.single.bytesTransferred, await sourceFile.length());
+      expect(bob.container.read(transferJobsProvider), isEmpty);
+    },
+  );
+
+  test(
+    'does not fallback to legacy UDP transfer when TCP channel is missing',
+    () async {
+      var transferInitCount = 0;
+      final network = _LinkedFakeAuthNetwork(
+        interceptor:
+            ({
+              required packet,
+              required address,
+              required sourcePort,
+              required targetPort,
+              required deliver,
+            }) async {
+              if (packet.type == AuthPacketType.transferInit) {
+                transferInitCount += 1;
+              }
+              deliver(packet, address: address, port: sourcePort);
+            },
+      );
+      final alice = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41214,
+        receivePath: '${workspaceDirectory.path}/alice-missing-tcp-channel',
+        allowLegacyUdpDataFallback: false,
+      );
+      final bob = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-b',
+        authPort: 41215,
+        receivePath: '${workspaceDirectory.path}/bob-missing-tcp-channel',
+        allowLegacyUdpDataFallback: false,
+      );
+      addTearDown(alice.dispose);
+      addTearDown(bob.dispose);
+
+      await _prepareAuthenticatedPair(
+        alice: alice,
+        bob: bob,
+        bobReceivePath: '${workspaceDirectory.path}/bob-missing-tcp-channel',
+        bobPort: 41215,
+        alicePort: 41214,
+        clock: clock,
+      );
+
+      final sourceFile = File(
+        '${workspaceDirectory.path}/alice-missing-tcp-channel/source.txt',
+      );
+      await sourceFile.parent.create(recursive: true);
+      await sourceFile.writeAsString('tcp channel is required');
+
+      await alice.transferController.sendFile(
+        peerId: 'team@instance-device-b',
+        filePath: sourceFile.path,
+      );
+
+      final aliceJob = await _waitForTerminalTransfer(alice.container);
+      expect(transferInitCount, 0);
+      expect(aliceJob.status, TransferJobStatus.failed);
+      expect(aliceJob.dataCapability, DataTransferCapability.tcpDataStreamV1);
+      expect(aliceJob.message, contains('TCP data channel'));
+      expect(aliceJob.message, isNot(contains('연결 경로')));
+    },
+  );
+
+  test(
+    'opens outbound TCP data channel from authenticated offer packet',
+    () async {
+      final network = _LinkedFakeAuthNetwork();
+      final outboundOpenCommand = _RecordingTcpDataOutboundChannelOpenCommand();
+      final alice = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41207,
+        receivePath: '${workspaceDirectory.path}/alice-tcp-offer',
+      );
+      final bob = await _createNode(
+        network: network,
+        tcpDataOutboundOpenCommand: outboundOpenCommand,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-b',
+        authPort: 41208,
+        receivePath: '${workspaceDirectory.path}/bob-tcp-offer',
+      );
+      addTearDown(alice.dispose);
+      addTearDown(bob.dispose);
+
+      await _prepareAuthenticatedPair(
+        alice: alice,
+        bob: bob,
+        bobReceivePath: '${workspaceDirectory.path}/bob-tcp-offer',
+        bobPort: 41208,
+        alicePort: 41207,
+        clock: clock,
+      );
+      final bobSession = bob.container.read(
+        peerAuthSessionByPeerIdProvider('team@instance-device-a'),
+      );
+      expect(bobSession?.isAuthenticated, isTrue);
+
+      network._transports[41208]!.emit(
+        AuthPacket(
+          type: AuthPacketType.dataChannelOffer,
+          protocolVersion: '1.0',
+          sessionId: bobSession!.sessionId,
+          fromUserId: _sharedUserId,
+          fromDeviceId: 'device-a',
+          fromInstanceId: 'instance-device-a',
+          sentAtEpochMs: clock.value.millisecondsSinceEpoch,
+          dataChannelSessionId: 'tcp-session-1',
+          dataChannelHost: '10.0.0.2',
+          dataChannelPort: 50100,
+          dataChannelDirection: 'inbound',
+        ),
+        address: InternetAddress('127.0.0.1'),
+        port: 41207,
+      );
+      await _flush();
+
+      expect(outboundOpenCommand.calls, hasLength(1));
+      expect(
+        outboundOpenCommand.calls.single.connectRequest.peerId,
+        bobSession.peerId,
+      );
+      expect(
+        outboundOpenCommand.calls.single.connectRequest.authSessionId,
+        bobSession.sessionId,
+      );
+      expect(
+        outboundOpenCommand.calls.single.connectRequest.sessionId,
+        const TcpDataSessionId('tcp-session-1'),
+      );
+      expect(outboundOpenCommand.calls.single.connectRequest.host, '10.0.0.2');
+      expect(outboundOpenCommand.calls.single.connectRequest.port, 50100);
+      expect(
+        outboundOpenCommand.calls.single.hello.instanceId,
+        'instance-device-b',
+      );
+      expect(
+        outboundOpenCommand.calls.single.hello.peerId,
+        'team@instance-device-b',
+      );
+      expect(
+        outboundOpenCommand.calls.single.hello.proof,
+        bobSession.sessionId,
+      );
+    },
+  );
+
+  test('ignores invalid TCP data channel offer endpoint', () async {
+    final network = _LinkedFakeAuthNetwork();
+    final outboundOpenCommand = _RecordingTcpDataOutboundChannelOpenCommand();
+    final alice = await _createNode(
+      network: network,
+      clock: clock,
+      loginUserId: _sharedUserId,
+      loginPassword: _sharedPassword,
+      localDeviceId: 'device-a',
+      authPort: 41209,
+      receivePath: '${workspaceDirectory.path}/alice-invalid-tcp-offer',
+    );
+    final bob = await _createNode(
+      network: network,
+      tcpDataOutboundOpenCommand: outboundOpenCommand,
+      clock: clock,
+      loginUserId: _sharedUserId,
+      loginPassword: _sharedPassword,
+      localDeviceId: 'device-b',
+      authPort: 41210,
+      receivePath: '${workspaceDirectory.path}/bob-invalid-tcp-offer',
+    );
+    addTearDown(alice.dispose);
+    addTearDown(bob.dispose);
+
+    await _prepareAuthenticatedPair(
+      alice: alice,
+      bob: bob,
+      bobReceivePath: '${workspaceDirectory.path}/bob-invalid-tcp-offer',
+      bobPort: 41210,
+      alicePort: 41209,
+      clock: clock,
+    );
+    final bobSession = bob.container.read(
+      peerAuthSessionByPeerIdProvider('team@instance-device-a'),
+    );
+
+    network._transports[41210]!.emit(
+      AuthPacket(
+        type: AuthPacketType.dataChannelOffer,
+        protocolVersion: '1.0',
+        sessionId: bobSession!.sessionId,
+        fromUserId: _sharedUserId,
+        fromDeviceId: 'device-a',
+        fromInstanceId: 'instance-device-a',
+        sentAtEpochMs: clock.value.millisecondsSinceEpoch,
+        dataChannelSessionId: 'tcp-session-invalid',
+        dataChannelHost: '10.0.0.2',
+        dataChannelPort: 0,
+        dataChannelDirection: 'inbound',
+      ),
+      address: InternetAddress('127.0.0.1'),
+      port: 41209,
+    );
+    await _flush();
+
+    expect(outboundOpenCommand.calls, isEmpty);
+  });
+
+  test('publishes TCP data channel offer after peer authentication', () async {
+    final offers = <AuthPacket>[];
+    final network = _LinkedFakeAuthNetwork(
+      interceptor:
+          ({
+            required packet,
+            required address,
+            required sourcePort,
+            required targetPort,
+            required deliver,
+          }) async {
+            if (packet.type == AuthPacketType.dataChannelOffer &&
+                sourcePort == 41212 &&
+                targetPort == 41211) {
+              offers.add(packet);
+            }
+            deliver(packet, address: address, port: sourcePort);
+          },
+    );
+    final bobListener = _RecordingTcpDataListener();
+    final bobSubscription = _RecordingTcpIncomingListenerSubscription();
+    final alice = await _createNode(
+      network: network,
+      clock: clock,
+      loginUserId: _sharedUserId,
+      loginPassword: _sharedPassword,
+      localDeviceId: 'device-a',
+      authPort: 41211,
+      receivePath: '${workspaceDirectory.path}/alice-publish-tcp-offer',
+    );
+    final bob = await _createNode(
+      network: network,
+      tcpDataListener: bobListener,
+      tcpIncomingSubscription: bobSubscription,
+      clock: clock,
+      loginUserId: _sharedUserId,
+      loginPassword: _sharedPassword,
+      localDeviceId: 'device-b',
+      authPort: 41212,
+      receivePath: '${workspaceDirectory.path}/bob-publish-tcp-offer',
+    );
+    addTearDown(alice.dispose);
+    addTearDown(bob.dispose);
+
+    await _prepareAuthenticatedPair(
+      alice: alice,
+      bob: bob,
+      bobReceivePath: '${workspaceDirectory.path}/bob-publish-tcp-offer',
+      bobPort: 41212,
+      alicePort: 41211,
+      clock: clock,
+    );
+    bob.container
+        .read(peerPathRegistryMutationsProvider)
+        .select(
+          _testActivePath(
+            peerId: 'team@instance-device-a',
+            localAddress: '127.0.0.1',
+            remoteAddress: '127.0.0.1',
+            remotePort: 41211,
+          ),
+        );
+    await _flush();
+
+    expect(offers, isNotEmpty);
+    final offer = offers.last;
+    expect(offer.sessionId, isNotEmpty);
+    expect(offer.dataChannelSessionId, isNotEmpty);
+    expect(offer.dataChannelHost, '127.0.0.1');
+    expect(offer.dataChannelPort, 50001);
+    expect(offer.dataChannelDirection, 'inbound');
+    expect(offer.fromInstanceId, 'instance-device-b');
+  });
+
+  test('establishes TCP data channel registries from control offer', () async {
+    final network = _LinkedFakeAuthNetwork();
+    final alice = await _createNode(
+      network: network,
+      clock: clock,
+      loginUserId: _sharedUserId,
+      loginPassword: _sharedPassword,
+      localDeviceId: 'device-a',
+      authPort: 41213,
+      receivePath: '${workspaceDirectory.path}/alice-tcp-auto',
+    );
+    final bob = await _createNode(
+      network: network,
+      clock: clock,
+      loginUserId: _sharedUserId,
+      loginPassword: _sharedPassword,
+      localDeviceId: 'device-b',
+      authPort: 41214,
+      receivePath: '${workspaceDirectory.path}/bob-tcp-auto',
+    );
+    addTearDown(() async {
+      await alice.container.read(tcpDataConnectorProvider).close();
+      await bob.container.read(tcpDataConnectorProvider).close();
+      await alice.dispose();
+      await bob.dispose();
+    });
+
+    await _prepareAuthenticatedPair(
+      alice: alice,
+      bob: bob,
+      bobReceivePath: '${workspaceDirectory.path}/bob-tcp-auto',
+      bobPort: 41214,
+      alicePort: 41213,
+      clock: clock,
+    );
+    alice.container
+        .read(peerPathRegistryMutationsProvider)
+        .select(
+          _testActivePath(
+            peerId: 'team@instance-device-b',
+            localAddress: '127.0.0.1',
+            remoteAddress: '127.0.0.1',
+            remotePort: 41214,
+          ),
+        );
+    bob.container
+        .read(peerPathRegistryMutationsProvider)
+        .select(
+          _testActivePath(
+            peerId: 'team@instance-device-a',
+            localAddress: '127.0.0.1',
+            remoteAddress: '127.0.0.1',
+            remotePort: 41213,
+          ),
+        );
+
+    final aliceSession = alice.container.read(
+      peerAuthSessionByPeerIdProvider('team@instance-device-b'),
+    )!;
+    final bobSession = bob.container.read(
+      peerAuthSessionByPeerIdProvider('team@instance-device-a'),
+    )!;
+    final aliceOutbound = await _waitForTcpDataSession(
+      alice.container,
+      DataChannelSessionKey(
+        peerId: 'team@instance-device-b',
+        authSessionId: aliceSession.sessionId,
+        direction: TcpDataChannelDirection.outbound,
+      ),
+    );
+    final bobInbound = await _waitForTcpDataSession(
+      bob.container,
+      DataChannelSessionKey(
+        peerId: 'team@instance-device-a',
+        authSessionId: bobSession.sessionId,
+        direction: TcpDataChannelDirection.inbound,
+      ),
+    );
+
+    expect(aliceOutbound.status, TcpDataPeerSessionStatus.connected);
+    expect(bobInbound.status, TcpDataPeerSessionStatus.connected);
+    expect(aliceOutbound.direction, TcpDataChannelDirection.outbound);
+    expect(bobInbound.direction, TcpDataChannelDirection.inbound);
+  });
+
+  test(
+    'sends and stores file payload over established TCP data channel',
+    () async {
+      var transferInitCount = 0;
+      final network = _LinkedFakeAuthNetwork(
+        interceptor:
+            ({
+              required packet,
+              required address,
+              required sourcePort,
+              required targetPort,
+              required deliver,
+            }) async {
+              if (packet.type == AuthPacketType.transferInit) {
+                transferInitCount += 1;
+              }
+              deliver(packet, address: address, port: sourcePort);
+            },
+      );
+      final aliceReceivePath = '${workspaceDirectory.path}/alice-tcp-payload';
+      final bobReceivePath = '${workspaceDirectory.path}/bob-tcp-payload';
+      final sourceFile = File('${workspaceDirectory.path}/tcp-source.txt');
+      const sourceContent = 'tcp payload should be stored by receiver';
+      await sourceFile.writeAsString(sourceContent);
+      final alice = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41215,
+        receivePath: aliceReceivePath,
+      );
+      final bob = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-b',
+        authPort: 41216,
+        receivePath: bobReceivePath,
+      );
+      final bobTcpResults = <TcpIncomingStreamFrameEventCoordinatorResult>[];
+      final bobTcpResultSubscription = bob.container
+          .read(tcpIncomingListenerSubscriptionProvider(bobReceivePath))
+          .results
+          .listen(bobTcpResults.add);
+      addTearDown(() async {
+        await bobTcpResultSubscription.cancel();
+        await alice.container.read(tcpDataConnectorProvider).close();
+        await bob.container.read(tcpDataConnectorProvider).close();
+        await alice.dispose();
+        await bob.dispose();
+      });
+
+      await _prepareAuthenticatedPair(
+        alice: alice,
+        bob: bob,
+        bobReceivePath: bobReceivePath,
+        bobPort: 41216,
+        alicePort: 41215,
+        clock: clock,
+      );
+      alice.container
+          .read(peerPathRegistryMutationsProvider)
+          .select(
+            _testActivePath(
+              peerId: 'team@instance-device-b',
+              localAddress: '127.0.0.1',
+              remoteAddress: '127.0.0.1',
+              remotePort: 41216,
+            ),
+          );
+      bob.container
+          .read(peerPathRegistryMutationsProvider)
+          .select(
+            _testActivePath(
+              peerId: 'team@instance-device-a',
+              localAddress: '127.0.0.1',
+              remoteAddress: '127.0.0.1',
+              remotePort: 41215,
+            ),
+          );
+      final aliceSession = alice.container.read(
+        peerAuthSessionByPeerIdProvider('team@instance-device-b'),
+      )!;
+      final bobSession = bob.container.read(
+        peerAuthSessionByPeerIdProvider('team@instance-device-a'),
+      )!;
+      await _waitForTcpDataSession(
+        alice.container,
+        DataChannelSessionKey(
+          peerId: 'team@instance-device-b',
+          authSessionId: aliceSession.sessionId,
+          direction: TcpDataChannelDirection.outbound,
+        ),
+      );
+      await _waitForTcpDataSession(
+        bob.container,
+        DataChannelSessionKey(
+          peerId: 'team@instance-device-a',
+          authSessionId: bobSession.sessionId,
+          direction: TcpDataChannelDirection.inbound,
+        ),
+      );
+
+      await alice.transferController.sendFile(
+        peerId: 'team@instance-device-b',
+        filePath: sourceFile.path,
+      );
+
+      final receivedFile = await _waitForFile(
+        '$bobReceivePath/tcp-source.txt',
+        diagnostics: () => bobTcpResults
+            .map(
+              (result) =>
+                  '${result.applied}:${result.state?.name}:'
+                  '${result.issueCode}',
+            )
+            .join(', '),
+      );
+      expect(await receivedFile.readAsString(), sourceContent);
+      expect(transferInitCount, 0);
+      final jobs = alice.container.read(transferJobsProvider);
+      expect(jobs, hasLength(1));
+      expect(jobs.single.status, TransferJobStatus.completed);
+      expect(jobs.single.message, 'TCP data channel 전송 완료');
+      expect(
+        jobs.single.dataCapability,
+        DataTransferCapability.tcpDataStreamV1,
+      );
+      final bobJobs = bob.container.read(transferJobsProvider);
+      expect(bobJobs, hasLength(1));
+      expect(bobJobs.single.direction, TransferDirection.incoming);
+      expect(bobJobs.single.status, TransferJobStatus.completed);
+      expect(bobJobs.single.fileName, 'tcp-source.txt');
+      expect(bobJobs.single.bytesTransferred, sourceContent.length);
+      expect(bobJobs.single.destinationPath, bobReceivePath);
+      expect(
+        bobJobs.single.dataCapability,
+        DataTransferCapability.tcpDataStreamV1,
+      );
     },
   );
 
@@ -2632,8 +3540,14 @@ Future<_TransferHarness> _createNode({
   AppLogger? logger,
   DataTransport? dataTransport,
   TransferFileService? transferFileService,
+  TcpTransferSendUseCase? tcpTransferSendUseCase,
+  TcpIncomingListenerSubscriptionPort? tcpIncomingSubscription,
+  TcpDataListenerPort? tcpDataListener,
+  TcpDataConnectorPort? tcpDataConnector,
+  TcpDataOutboundChannelOpenCommand? tcpDataOutboundOpenCommand,
   AppStoragePathProvider? storagePathProvider,
   bool useSwitchableSettingsRepository = false,
+  bool allowLegacyUdpDataFallback = true,
 }) async {
   final database = AppDatabase.forTesting(NativeDatabase.memory());
   final settingsRepository = useSwitchableSettingsRepository
@@ -2644,7 +3558,7 @@ Future<_TransferHarness> _createNode({
   final container = ProviderContainer(
     overrides: [
       appConfigProvider.overrideWithValue(
-        const AppConfig(
+        AppConfig(
           environment: AppEnvironment.development,
           appName: 'Sponzey FileSharing',
           protocolVersion: '1.0',
@@ -2657,6 +3571,7 @@ Future<_TransferHarness> _createNode({
           discoveryStaleAfter: Duration(seconds: 10),
           discoveryOfflineAfter: Duration(seconds: 30),
           defaultLogLevel: AppLogLevel.error,
+          allowLegacyUdpDataFallback: allowLegacyUdpDataFallback,
         ),
       ),
       appDatabaseProvider.overrideWithValue(database),
@@ -2676,6 +3591,22 @@ Future<_TransferHarness> _createNode({
       dataTransportProvider.overrideWithValue(resolvedDataTransport),
       if (transferFileService != null)
         transferFileServiceProvider.overrideWithValue(transferFileService),
+      if (tcpTransferSendUseCase != null)
+        tcpTransferSendUseCaseProvider.overrideWithValue(
+          tcpTransferSendUseCase,
+        ),
+      if (tcpIncomingSubscription != null)
+        tcpIncomingListenerSubscriptionProvider(
+          receivePath,
+        ).overrideWithValue(tcpIncomingSubscription),
+      if (tcpDataListener != null)
+        tcpDataListenerProvider.overrideWithValue(tcpDataListener),
+      if (tcpDataConnector != null)
+        tcpDataConnectorProvider.overrideWithValue(tcpDataConnector),
+      if (tcpDataOutboundOpenCommand != null)
+        tcpDataOutboundChannelOpenCommandProvider.overrideWithValue(
+          tcpDataOutboundOpenCommand,
+        ),
       localDeviceIdentityServiceProvider.overrideWithValue(
         _FakeLocalDeviceIdentityService(localDeviceId),
       ),
@@ -2837,6 +3768,39 @@ Future<TransferJob> _waitForTransferJobMatching(
   );
 }
 
+Future<TcpDataPeerSessionSnapshot> _waitForTcpDataSession(
+  ProviderContainer container,
+  DataChannelSessionKey key,
+) async {
+  final registry = container.read(tcpDataChannelSessionRegistryProvider);
+  for (var i = 0; i < 100; i += 1) {
+    final session = registry.lookup(key);
+    if (session != null) {
+      return session;
+    }
+    await _flush();
+  }
+  fail(
+    'Expected TCP data session ${key.peerId}:${key.authSessionId}:'
+    '${key.direction.name}.',
+  );
+}
+
+Future<File> _waitForFile(String path, {String Function()? diagnostics}) async {
+  final file = File(path);
+  for (var i = 0; i < 100; i += 1) {
+    if (await file.exists()) {
+      return file;
+    }
+    await _flush();
+  }
+  final details = diagnostics?.call();
+  fail(
+    'Expected file to exist: $path'
+    '${details == null || details.isEmpty ? '' : ' diagnostics=[$details]'}',
+  );
+}
+
 Future<List<TransferHistorySnapshot>> _waitForHistory(
   ProviderContainer container,
   int expectedCount,
@@ -2898,6 +3862,10 @@ AuthPacket _copyPacket(
     transferDataProtocol: packet.transferDataProtocol,
     transferCapabilities: packet.transferCapabilities,
     transferDataAuthContextId: packet.transferDataAuthContextId,
+    dataChannelSessionId: packet.dataChannelSessionId,
+    dataChannelHost: packet.dataChannelHost,
+    dataChannelPort: packet.dataChannelPort,
+    dataChannelDirection: packet.dataChannelDirection,
     sentAtEpochMs: packet.sentAtEpochMs,
   );
 }
@@ -3012,6 +3980,259 @@ class _AppendFailingIncomingWriter implements IncomingDigestingTransferWriter {
   @override
   Future<String> closeWithDigest() async {
     return '';
+  }
+}
+
+class _RecordingTcpTransferSendUseCase extends TcpTransferSendUseCase {
+  _RecordingTcpTransferSendUseCase({required this.result})
+    : super(
+        fileService: LocalTransferFileService(),
+        peerSender: const _ThrowingTcpPeerFileSender(),
+        dataChannelRegistry: InMemoryDataChannelSessionRegistry(
+          mode: DataChannelMode.tcp,
+        ),
+      );
+
+  final TcpTransferSendUseCaseResult result;
+  final List<TcpTransferSendUseCaseInput> calls = [];
+
+  @override
+  Future<TcpTransferSendUseCaseResult> send(
+    TcpTransferSendUseCaseInput input,
+  ) async {
+    calls.add(input);
+    return result;
+  }
+}
+
+class _ThrowingTcpPeerFileSender implements TcpPeerFileSenderPort {
+  const _ThrowingTcpPeerFileSender();
+
+  @override
+  Future<TcpPeerFileSendResult> send({
+    required DataChannelSessionRegistry registry,
+    required String peerId,
+    required String authSessionId,
+    required String transferId,
+    required String filePath,
+    required int chunkSize,
+  }) {
+    throw StateError('TCP peer sender should not be called by this fake.');
+  }
+}
+
+class _RecordingTcpDataOutboundChannelOpenCommand
+    extends TcpDataOutboundChannelOpenCommand {
+  _RecordingTcpDataOutboundChannelOpenCommand()
+    : super(
+        connector: _ThrowingTcpDataConnector(),
+        registry: InMemoryDataChannelSessionRegistry(mode: DataChannelMode.tcp),
+      );
+
+  final List<_RecordedTcpDataOutboundOpenCall> calls = [];
+
+  @override
+  Future<TcpDataOutboundChannelOpenResult> open({
+    required TcpDataConnectRequest connectRequest,
+    required TcpDataSessionHello hello,
+  }) async {
+    calls.add(
+      _RecordedTcpDataOutboundOpenCall(
+        connectRequest: connectRequest,
+        hello: hello,
+      ),
+    );
+    return TcpDataOutboundChannelOpenResult.opened(
+      TcpDataPeerSessionSnapshot(
+        peerId: connectRequest.peerId,
+        sessionId: connectRequest.sessionId,
+        channelId: const TcpDataChannelId('channel-recorded'),
+        direction: TcpDataChannelDirection.outbound,
+        status: TcpDataPeerSessionStatus.connected,
+        localEndpointLabel: 'recorded-local',
+        remoteEndpointLabel: '${connectRequest.host}:${connectRequest.port}',
+      ),
+    );
+  }
+}
+
+class _RecordedTcpDataOutboundOpenCall {
+  const _RecordedTcpDataOutboundOpenCall({
+    required this.connectRequest,
+    required this.hello,
+  });
+
+  final TcpDataConnectRequest connectRequest;
+  final TcpDataSessionHello hello;
+}
+
+class _ThrowingTcpDataConnector implements TcpDataConnectorPort {
+  @override
+  Future<TcpDataChannelId> connect(TcpDataConnectRequest request) {
+    throw StateError('TCP connector should not be called by this fake.');
+  }
+
+  @override
+  Future<void> sendHello(
+    TcpDataChannelId channelId,
+    TcpDataSessionHello hello,
+  ) {
+    throw StateError('TCP connector should not be called by this fake.');
+  }
+
+  @override
+  Future<void> sendFrame(TcpDataChannelId channelId, TcpDataStreamFrame frame) {
+    throw StateError('TCP connector should not be called by this fake.');
+  }
+
+  @override
+  Future<void> close() async {}
+}
+
+class _RecordingTcpDataConnector implements TcpDataConnectorPort {
+  int closeCount = 0;
+
+  @override
+  Future<TcpDataChannelId> connect(TcpDataConnectRequest request) {
+    throw StateError('TCP connector should not connect in this test.');
+  }
+
+  @override
+  Future<void> sendFrame(TcpDataChannelId channelId, TcpDataStreamFrame frame) {
+    throw StateError('TCP connector should not send frames in this test.');
+  }
+
+  @override
+  Future<void> sendHello(
+    TcpDataChannelId channelId,
+    TcpDataSessionHello hello,
+  ) {
+    throw StateError('TCP connector should not send hello in this test.');
+  }
+
+  @override
+  Future<void> close() async {
+    closeCount += 1;
+  }
+}
+
+class _RecordingTcpIncomingListenerSubscription
+    implements TcpIncomingListenerSubscriptionPort {
+  _RecordingTcpIncomingListenerSubscription({
+    this.failStart = false,
+    List<String>? events,
+  }) : events = events ?? <String>[];
+
+  final bool failStart;
+  final List<String> events;
+  final StreamController<TcpIncomingStreamFrameEventCoordinatorResult>
+  _resultsController =
+      StreamController<
+        TcpIncomingStreamFrameEventCoordinatorResult
+      >.broadcast();
+  int startCount = 0;
+  int stopCount = 0;
+  bool _isRunning = false;
+
+  @override
+  Stream<TcpIncomingStreamFrameEventCoordinatorResult> get results =>
+      _resultsController.stream;
+
+  void emitResult(TcpIncomingStreamFrameEventCoordinatorResult result) {
+    _resultsController.add(result);
+  }
+
+  @override
+  bool get isRunning => _isRunning;
+
+  @override
+  Future<void> start() async {
+    startCount += 1;
+    events.add('subscription.start');
+    if (failStart) {
+      throw StateError('tcp subscription start failed for test');
+    }
+    _isRunning = true;
+  }
+
+  @override
+  Future<void> stop() async {
+    if (_isRunning) {
+      stopCount += 1;
+      events.add('subscription.stop');
+    }
+    _isRunning = false;
+  }
+
+  @override
+  Future<void> dispose() async {
+    await stop();
+    await _resultsController.close();
+  }
+}
+
+class _RecordingTcpDataListener implements TcpDataListenerPort {
+  _RecordingTcpDataListener({this.failBind = false, List<String>? events})
+    : events = events ?? <String>[];
+
+  final bool failBind;
+  final List<String> events;
+  final List<TcpDataListenerBindRequest> bindRequests = [];
+  final StreamController<TcpDataAcceptedConnection> _acceptedController =
+      StreamController<TcpDataAcceptedConnection>.broadcast();
+  final StreamController<TcpDataReceivedHello> _helloController =
+      StreamController<TcpDataReceivedHello>.broadcast();
+  final StreamController<TcpDataReceivedHelloError> _helloErrorController =
+      StreamController<TcpDataReceivedHelloError>.broadcast();
+  final StreamController<TcpDataReceivedStreamFrame> _frameController =
+      StreamController<TcpDataReceivedStreamFrame>.broadcast();
+  final StreamController<TcpDataReceivedStreamFrameError>
+  _frameErrorController =
+      StreamController<TcpDataReceivedStreamFrameError>.broadcast();
+  int closeCount = 0;
+  bool isBound = false;
+
+  @override
+  Stream<TcpDataAcceptedConnection> get acceptedConnections =>
+      _acceptedController.stream;
+
+  @override
+  Stream<TcpDataReceivedStreamFrameError> get frameErrors =>
+      _frameErrorController.stream;
+
+  @override
+  Stream<TcpDataReceivedStreamFrame> get frames => _frameController.stream;
+
+  @override
+  Stream<TcpDataReceivedHelloError> get helloErrors =>
+      _helloErrorController.stream;
+
+  @override
+  Stream<TcpDataReceivedHello> get hellos => _helloController.stream;
+
+  @override
+  Future<TcpDataListenerBinding> bind(
+    TcpDataListenerBindRequest request,
+  ) async {
+    bindRequests.add(request);
+    events.add('listener.bind');
+    if (failBind) {
+      throw StateError('tcp listener bind failed for test');
+    }
+    isBound = true;
+    return TcpDataListenerBinding(
+      host: request.host == '0.0.0.0' ? '127.0.0.1' : request.host,
+      port: request.port == 0 ? 50001 : request.port,
+    );
+  }
+
+  @override
+  Future<void> close() async {
+    if (isBound) {
+      closeCount += 1;
+      events.add('listener.close');
+    }
+    isBound = false;
   }
 }
 

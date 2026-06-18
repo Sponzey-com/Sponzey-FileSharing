@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sponzey_file_sharing/domain/entities/transfer_job.dart';
+import 'package:sponzey_file_sharing/domain/transfer/data_transfer_protocol.dart';
 import 'package:sponzey_file_sharing/domain/transfer/transfer_failure_policy.dart';
 
 void main() {
@@ -70,12 +71,41 @@ void main() {
       );
     },
   );
+
+  test('classifies TCP route lease messages as TCP data channel failures', () {
+    final decision = policy.classify(
+      _job(
+        status: TransferJobStatus.failed,
+        message: '전송 중 연결 경로가 만료되어 전송을 중단했습니다. route=path:peer-a@1',
+        dataCapability: DataTransferCapability.tcpDataStreamV1,
+      ),
+    );
+
+    expect(decision.category, TransferFailureCategory.network);
+    expect(decision.retryable, isTrue);
+    expect(decision.diagnosticCode, 'transfer.failure.tcp_data_channel');
+    expect(decision.userMessage, contains('TCP 데이터 채널'));
+  });
+
+  test('keeps legacy UDP route failures in route category', () {
+    final decision = policy.classify(
+      _job(
+        status: TransferJobStatus.failed,
+        message: '전송 중 연결 경로가 만료되어 전송을 중단했습니다.',
+        dataCapability: DataTransferCapability.udpDataBinaryV1,
+      ),
+    );
+
+    expect(decision.category, TransferFailureCategory.route);
+    expect(decision.diagnosticCode, 'transfer.failure.route');
+  });
 }
 
 TransferJob _job({
   TransferDirection direction = TransferDirection.outgoing,
   TransferJobStatus status = TransferJobStatus.failed,
   String? message,
+  DataTransferCapability? dataCapability,
 }) {
   final now = DateTime.utc(2026, 1, 1);
   return TransferJob(
@@ -93,5 +123,6 @@ TransferJob _job({
     createdAt: now,
     updatedAt: now,
     message: message,
+    dataCapability: dataCapability,
   );
 }

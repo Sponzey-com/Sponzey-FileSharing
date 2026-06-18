@@ -14,7 +14,11 @@ enum AuthPacketType {
   transferChunkNack('TRANSFER_CHUNK_NACK'),
   transferWindowUpdate('TRANSFER_WINDOW_UPDATE'),
   transferComplete('TRANSFER_COMPLETE'),
-  transferCompleteAck('TRANSFER_COMPLETE_ACK');
+  transferCompleteAck('TRANSFER_COMPLETE_ACK'),
+  dataChannelOffer('DATA_CHANNEL_OFFER'),
+  dataChannelConnect('DATA_CHANNEL_CONNECT'),
+  dataChannelAccept('DATA_CHANNEL_ACCEPT'),
+  dataChannelReject('DATA_CHANNEL_REJECT');
 
   const AuthPacketType(this.wireName);
 
@@ -62,6 +66,10 @@ class AuthPacket {
     this.transferDataProtocol,
     this.transferCapabilities,
     this.transferDataAuthContextId,
+    this.dataChannelSessionId,
+    this.dataChannelHost,
+    this.dataChannelPort,
+    this.dataChannelDirection,
   });
 
   final AuthPacketType type;
@@ -96,6 +104,10 @@ class AuthPacket {
   final String? transferDataProtocol;
   final List<String>? transferCapabilities;
   final String? transferDataAuthContextId;
+  final String? dataChannelSessionId;
+  final String? dataChannelHost;
+  final int? dataChannelPort;
+  final String? dataChannelDirection;
 
   List<int> encode() {
     return utf8.encode(
@@ -131,6 +143,10 @@ class AuthPacket {
         'transferDataProtocol': transferDataProtocol,
         'transferCapabilities': transferCapabilities,
         'transferDataAuthContextId': transferDataAuthContextId,
+        'dataChannelSessionId': dataChannelSessionId,
+        'dataChannelHost': dataChannelHost,
+        'dataChannelPort': dataChannelPort,
+        'dataChannelDirection': dataChannelDirection,
         'sentAtEpochMs': sentAtEpochMs,
       }),
     );
@@ -198,6 +214,16 @@ class AuthPacket {
       transferDataAuthContextId: _readOptionalString(
         payload,
         'transferDataAuthContextId',
+      ),
+      dataChannelSessionId: _readOptionalString(
+        payload,
+        'dataChannelSessionId',
+      ),
+      dataChannelHost: _readOptionalString(payload, 'dataChannelHost'),
+      dataChannelPort: _readOptionalInt(payload, 'dataChannelPort'),
+      dataChannelDirection: _readOptionalString(
+        payload,
+        'dataChannelDirection',
       ),
     );
   }

@@ -1,4 +1,5 @@
 import 'package:sponzey_file_sharing/domain/transfer/transfer_route_snapshot.dart';
+import 'package:sponzey_file_sharing/domain/transfer/data_transfer_protocol.dart';
 
 enum TransferDirection { outgoing, incoming }
 
@@ -39,6 +40,7 @@ class TransferJob {
     this.destinationPath,
     this.message,
     this.routeSnapshot,
+    this.dataCapability,
   });
 
   final String id;
@@ -64,6 +66,10 @@ class TransferJob {
   final String? destinationPath;
   final String? message;
   final TransferRouteSnapshot? routeSnapshot;
+  final DataTransferCapability? dataCapability;
+
+  bool get usesTcpDataChannel =>
+      dataCapability == DataTransferCapability.tcpDataStreamV1;
 
   double get progress {
     if (fileSize <= 0) {
@@ -145,10 +151,12 @@ class TransferJob {
     String? destinationPath,
     String? message,
     TransferRouteSnapshot? routeSnapshot,
+    DataTransferCapability? dataCapability,
     bool clearLocalFilePath = false,
     bool clearDestinationPath = false,
     bool clearMessage = false,
     bool clearRouteSnapshot = false,
+    bool clearDataCapability = false,
   }) {
     return TransferJob(
       id: id ?? this.id,
@@ -181,6 +189,9 @@ class TransferJob {
       routeSnapshot: clearRouteSnapshot
           ? null
           : routeSnapshot ?? this.routeSnapshot,
+      dataCapability: clearDataCapability
+          ? null
+          : dataCapability ?? this.dataCapability,
     );
   }
 }

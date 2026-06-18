@@ -57,6 +57,22 @@ void main() {
     }
   });
 
+  test('routes TCP data channel negotiation packets to ignored for now', () {
+    const dispatcher = TransferControlPacketDispatcher();
+
+    expect(
+      dispatcher.routeFor(AuthPacketType.dataChannelOffer),
+      TransferControlPacketRoute.dataChannelOffer,
+    );
+    for (final type in const [
+      AuthPacketType.dataChannelConnect,
+      AuthPacketType.dataChannelAccept,
+      AuthPacketType.dataChannelReject,
+    ]) {
+      expect(dispatcher.routeFor(type), TransferControlPacketRoute.ignored);
+    }
+  });
+
   test('dispatcher stays independent from framework and IO adapters', () async {
     final source = await File(
       'lib/application/transfer/transfer_control_packet_dispatcher.dart',

@@ -26,6 +26,34 @@ void main() {
     );
   });
 
+  test('production config keeps legacy UDP data fallback disabled', () {
+    final config = AppConfig.production();
+
+    expect(config.allowLegacyUdpDataFallback, isFalse);
+  });
+
+  test('legacy UDP data fallback requires explicit bootstrap config', () {
+    const config = AppConfig(
+      environment: AppEnvironment.development,
+      appName: 'Test',
+      protocolVersion: '1.0',
+      discoveryPort: 40000,
+      authPort: 40001,
+      dataPort: 40010,
+      dataPortRange: UdpPortRange(start: 40010, end: 40012),
+      authTokenLifetime: Duration(seconds: 20),
+      authAllowedClockSkew: Duration(seconds: 5),
+      authHandshakeTimeout: Duration(seconds: 15),
+      discoveryBroadcastInterval: Duration(seconds: 3),
+      discoveryStaleAfter: Duration(seconds: 10),
+      discoveryOfflineAfter: Duration(seconds: 30),
+      defaultLogLevel: AppLogLevel.info,
+      allowLegacyUdpDataFallback: true,
+    );
+
+    expect(config.allowLegacyUdpDataFallback, isTrue);
+  });
+
   test('authPort remains a migration alias for controlPort', () {
     const config = AppConfig(
       environment: AppEnvironment.development,

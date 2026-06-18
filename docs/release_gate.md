@@ -3,8 +3,8 @@
 This document defines the release gate for Sponzey FileSharing. CI artifacts are
 not enough to approve a release. A release is eligible only after real
 bidirectional desktop transfer scenarios verify discovery, authentication,
-active route selection, data transfer, receiver-side file persistence, receiver
-digest, and diagnostics redaction.
+TCP data session establishment, data transfer, receiver-side file persistence,
+receiver digest, and diagnostics redaction.
 
 ## Release Rule
 
@@ -16,9 +16,9 @@ digest, and diagnostics redaction.
 - Do not publish a final release without diagnostics export redaction review.
 - Do not publish a final release if the same UID appears as more than one peer
   in the product UI.
-- Do not publish a final release if route candidates replace an active route
-  lease during transfer without an explicit disconnect, timeout, or socket
-  failure.
+- Do not publish a final release if route candidates or discovery refreshes
+  replace an active TCP data session during transfer without an explicit
+  disconnect, timeout, or socket failure.
 - If any required scenario fails, hold the tag and keep the release draft.
 
 ## Required Local Commands
@@ -60,23 +60,23 @@ used in manual transfer scenarios.
 Each scenario must use the same ID/password group on both peers and must create
 a diagnostics export on both ends after the transfer.
 
-Each scenario must also prove the UID active-route model:
+Each scenario must also prove the UID and TCP data session model:
 
 - same UID appears as one peer in product UI, even when multiple network paths
   are discovered.
-- route candidates remain separate from the active route lease in diagnostics.
-- active route lease must not change during transfer unless explicit disconnect, timeout, or socket failure occurs.
+- route candidates remain separate from TCP data sessions in diagnostics.
+- TCP data session must remain stable during transfer unless explicit disconnect, timeout, or socket failure occurs.
 - port changes or additional discovery packets must not change the selected
-  transfer target while the active route lease is still valid.
+  transfer target while the TCP data session is still connected.
 
 | Scenario | Required result |
 | --- | --- |
-| macOS host to macOS second instance | discovery, auth, active route, transfer, receiver digest |
-| macOS second instance to macOS host | discovery, auth, active route, transfer, receiver digest |
-| macOS host to Parallels Windows VM | discovery, auth, active route, transfer, receiver digest |
-| Parallels Windows VM to macOS host | discovery, auth, active route, transfer, receiver digest |
-| macOS host to Ubuntu 22.04 | discovery, auth, active route, transfer, receiver digest |
-| Ubuntu 22.04 to macOS host | discovery, auth, active route, transfer, receiver digest |
+| macOS host to macOS second instance | discovery, auth, TCP data session, transfer, receiver digest |
+| macOS second instance to macOS host | discovery, auth, TCP data session, transfer, receiver digest |
+| macOS host to Parallels Windows VM | discovery, auth, TCP data session, transfer, receiver digest |
+| Parallels Windows VM to macOS host | discovery, auth, TCP data session, transfer, receiver digest |
+| macOS host to Ubuntu 22.04 | discovery, auth, TCP data session, transfer, receiver digest |
+| Ubuntu 22.04 to macOS host | discovery, auth, TCP data session, transfer, receiver digest |
 
 For VM scenarios, bridged networking is preferred. NAT-only VM networking can
 block UDP broadcast discovery and is not a valid pass condition for the product
@@ -90,16 +90,18 @@ match the benchmark record:
 - app version or tag
 - OS and build mode
 - peer id or safe peer label
-- route lease id
-- active route lease status
+- TCP data session id or safe session reference
+- TCP data session state
+- TCP data session direction
+- TCP data session safe endpoint summary
+- last close reason
 - route candidate count
-- route switch count
+- TCP data session restart count
 - selected route address family and route type
 - transfer id
-- session id or safe session reference
 - sender final state
 - receiver final state
-- retry count and loss percent
+- throughput and elapsed time
 - diagnostics timestamp
 
 The export must not contain:
@@ -129,14 +131,16 @@ or summarize the redacted result in the GitHub Release notes.
 | route type | same host / VM bridge / wired LAN / other |
 | same UID one peer | pass / fail |
 | route candidate count |  |
-| active route lease id |  |
-| active route lease stable during transfer | pass / fail |
-| route switch count | 0 required unless explicit disconnect, timeout, or socket failure |
+| TCP data session id |  |
+| TCP data session state |  |
+| TCP data session direction | outbound / inbound |
+| TCP data session stable during transfer | pass / fail |
+| TCP data session restart count | 0 required unless explicit disconnect, timeout, or socket failure |
+| last close reason | none required for successful transfers |
 | file size | 100 MB required for benchmark |
 | average speed |  |
 | peak speed |  |
-| retry count |  |
-| loss percent |  |
+| elapsed time |  |
 | sender final state |  |
 | receiver final state |  |
 | receiver digest result | pass / fail |
@@ -150,8 +154,8 @@ Hold the tag and keep the GitHub Release draft when:
 
 - host to VM succeeds but VM to host fails
 - same UID appears as multiple product peers
-- route candidates overwrite an active route lease during transfer
-- active route lease changes during transfer without explicit disconnect,
+- route candidates overwrite an active TCP data session during transfer
+- TCP data session changes during transfer without explicit disconnect,
   timeout, or socket failure
 - sender completes but receiver digest is missing or failed
 - receiver saved file cannot be found in the expected receive directory

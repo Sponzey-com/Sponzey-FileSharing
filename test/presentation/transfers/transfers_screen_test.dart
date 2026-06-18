@@ -8,6 +8,8 @@ import 'package:sponzey_file_sharing/application/transfer/transfer_overview_prov
 import 'package:sponzey_file_sharing/core/logger/app_logger.dart';
 import 'package:sponzey_file_sharing/domain/entities/app_settings.dart';
 import 'package:sponzey_file_sharing/domain/entities/transfer_job.dart';
+import 'package:sponzey_file_sharing/domain/transfer/data_transfer_protocol.dart';
+import 'package:sponzey_file_sharing/domain/transfer/transfer_route_snapshot.dart';
 import 'package:sponzey_file_sharing/presentation/transfers/transfers_screen.dart';
 
 void main() {
@@ -42,6 +44,136 @@ void main() {
     expect(find.text('재시도'), findsNothing);
     expect(find.textContaining('수신 파일 검증에 실패'), findsOneWidget);
   });
+
+  testWidgets('hides UDP transport metrics for TCP transfer jobs', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 800);
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          transferControllerProvider.overrideWith(
+            _TcpTransferFakeController.new,
+          ),
+          authenticatedTransferPeersProvider.overrideWith((ref) => const []),
+          peerAuthControllerProvider.overrideWith(_PeerAuthFakeController.new),
+          settingsControllerProvider.overrideWith(_SettingsFakeController.new),
+        ],
+        child: const MaterialApp(home: Scaffold(body: TransfersScreen())),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('tcp-demo.txt'), findsOneWidget);
+    expect(find.textContaining('속도'), findsWidgets);
+    expect(find.textContaining('Window'), findsNothing);
+    expect(find.textContaining('Retry'), findsNothing);
+    expect(find.textContaining('Loss'), findsNothing);
+    expect(find.textContaining('RTT'), findsNothing);
+  });
+
+  testWidgets('hides internal UDP route lease message for TCP failures', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 800);
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          transferControllerProvider.overrideWith(
+            _TcpRouteFailureFakeController.new,
+          ),
+          authenticatedTransferPeersProvider.overrideWith((ref) => const []),
+          peerAuthControllerProvider.overrideWith(_PeerAuthFakeController.new),
+          settingsControllerProvider.overrideWith(_SettingsFakeController.new),
+        ],
+        child: const MaterialApp(home: Scaffold(body: TransfersScreen())),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('tcp-route-failure.txt'), findsOneWidget);
+    expect(find.textContaining('TCP 데이터 채널'), findsOneWidget);
+    expect(find.textContaining('연결 경로가 만료'), findsNothing);
+    expect(find.textContaining('route='), findsNothing);
+  });
+
+  testWidgets('hides legacy route snapshot for TCP transfer jobs', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 800);
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          transferControllerProvider.overrideWith(
+            _TcpRouteSnapshotFakeController.new,
+          ),
+          authenticatedTransferPeersProvider.overrideWith((ref) => const []),
+          peerAuthControllerProvider.overrideWith(_PeerAuthFakeController.new),
+          settingsControllerProvider.overrideWith(_SettingsFakeController.new),
+        ],
+        child: const MaterialApp(home: Scaffold(body: TransfersScreen())),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('tcp-route-snapshot.txt'), findsOneWidget);
+    expect(find.textContaining('Route:'), findsNothing);
+  });
+
+  testWidgets('keeps route snapshot visible for legacy UDP transfer jobs', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 800);
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          transferControllerProvider.overrideWith(
+            _UdpRouteSnapshotFakeController.new,
+          ),
+          authenticatedTransferPeersProvider.overrideWith((ref) => const []),
+          peerAuthControllerProvider.overrideWith(_PeerAuthFakeController.new),
+          settingsControllerProvider.overrideWith(_SettingsFakeController.new),
+        ],
+        child: const MaterialApp(home: Scaffold(body: TransfersScreen())),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('udp-route-snapshot.txt'), findsOneWidget);
+    expect(find.textContaining('Route:'), findsOneWidget);
+  });
 }
 
 class _TransfersFakeController extends TransferController {
@@ -72,6 +204,140 @@ class _TransfersFakeController extends TransferController {
       isListening: true,
     );
   }
+}
+
+class _TcpTransferFakeController extends TransferController {
+  @override
+  TransferState build() {
+    final now = DateTime.utc(2026, 1, 1, 12);
+    return TransferState(
+      jobs: [
+        TransferJob(
+          id: 'job-tcp',
+          transferId: 'transfer-tcp',
+          direction: TransferDirection.incoming,
+          peerId: 'peer-1',
+          peerDisplayName: 'peer',
+          fileName: 'tcp-demo.txt',
+          fileSize: 128,
+          bytesTransferred: 64,
+          totalChunks: 2,
+          completedChunks: 1,
+          status: TransferJobStatus.receiving,
+          createdAt: now,
+          updatedAt: now,
+          windowSize: 32,
+          retryCount: 9,
+          lossRate: 0.25,
+          rttMs: 42,
+          dataCapability: DataTransferCapability.tcpDataStreamV1,
+        ),
+      ],
+      isLoading: false,
+      isListening: true,
+    );
+  }
+}
+
+class _TcpRouteFailureFakeController extends TransferController {
+  @override
+  TransferState build() {
+    final now = DateTime.utc(2026, 1, 1, 12);
+    return TransferState(
+      jobs: [
+        TransferJob(
+          id: 'job-tcp-route',
+          transferId: 'transfer-tcp-route',
+          direction: TransferDirection.outgoing,
+          peerId: 'peer-1',
+          peerDisplayName: 'peer',
+          fileName: 'tcp-route-failure.txt',
+          fileSize: 128,
+          bytesTransferred: 64,
+          totalChunks: 2,
+          completedChunks: 1,
+          status: TransferJobStatus.failed,
+          createdAt: now,
+          updatedAt: now,
+          localFilePath: '/tmp/tcp-route-failure.txt',
+          message: '전송 중 연결 경로가 만료되어 전송을 중단했습니다. route=path:peer-a@1',
+          dataCapability: DataTransferCapability.tcpDataStreamV1,
+        ),
+      ],
+      isLoading: false,
+      isListening: true,
+    );
+  }
+}
+
+class _TcpRouteSnapshotFakeController extends TransferController {
+  @override
+  TransferState build() {
+    final now = DateTime.utc(2026, 1, 1, 12);
+    return TransferState(
+      jobs: [
+        _routeSnapshotJob(
+          now: now,
+          fileName: 'tcp-route-snapshot.txt',
+          dataCapability: DataTransferCapability.tcpDataStreamV1,
+        ),
+      ],
+      isLoading: false,
+      isListening: true,
+    );
+  }
+}
+
+class _UdpRouteSnapshotFakeController extends TransferController {
+  @override
+  TransferState build() {
+    final now = DateTime.utc(2026, 1, 1, 12);
+    return TransferState(
+      jobs: [
+        _routeSnapshotJob(
+          now: now,
+          fileName: 'udp-route-snapshot.txt',
+          dataCapability: DataTransferCapability.udpDataBinaryV1,
+        ),
+      ],
+      isLoading: false,
+      isListening: true,
+    );
+  }
+}
+
+TransferJob _routeSnapshotJob({
+  required DateTime now,
+  required String fileName,
+  required DataTransferCapability dataCapability,
+}) {
+  return TransferJob(
+    id: 'job-$fileName',
+    transferId: 'transfer-$fileName',
+    direction: TransferDirection.outgoing,
+    peerId: 'peer-1',
+    peerDisplayName: 'peer',
+    fileName: fileName,
+    fileSize: 128,
+    bytesTransferred: 64,
+    totalChunks: 2,
+    completedChunks: 1,
+    status: TransferJobStatus.sending,
+    createdAt: now,
+    updatedAt: now,
+    dataCapability: dataCapability,
+    routeSnapshot: const TransferRouteSnapshot(
+      routeLeaseId: 'path:peer-a@legacy-route',
+      peerId: 'peer-a',
+      controlLocalAddress: '10.211.55.2',
+      controlRemoteAddress: '10.211.55.3',
+      controlRemotePort: 38401,
+      localInterfaceId: 'ethernet#14',
+      dataLocalAddress: '10.211.55.2',
+      dataRemoteAddress: '10.211.55.3',
+      dataRemotePort: 23200,
+    ),
+  );
 }
 
 class _PeerAuthFakeController extends PeerAuthController {

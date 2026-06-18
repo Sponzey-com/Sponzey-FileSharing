@@ -11,6 +11,7 @@ import 'package:sponzey_file_sharing/domain/entities/peer_auth_session.dart';
 import 'package:sponzey_file_sharing/domain/entities/transfer_job.dart';
 import 'package:sponzey_file_sharing/domain/network/peer_connection_path.dart';
 import 'package:sponzey_file_sharing/domain/network/peer_route_candidate.dart';
+import 'package:sponzey_file_sharing/domain/transfer/tcp_data_peer_session_state_machine.dart';
 
 class DiagnosticsExportBundle {
   const DiagnosticsExportBundle({
@@ -57,6 +58,7 @@ class DiagnosticsExportInput {
     required this.settingsState,
     required this.routeCandidates,
     required this.activePaths,
+    this.tcpDataSessions = const [],
     this.logFilePath,
   });
 
@@ -73,6 +75,7 @@ class DiagnosticsExportInput {
   final SettingsState settingsState;
   final List<PeerRouteCandidate> routeCandidates;
   final List<PeerConnectionPath> activePaths;
+  final List<TcpDataPeerSessionSnapshot> tcpDataSessions;
 }
 
 class PacketDecisionSummary {
@@ -182,6 +185,7 @@ class DiagnosticsExportBundleBuilder {
         'activeRouteCount': input.activePaths
             .where((path) => path.status == PeerPathStatus.active)
             .length,
+        'tcpDataSessionCount': input.tcpDataSessions.length,
         'transferCount': input.transferState.jobs.length,
         'failedTransferCount': input.transferState.jobs
             .where((job) => job.status == TransferJobStatus.failed)
@@ -192,6 +196,9 @@ class DiagnosticsExportBundleBuilder {
         'packetDecisionSummary': packetSummary.toJson(),
         'discovery': _discoverySnapshot(input.discoveryState),
         'routes': _routeSnapshot(input.routeCandidates, input.activePaths),
+        'tcpDataSessions': input.tcpDataSessions
+            .map(_tcpDataSessionSnapshot)
+            .toList(growable: false),
         'authSessions': input.peerAuthState.sessions.values
             .map(_authSessionSnapshot)
             .toList(growable: false),
@@ -327,6 +334,21 @@ class DiagnosticsExportBundleBuilder {
       },
       'updatedAt': session.updatedAt.toIso8601String(),
       'message': session.message,
+    };
+  }
+
+  static Map<String, Object?> _tcpDataSessionSnapshot(
+    TcpDataPeerSessionSnapshot session,
+  ) {
+    return {
+      'peerId': session.peerId,
+      'sessionId': _safeId(session.sessionId.value),
+      'channelId': _safeId(session.channelId.value),
+      'direction': session.direction.name,
+      'status': session.status.name,
+      'localEndpoint': session.localEndpointLabel,
+      'remoteEndpoint': session.remoteEndpointLabel,
+      'lastCloseReason': session.lastCloseReason,
     };
   }
 

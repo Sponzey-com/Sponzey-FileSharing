@@ -11,6 +11,7 @@ import 'package:sponzey_file_sharing/application/network/peer_path_registry.dart
 import 'package:sponzey_file_sharing/application/settings/settings_controller.dart';
 import 'package:sponzey_file_sharing/application/transfer/transfer_controller.dart';
 import 'package:sponzey_file_sharing/core/logger/app_logger.dart';
+import 'package:sponzey_file_sharing/infrastructure/transfer/tcp_transfer_pipeline_providers.dart';
 
 final diagnosticsExportBundleProvider = Provider<DiagnosticsExportBundle>((
   ref,
@@ -36,6 +37,9 @@ final diagnosticsExportBundleProvider = Provider<DiagnosticsExportBundle>((
       settingsState: ref.watch(settingsControllerProvider),
       routeCandidates: ref.watch(peerRouteCandidateStoreProvider),
       activePaths: ref.watch(peerPathRegistryProvider).snapshot(),
+      tcpDataSessions: ref
+          .watch(tcpDataChannelSessionRegistryProvider)
+          .snapshot(),
     ),
   );
 });

@@ -393,6 +393,7 @@ class _TransferJobTile extends ConsumerWidget {
         job.status == TransferJobStatus.completed &&
         job.destinationPath != null;
     final canOpenFolder = canOpenCompletedFile;
+    final primaryMessage = _primaryTransferMessage(job, failureDecision);
     return ListTile(
       contentPadding: EdgeInsets.zero,
       leading: Icon(
@@ -414,11 +415,13 @@ class _TransferJobTile extends ConsumerWidget {
             runSpacing: AppSpacing.xs,
             children: [
               Text('속도 ${_formatRate(job.throughputBytesPerSec)}'),
-              Text('Window ${job.windowSize}'),
-              Text('Retry ${job.retryCount}'),
-              Text('Loss ${(job.lossRate * 100).toStringAsFixed(1)}%'),
-              if (job.rttMs != null)
-                Text('RTT ${job.rttMs!.toStringAsFixed(0)}ms'),
+              if (!job.usesTcpDataChannel) ...[
+                Text('Window ${job.windowSize}'),
+                Text('Retry ${job.retryCount}'),
+                Text('Loss ${(job.lossRate * 100).toStringAsFixed(1)}%'),
+                if (job.rttMs != null)
+                  Text('RTT ${job.rttMs!.toStringAsFixed(0)}ms'),
+              ],
               if (job.estimatedRemaining != null)
                 Text('ETA ${_formatDuration(job.estimatedRemaining!)}'),
             ],
@@ -431,13 +434,13 @@ class _TransferJobTile extends ConsumerWidget {
             backgroundColor: AppColors.brandYellowMist,
             borderRadius: BorderRadius.circular(999),
           ),
-          if (job.message != null) ...[
+          if (primaryMessage != null) ...[
             const SizedBox(height: AppSpacing.xs),
-            Text(job.message!),
+            Text(primaryMessage),
           ],
           if (job.isTerminal &&
               job.status != TransferJobStatus.completed &&
-              failureDecision.userMessage != job.message) ...[
+              failureDecision.userMessage != primaryMessage) ...[
             const SizedBox(height: AppSpacing.xs),
             Text(failureDecision.userMessage),
           ],
@@ -448,7 +451,7 @@ class _TransferJobTile extends ConsumerWidget {
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
-          if (job.routeSnapshot != null) ...[
+          if (job.routeSnapshot != null && !job.usesTcpDataChannel) ...[
             const SizedBox(height: AppSpacing.xs),
             Text(
               _formatRouteSnapshot(job.routeSnapshot!),
@@ -555,6 +558,16 @@ String _formatRouteSnapshot(TransferRouteSnapshot snapshot) {
       ? snapshot.routeLeaseId
       : snapshot.routeLeaseId.substring(0, 12);
   return 'Route: $dataLocal -> $dataRemote ($lease)';
+}
+
+String? _primaryTransferMessage(
+  TransferJob job,
+  TransferFailureDecision failureDecision,
+) {
+  if (job.isTerminal && job.status != TransferJobStatus.completed) {
+    return failureDecision.userMessage;
+  }
+  return job.message;
 }
 
 String _formatBytes(int value) {

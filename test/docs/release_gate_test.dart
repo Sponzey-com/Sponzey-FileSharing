@@ -17,15 +17,17 @@ void main() {
     expect(doc, contains('same UID appears as one peer'));
     expect(
       doc,
-      contains('route candidates remain separate from the active route lease'),
+      contains('route candidates remain separate from TCP data sessions'),
     );
     expect(
       doc,
       contains(
-        'active route lease must not change during transfer unless explicit disconnect, timeout, or socket failure occurs',
+        'TCP data session must remain stable during transfer unless explicit disconnect, timeout, or socket failure occurs',
       ),
     );
-    expect(doc, contains('route switch count'));
+    expect(doc, contains('TCP data session state'));
+    expect(doc, contains('last close reason'));
+    expect(doc, contains('TCP data session restart count'));
     expect(doc, contains('.tasks/release_runs/<tag>.md'));
     expect(doc, contains('Do not reuse or force-move a published tag'));
   });
@@ -41,6 +43,7 @@ void main() {
     expect(script, contains('scripts\\\\build_windows.ps1 -AppVersion'));
     expect(script, contains('Manual release gate still required'));
     expect(script, contains('same UID one peer'));
-    expect(script, contains('active route lease stability'));
+    expect(script, contains('TCP data session stability'));
+    expect(script, contains('last close reason'));
   });
 }

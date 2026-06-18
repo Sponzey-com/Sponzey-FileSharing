@@ -417,7 +417,11 @@ class RawUdpControlTransport implements ControlTransport {
         type == AuthPacketType.transferChunkNack ||
         type == AuthPacketType.transferWindowUpdate ||
         type == AuthPacketType.transferComplete ||
-        type == AuthPacketType.transferCompleteAck;
+        type == AuthPacketType.transferCompleteAck ||
+        type == AuthPacketType.dataChannelOffer ||
+        type == AuthPacketType.dataChannelConnect ||
+        type == AuthPacketType.dataChannelAccept ||
+        type == AuthPacketType.dataChannelReject;
   }
 
   bool _isAddressInUse(Object error) {

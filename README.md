@@ -12,8 +12,8 @@ The project explicitly targets environments where a single machine can have mult
 
 - Automatically discover nodes on the same local network.
 - Open file transfer sessions only with peers authenticated through ID/password-based credentials.
-- Provide a low-latency transfer experience over UDP.
-- Add reliability on top of UDP by explicitly handling packet loss, duplication, retransmission, and timeouts.
+- Use UDP for low-latency discovery and control, and use an authenticated TCP Data Channel for file payload transfer.
+- Use TCP stream ordering, retransmission, and flow control for file payloads, with application-level framing, digest validation, cancellation, and failure recovery.
 - Support both 1:1 transfer and 1:N distribution.
 - Use all available Ethernet interfaces as discovery, connection, and transfer path candidates.
 - Target desktop environments on macOS, Windows, and Linux, with Linux support based on Ubuntu 22.04 LTS or newer.
@@ -52,19 +52,19 @@ The authentication flow follows these rules:
 - Automatically authenticate, connect, and receive between peers using the same ID/password group.
 - Treat allowed-user lists, manual receive approval, and persisted credential verifiers as future extensions, not the current default path.
 
-### UDP-Based File Transfer
+### UDP Discovery/Control and TCP Data Transfer
 
-The transfer transport is UDP. UDP is favorable for low connection latency and fast transfer inside local networks, but reliability has to be reinforced explicitly.
+Discovery and control remain UDP-based because broadcast discovery and low-latency local control messages are still the right fit for peer detection and session negotiation. File payload transfer uses an authenticated TCP Data Channel so the active peer session is not invalidated by UDP source port changes, route candidate churn, or discovery lease expiry while a file is moving.
 
-The transfer layer therefore handles:
+The TCP Data Channel layer therefore handles:
 
-- Packet loss
-- Packet duplication
-- Out-of-order delivery
-- Retransmission
-- Timeout
-- Transfer cancellation
+- Stream frame boundaries
+- Transfer metadata negotiation
+- Backpressure and flow control
+- Cancellation
+- Socket close and reconnect decisions
 - Partial failure and retry
+- Digest validation after receive completion
 
 ### Multi-Peer Connectivity and Transfer Queue
 
@@ -80,7 +80,7 @@ Receivers automatically accept files from authenticated peers and save them to t
 
 - Flutter Desktop app
 - Local network node discovery
-- UDP-based control and data transfer
+- UDP-based discovery/control and TCP Data Channel file payload transfer
 - Runtime ID/password session without sign-up
 - Authenticated peer connection
 - Single-file and multi-file transfer
@@ -107,7 +107,7 @@ Receivers automatically accept files from authenticated peers and save them to t
 - Dart
 - Riverpod
 - Drift / SQLite
-- UDP socket based local network communication
+- UDP discovery/control sockets and TCP Data Channel stream transport
 - Runtime-only password-derived JWT authentication
 - In-memory credential and session-key lifecycle
 - Platform path and permission handling
@@ -130,7 +130,7 @@ lib/
   application/         use cases, controllers, state composition
   core/                shared foundations such as errors and logging
   domain/              entities, domain services, pure rules
-  infrastructure/      UDP, auth, DB, file system, platform implementations
+  infrastructure/      UDP/TCP, auth, DB, file system, platform implementations
   presentation/        Flutter screens and widgets
 
 test/
@@ -145,7 +145,7 @@ Dependency direction:
 - `presentation` uses `application`.
 - `application` uses `domain`.
 - `infrastructure` handles external systems and platform-specific implementations.
-- `domain` does not depend on Flutter, Riverpod, Drift, UDP sockets, or the file system.
+- `domain` does not depend on Flutter, Riverpod, Drift, UDP/TCP sockets, or the file system.
 
 ## State Management and Internal Procedures
 
@@ -203,13 +203,18 @@ Actual platform availability depends on the local Flutter environment and deskto
 
 ## Platform Operations and Troubleshooting
 
-Sponzey FileSharing uses UDP for discovery, control, and data transfer. Platform issues should be solved at the platform boundary, not by adding OS-specific protocol branches.
+Sponzey FileSharing uses UDP for discovery/control and TCP for file payload transfer in the current TCP Data Channel plan. Platform issues should be solved at the platform boundary, not by adding OS-specific protocol branches.
 
 Default UDP ports:
 
 - Discovery: `38400/udp`
 - Control/auth: `38401/udp`
-- Data transfer: `38410-38430/udp`
+
+TCP Data Channel:
+
+- The TCP listener is negotiated after authenticated control setup.
+- Prefer an OS-assigned ephemeral TCP port unless `AppConfig` explicitly fixes a data listener port at bootstrap.
+- If a fixed TCP Data Channel port is introduced, firewall and smoke-test instructions must be updated in the same change.
 
 If these values are changed in `AppConfig`, firewall and smoke-test instructions must be updated at the same time.
 
@@ -223,7 +228,8 @@ If these values are changed in `AppConfig`, firewall and smoke-test instructions
 ### Windows Runtime
 
 - Allow the app through Windows Defender Firewall for Private networks.
-- If discovery or transfer does not work, explicitly allow the configured UDP ports: discovery `38400/udp`, control `38401/udp`, and data `38410-38430/udp`.
+- If discovery does not work, explicitly allow the configured UDP ports: discovery `38400/udp` and control `38401/udp`.
+- If file transfer does not work after peers are authenticated, allow the app for inbound TCP on Private networks, or allow the fixed TCP Data Channel port if one is configured at bootstrap.
 - In a Windows VM, use bridged networking when host/guest discovery is required. NAT-only VM networking can block broadcast discovery.
 - The default receive directory is `%USERPROFILE%\Downloads\Sponzey FileSharing`.
 - App support data, logs, and diagnostics export files are stored under `%APPDATA%\Sponzey FileSharing`.
@@ -231,7 +237,8 @@ If these values are changed in `AppConfig`, firewall and smoke-test instructions
 PowerShell firewall example:
 
 ```powershell
-New-NetFirewallRule -DisplayName "Sponzey FileSharing UDP" -Direction Inbound -Action Allow -Protocol UDP -LocalPort 38400,38401,38410-38430 -Profile Private
+New-NetFirewallRule -DisplayName "Sponzey FileSharing UDP Control" -Direction Inbound -Action Allow -Protocol UDP -LocalPort 38400,38401 -Profile Private
+New-NetFirewallRule -DisplayName "Sponzey FileSharing TCP Data" -Direction Inbound -Action Allow -Program "C:\Work\SponzeyFileSharing\build\windows\x64\runner\Release\sponzey_file_sharing.exe" -Profile Private
 ```
 
 ### Windows Development Mode and Symlinks
@@ -279,10 +286,10 @@ Before treating a build as platform-ready:
 2. Confirm login fields accept keyboard input and the login button enables immediately after both fields are filled.
 3. Confirm primary buttons respond to a single click.
 4. Confirm peer discovery on the intended network path.
-5. Confirm authenticated connection reaches an active route.
-6. Transfer a small file in both directions.
+5. Confirm authenticated connection reaches a connected TCP Data Channel, with route candidates remaining diagnostic context.
+6. Transfer a small file in both directions through the TCP Data Channel.
 7. Confirm the receiver writes the file under the default receive directory.
-8. Create a diagnostics export and confirm it contains route, auth, transfer, and storage state without passwords, JWTs, session keys, file payloads, or full sensitive paths.
+8. Create a diagnostics export and confirm it contains route, auth, TCP data session, transfer, and storage state without passwords, JWTs, session keys, file payloads, or full sensitive paths.
 
 ## Windows Build
 
@@ -375,7 +382,7 @@ Feature changes should follow TDD.
 
 - [AGENTS.md](AGENTS.md): mandatory development principles and agent workflow rules for this repository
 - [plan.md](plan.md): product requirements, architecture, protocol, and phased development plan
-- [.tasks/plan.md](.tasks/plan.md): current connection-first plan for multi-Ethernet stabilization
+- [.tasks/plan.md](.tasks/plan.md): current TCP Data Channel migration plan
 - [.tasks/phase001/README.md](.tasks/phase001/README.md): phase001 task index
 - [.tasks/phase002/README.md](.tasks/phase002/README.md): phase002 task index for state machines, MessageBus, and UDP port separation
 - [.tasks/phase003/README.md](.tasks/phase003/README.md): phase003 task index for full multi-Ethernet interface support
@@ -383,23 +390,23 @@ Feature changes should follow TDD.
 - [.tasks/phase005/plan.md](.tasks/phase005/plan.md): high-speed UDP Data channel transition record
 - [docs/release_gate.md](docs/release_gate.md): release gate, bidirectional host/VM transfer validation, and benchmark record template
 
-Tasks are organized under `.tasks` and phase archive directories. The current connection-first plan is kept at `.tasks/plan.md`, with current execution tasks at `.tasks/task001.md` through `.tasks/task011.md`.
+Tasks are organized under `.tasks` and phase archive directories. The current TCP Data Channel migration plan is kept at `.tasks/plan.md`, and current execution tasks are created one at a time starting at `.tasks/task001.md`.
 
 ## Current Development Flow
 
-The current stabilization flow follows `.tasks/plan.md`:
+The current TCP Data Channel migration flow follows `.tasks/plan.md`:
 
 1. Align product documents and task standards.
-2. Stabilize peer identity, route candidates, route leases, and self-packet suppression.
-3. Verify multi-Ethernet discovery targets and packet receive decisions.
-4. Complete automatic authentication and connection state machines.
-5. Ensure active route leases and Data transfer paths match.
-6. Stabilize receive paths, temp files, and receiver preparation lifecycle.
-7. Verify Data channel correctness, digest validation, and throughput benchmarks.
-8. Productize transfer UX, retry/cancel, and persisted history.
-9. Provide diagnostics export with safe redaction.
+2. Add TCP data peer session state machines and value objects.
+3. Separate DataChannel abstractions from legacy UDP data transfer code.
+4. Add TCP listener, connector, and authenticated control negotiation.
+5. Bind TCP data sessions to authenticated peer sessions.
+6. Stream files through TCP frames with digest validation and cancellation.
+7. Support queue, bidirectional transfer, and multi-peer isolation over TCP.
+8. Project TCP data state into UI and diagnostics without leaking transport details.
+9. Isolate or remove the UDP Data default path.
 10. Harden macOS, Windows, and Linux platform behavior.
-11. Enforce release gates with bidirectional host/VM transfer verification.
+11. Enforce release gates with bidirectional host/VM TCP Data Channel verification.
 
 ## Development Standards
 
@@ -416,4 +423,4 @@ When writing new code, follow these standards:
 
 ## Summary
 
-Sponzey FileSharing is a desktop app for fast and secure file exchange inside local networks. It uses UDP for low latency while reinforcing reliability, enforcing authentication boundaries, managing procedures through state machines, delivering events through MessageBus, and preserving a testable layered architecture so it can evolve into a practical internal-network file transfer tool.
+Sponzey FileSharing is a desktop app for fast and secure file exchange inside local networks. It uses UDP for discovery/control and an authenticated TCP Data Channel for file payload transfer, while enforcing authentication boundaries, managing procedures through state machines, delivering events through MessageBus, and preserving a testable layered architecture so it can evolve into a practical internal-network file transfer tool.

@@ -2,6 +2,7 @@ class DataTransferCapability {
   const DataTransferCapability._(this.name);
 
   static const udpDataBinaryV1 = DataTransferCapability._('udpDataBinaryV1');
+  static const tcpDataStreamV1 = DataTransferCapability._('tcpDataStreamV1');
 
   final String name;
 
@@ -33,7 +34,9 @@ class DataTransferCapabilitySet {
   static DataTransferCapabilitySet fromWireList(List<String> names) {
     return DataTransferCapabilitySet({
       for (final name in names)
-        if (name == DataTransferCapability.udpDataBinaryV1.name)
+        if (name == DataTransferCapability.tcpDataStreamV1.name)
+          DataTransferCapability.tcpDataStreamV1
+        else if (name == DataTransferCapability.udpDataBinaryV1.name)
           DataTransferCapability.udpDataBinaryV1,
     });
   }

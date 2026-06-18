@@ -62,7 +62,13 @@ import 'package:sponzey_file_sharing/application/transfer/transfer_outgoing_wind
 import 'package:sponzey_file_sharing/application/transfer/transfer_outgoing_window_update_command.dart';
 import 'package:sponzey_file_sharing/application/transfer/transfer_random_hex_formatter.dart';
 import 'package:sponzey_file_sharing/application/transfer/transfer_rtt_estimator.dart';
+import 'package:sponzey_file_sharing/application/transfer/tcp_transfer_send_use_case.dart';
 import 'package:sponzey_file_sharing/application/transfer/transfer_session_registry.dart';
+import 'package:sponzey_file_sharing/application/transfer/tcp_data_stream_frame_dispatcher.dart';
+import 'package:sponzey_file_sharing/application/transfer/tcp_incoming_listener_stream_subscription_coordinator.dart';
+import 'package:sponzey_file_sharing/application/transfer/tcp_incoming_stream_frame_event_coordinator.dart';
+import 'package:sponzey_file_sharing/application/transfer/tcp_data_channel_ports.dart';
+import 'package:sponzey_file_sharing/application/transfer/tcp_data_session_handshake_command.dart';
 import 'package:sponzey_file_sharing/core/errors/app_exception.dart';
 import 'package:sponzey_file_sharing/core/logger/app_log_category.dart';
 import 'package:sponzey_file_sharing/core/logger/app_logger.dart';
@@ -70,12 +76,14 @@ import 'package:sponzey_file_sharing/core/message_bus/message_bus.dart';
 import 'package:sponzey_file_sharing/core/network/udp_port_config.dart';
 import 'package:sponzey_file_sharing/domain/entities/app_settings.dart';
 import 'package:sponzey_file_sharing/domain/entities/peer_auth_session.dart';
+import 'package:sponzey_file_sharing/domain/entities/peer_identity.dart';
 import 'package:sponzey_file_sharing/domain/entities/transfer_job.dart';
 import 'package:sponzey_file_sharing/domain/network/network_interface_models.dart';
 import 'package:sponzey_file_sharing/domain/network/peer_connection_path.dart';
 import 'package:sponzey_file_sharing/domain/network/peer_route_candidate.dart';
 import 'package:sponzey_file_sharing/domain/transfer/data_transfer_tuning_policy.dart';
 import 'package:sponzey_file_sharing/domain/transfer/data_transfer_protocol.dart';
+import 'package:sponzey_file_sharing/domain/transfer/tcp_data_peer_session_state_machine.dart';
 import 'package:sponzey_file_sharing/domain/transfer/transfer_job_state_machine.dart';
 import 'package:sponzey_file_sharing/domain/transfer/transfer_route_snapshot.dart';
 import 'package:sponzey_file_sharing/infrastructure/auth/auth_packet.dart';
@@ -85,6 +93,7 @@ import 'package:sponzey_file_sharing/infrastructure/platform/app_storage_path_pr
 import 'package:sponzey_file_sharing/infrastructure/platform/local_device_identity_service.dart';
 import 'package:sponzey_file_sharing/infrastructure/repositories/settings_repository.dart';
 import 'package:sponzey_file_sharing/infrastructure/repositories/transfer_history_repository.dart';
+import 'package:sponzey_file_sharing/infrastructure/transfer/tcp_transfer_pipeline_providers.dart';
 import 'package:sponzey_file_sharing/infrastructure/transfer/transfer_file_service.dart';
 import 'package:sponzey_file_sharing/infrastructure/transfer/streaming_digest.dart';
 import 'package:sponzey_file_sharing/infrastructure/transfer_data/data_frame.dart';
@@ -183,7 +192,14 @@ class TransferController extends Notifier<TransferState> {
   final Random _random = Random.secure();
   StreamSubscription<ControlDatagram>? _packetSubscription;
   StreamSubscription<DataFrameDatagram>? _dataFrameSubscription;
+  StreamSubscription<TcpIncomingStreamFrameEventCoordinatorResult>?
+  _tcpIncomingResultSubscription;
+  TcpIncomingListenerSubscriptionPort? _tcpIncomingSubscription;
+  TcpDataListenerPort? _tcpDataListener;
+  TcpDataConnectorPort? _tcpDataConnector;
+  TcpDataListenerBinding? _tcpDataListenerBinding;
   LocalDeviceIdentity? _localIdentity;
+  final Set<String> _offeredTcpDataPeers = {};
   final TransferSessionRegistry<_OutgoingTransferContext>
   _outgoingSessionRegistry = TransferSessionRegistry<_OutgoingTransferContext>(
     direction: TransferDirection.outgoing,
@@ -202,6 +218,21 @@ class TransferController extends Notifier<TransferState> {
   TransferState build() {
     ref.onDispose(() {
       unawaited(_dispose());
+    });
+    ref.listen<PeerAuthState>(peerAuthControllerProvider, (previous, next) {
+      for (final session in next.sessions.values) {
+        if (!session.isAuthenticated) {
+          continue;
+        }
+        final wasAuthenticated =
+            previous?.sessions[session.peerId]?.isAuthenticated == true;
+        if (!wasAuthenticated) {
+          unawaited(_sendTcpDataChannelOffer(session));
+        }
+      }
+    });
+    ref.listen<int>(peerPathRegistryRevisionProvider, (previous, next) {
+      unawaited(_sendTcpDataChannelOffersToAuthenticatedPeers());
     });
 
     if (!_didInitialize) {
@@ -297,6 +328,9 @@ class TransferController extends Notifier<TransferState> {
     return _diagnosticFrameTraces[transferId]?.snapshot() ?? const [];
   }
 
+  // Legacy UDP outgoing path is intentionally retained until the dedicated
+  // removal task migrates or deletes old UDP-data controller tests.
+  // ignore: unused_element
   void _registerOutgoingTransfer(
     String transferId,
     _OutgoingTransferContext context,
@@ -416,114 +450,192 @@ class TransferController extends Notifier<TransferState> {
 
     try {
       final session = _requireAuthenticatedSession(peerId);
-      final activeRoute = _requireActiveTransferRoute(
-        peerId: peerId,
-        session: session,
-      );
-      final routeSnapshot = _snapshotFromActiveRoute(activeRoute);
-      final fileService = ref.read(transferFileServiceProvider);
-      final preparedFile = await fileService.prepareOutgoingMetadata(
-        filePath,
-        chunkSize: _dataChunkSize,
-      );
-      final reader = await fileService.openOutgoingReader(
-        preparedFile.filePath,
-      );
-      final transferId = _randomHex(12);
-      final now = _now();
-      final targetAddress = InternetAddress(routeSnapshot.controlRemoteAddress);
-      final targetPort = routeSnapshot.controlRemotePort;
-      final controlEndpoint = activeRoute.controlEndpoint;
-      final authContext = TransferDataAuthContext.derive(
-        sessionId: session.sessionId,
-        localNodeId: _currentInstanceId(),
-        remoteNodeId: session.peerId,
-        transferId: transferId,
-        selectedPathId: activeRoute.pathId,
-        nonce: _randomHex(12),
-      );
-      final context = _OutgoingTransferContext(
-        session: session,
-        preparedFile: preparedFile,
-        startedAt: now,
-        windowSize: _initialWindowSize,
-        remoteWindowStart: 0,
-        advertisedWindowSize: _receiverAdvertisedWindow,
-        rttEstimator: TransferRttEstimator(),
-        controlEndpoint: controlEndpoint,
-        reader: reader,
-        authContext: authContext,
-        transferId: transferId,
-        routeSnapshot: routeSnapshot,
-      );
-      _registerOutgoingTransfer(transferId, context);
-      ref
-          .read(appLoggerProvider)
-          .info(
-            AppLogCategory.transferControl,
-            'Starting outgoing transfer ${_safeTransfer(transferId)} '
-            'peer=$peerId route=${routeSnapshot.routeLeaseId} '
-            'session=${_safeSession(session.sessionId)} '
-            'target=${targetAddress.address}:$targetPort '
-            'local=${_endpointLabel(controlEndpoint)} '
-            'file=${preparedFile.fileName} size=${preparedFile.fileSize} '
-            'chunks=${preparedFile.chunkCount}',
+      final tcpTransferId = _randomHex(12);
+      final tcpSendResult = await ref
+          .read(tcpTransferSendUseCaseProvider)
+          .send(
+            TcpTransferSendUseCaseInput(
+              peerId: peerId,
+              authSessionId: session.sessionId,
+              transferId: tcpTransferId,
+              filePath: filePath,
+              chunkSize: _dataChunkSize,
+            ),
           );
-      _upsertJob(
-        TransferJob(
-          id: transferId,
-          transferId: transferId,
-          direction: TransferDirection.outgoing,
+      if (tcpSendResult.sent) {
+        final now = _now();
+        _upsertJob(
+          TransferJob(
+            id: tcpTransferId,
+            transferId: tcpTransferId,
+            direction: TransferDirection.outgoing,
+            peerId: peerId,
+            peerDisplayName: session.peerDisplayName,
+            fileName: tcpSendResult.fileName ?? filePath.split('/').last,
+            fileSize: tcpSendResult.fileSize,
+            bytesTransferred: tcpSendResult.bytesSent > 0
+                ? tcpSendResult.bytesSent
+                : tcpSendResult.fileSize,
+            totalChunks: tcpSendResult.chunkCount,
+            completedChunks: tcpSendResult.chunkCount,
+            status: TransferJobStatus.completed,
+            createdAt: now,
+            updatedAt: now,
+            localFilePath: tcpSendResult.filePath ?? filePath,
+            message: 'TCP data channel 전송 완료',
+            dataCapability: DataTransferCapability.tcpDataStreamV1,
+          ),
+        );
+        setDraftPeerId(peerId);
+        state = state.copyWith(
+          infoMessage:
+              '파일 전송이 완료되었습니다: ${tcpSendResult.fileName ?? filePath.split('/').last}',
+          clearError: true,
+        );
+        return;
+      }
+      if (ref.read(appConfigProvider).allowLegacyUdpDataFallback) {
+        final activeRoute = _requireActiveTransferRoute(
           peerId: peerId,
-          peerDisplayName: session.peerDisplayName,
-          fileName: preparedFile.fileName,
-          fileSize: preparedFile.fileSize,
-          bytesTransferred: 0,
-          totalChunks: preparedFile.chunkCount,
-          completedChunks: 0,
-          status: TransferJobStatus.preparing,
-          createdAt: now,
-          updatedAt: now,
-          localFilePath: preparedFile.filePath,
-          windowSize: context.windowSize,
-          routeSnapshot: routeSnapshot,
-        ),
-      );
-
-      await _send(
-        AuthPacket(
-          type: AuthPacketType.transferInit,
-          protocolVersion: ref.read(appConfigProvider).protocolVersion,
+          session: session,
+        );
+        final routeSnapshot = _snapshotFromActiveRoute(activeRoute);
+        final fileService = ref.read(transferFileServiceProvider);
+        final preparedFile = await fileService.prepareOutgoingMetadata(
+          filePath,
+          chunkSize: _dataChunkSize,
+        );
+        final reader = await fileService.openOutgoingReader(
+          preparedFile.filePath,
+        );
+        final transferId = _randomHex(12);
+        final now = _now();
+        final targetAddress = InternetAddress(
+          routeSnapshot.controlRemoteAddress,
+        );
+        final targetPort = routeSnapshot.controlRemotePort;
+        final controlEndpoint = activeRoute.controlEndpoint;
+        final authContext = TransferDataAuthContext.derive(
           sessionId: session.sessionId,
-          fromUserId: _currentUserId(),
-          fromDeviceId: _currentDeviceId(),
-          fromInstanceId: _currentInstanceId(),
-          fromDisplayName: _currentDisplayName(),
+          localNodeId: _currentInstanceId(),
+          remoteNodeId: session.peerId,
           transferId: transferId,
-          transferFileName: preparedFile.fileName,
-          transferFileSize: preparedFile.fileSize,
-          transferChunkCount: preparedFile.chunkCount,
-          transferAcceptedChunkSize: preparedFile.chunkSize,
-          transferCapabilities: const ['udpDataBinaryV1'],
-          transferDataProtocol: DataTransferCapability.udpDataBinaryV1.name,
-          transferDataAuthContextId: authContext.keyId,
-          sentAtEpochMs: now.millisecondsSinceEpoch,
-        ),
-        address: targetAddress,
-        port: targetPort,
-        localEndpoint: controlEndpoint,
-      );
+          selectedPathId: activeRoute.pathId,
+          nonce: _randomHex(12),
+        );
+        final context = _OutgoingTransferContext(
+          session: session,
+          preparedFile: preparedFile,
+          startedAt: now,
+          windowSize: _initialWindowSize,
+          remoteWindowStart: 0,
+          advertisedWindowSize: _receiverAdvertisedWindow,
+          rttEstimator: TransferRttEstimator(),
+          controlEndpoint: controlEndpoint,
+          reader: reader,
+          authContext: authContext,
+          transferId: transferId,
+          routeSnapshot: routeSnapshot,
+        );
+        _registerOutgoingTransfer(transferId, context);
+        ref
+            .read(appLoggerProvider)
+            .info(
+              AppLogCategory.transferControl,
+              'Starting legacy UDP outgoing transfer '
+              '${_safeTransfer(transferId)} '
+              'peer=$peerId route=${routeSnapshot.routeLeaseId} '
+              'session=${_safeSession(session.sessionId)} '
+              'target=${targetAddress.address}:$targetPort '
+              'local=${_endpointLabel(controlEndpoint)} '
+              'file=${preparedFile.fileName} size=${preparedFile.fileSize} '
+              'chunks=${preparedFile.chunkCount}',
+            );
+        _upsertJob(
+          TransferJob(
+            id: transferId,
+            transferId: transferId,
+            direction: TransferDirection.outgoing,
+            peerId: peerId,
+            peerDisplayName: session.peerDisplayName,
+            fileName: preparedFile.fileName,
+            fileSize: preparedFile.fileSize,
+            bytesTransferred: 0,
+            totalChunks: preparedFile.chunkCount,
+            completedChunks: 0,
+            status: TransferJobStatus.preparing,
+            createdAt: now,
+            updatedAt: now,
+            localFilePath: preparedFile.filePath,
+            windowSize: context.windowSize,
+            routeSnapshot: routeSnapshot,
+            dataCapability: DataTransferCapability.udpDataBinaryV1,
+          ),
+        );
 
-      _updateJob(
-        transferId,
-        (job) => job.copyWith(
-          status: TransferJobStatus.awaitingAcceptance,
-          updatedAt: _now(),
-          message: '수신 노드의 저장 준비를 기다리는 중입니다.',
+        await _send(
+          AuthPacket(
+            type: AuthPacketType.transferInit,
+            protocolVersion: ref.read(appConfigProvider).protocolVersion,
+            sessionId: session.sessionId,
+            fromUserId: _currentUserId(),
+            fromDeviceId: _currentDeviceId(),
+            fromInstanceId: _currentInstanceId(),
+            fromDisplayName: _currentDisplayName(),
+            transferId: transferId,
+            transferFileName: preparedFile.fileName,
+            transferFileSize: preparedFile.fileSize,
+            transferChunkCount: preparedFile.chunkCount,
+            transferAcceptedChunkSize: preparedFile.chunkSize,
+            transferCapabilities: const ['udpDataBinaryV1'],
+            transferDataProtocol: DataTransferCapability.udpDataBinaryV1.name,
+            transferDataAuthContextId: authContext.keyId,
+            sentAtEpochMs: now.millisecondsSinceEpoch,
+          ),
+          address: targetAddress,
+          port: targetPort,
+          localEndpoint: controlEndpoint,
+        );
+
+        _updateJob(
+          transferId,
+          (job) => job.copyWith(
+            status: TransferJobStatus.awaitingAcceptance,
+            updatedAt: _now(),
+            message: '수신 노드의 저장 준비를 기다리는 중입니다.',
+          ),
+        );
+        setDraftPeerId(peerId);
+        unawaited(_runOutgoingTransfer(transferId, context));
+        return;
+      }
+      final now = _now();
+      final failureMessage = tcpSendResult.message ?? 'TCP 파일 전송을 시작하지 못했습니다.';
+      _upsertJob(
+        TransferJobTerminalStatusCommand.failed(
+          TransferJob(
+            id: tcpTransferId,
+            transferId: tcpTransferId,
+            direction: TransferDirection.outgoing,
+            peerId: peerId,
+            peerDisplayName: session.peerDisplayName,
+            fileName: tcpSendResult.fileName ?? filePath.split('/').last,
+            fileSize: tcpSendResult.fileSize,
+            bytesTransferred: 0,
+            totalChunks: tcpSendResult.chunkCount,
+            completedChunks: 0,
+            status: TransferJobStatus.preparing,
+            createdAt: now,
+            updatedAt: now,
+            localFilePath: tcpSendResult.filePath ?? filePath,
+            dataCapability: DataTransferCapability.tcpDataStreamV1,
+          ),
+          updatedAt: now,
+          message: failureMessage,
         ),
       );
-      setDraftPeerId(peerId);
-      unawaited(_runOutgoingTransfer(transferId, context));
+      state = state.copyWith(errorMessage: failureMessage, clearInfo: true);
+      return;
     } on AppException catch (error) {
       state = state.copyWith(errorMessage: error.message);
     } catch (error, stackTrace) {
@@ -591,6 +703,22 @@ class TransferController extends Notifier<TransferState> {
       ) {
         unawaited(_handleDataFrame(datagram));
       });
+      final tcpIncomingDirectory =
+          await _loadTcpIncomingSubscriptionDirectory();
+      if (tcpIncomingDirectory != null) {
+        _tcpDataListener = ref.read(tcpDataListenerProvider);
+        _tcpDataConnector = ref.read(tcpDataConnectorProvider);
+        _tcpDataListenerBinding = await _tcpDataListener!.bind(
+          const TcpDataListenerBindRequest(host: '0.0.0.0', port: 0),
+        );
+        _tcpIncomingSubscription = ref.read(
+          tcpIncomingListenerSubscriptionProvider(tcpIncomingDirectory),
+        );
+        _tcpIncomingResultSubscription = _tcpIncomingSubscription!.results
+            .listen(_handleTcpIncomingResult);
+        await _tcpIncomingSubscription!.start();
+        await _sendTcpDataChannelOffersToAuthenticatedPeers();
+      }
       state = state.copyWith(
         isListening: true,
         isLoading: false,
@@ -605,6 +733,7 @@ class TransferController extends Notifier<TransferState> {
             error: error,
             stackTrace: stackTrace,
           );
+      await _dispose();
       state = state.copyWith(
         isListening: false,
         isLoading: false,
@@ -632,6 +761,8 @@ class TransferController extends Notifier<TransferState> {
         await _onTransferComplete(packet, datagram);
       case TransferControlPacketRoute.transferCompleteAck:
         await _onTransferCompleteAck(packet, datagram);
+      case TransferControlPacketRoute.dataChannelOffer:
+        await _onDataChannelOffer(packet, datagram);
       case TransferControlPacketRoute.ignored:
         return;
     }
@@ -704,6 +835,138 @@ class TransferController extends Notifier<TransferState> {
     );
   }
 
+  void _handleTcpIncomingResult(
+    TcpIncomingStreamFrameEventCoordinatorResult result,
+  ) {
+    final transferId = result.transferId;
+    if (transferId == null) {
+      return;
+    }
+    if (!result.applied) {
+      _markTcpIncomingIssue(transferId, result.issueCode);
+      return;
+    }
+
+    switch (result.route) {
+      case TcpDataStreamFrameRoute.metadata:
+        _upsertTcpIncomingMetadataJob(result);
+      case TcpDataStreamFrameRoute.chunk:
+        _updateTcpIncomingChunkJob(result);
+      case TcpDataStreamFrameRoute.complete:
+        _completeTcpIncomingJob(result);
+      case TcpDataStreamFrameRoute.cancel:
+      case TcpDataStreamFrameRoute.error:
+        _markTcpIncomingIssue(transferId, result.issueCode);
+      case null:
+        return;
+    }
+  }
+
+  void _upsertTcpIncomingMetadataJob(
+    TcpIncomingStreamFrameEventCoordinatorResult result,
+  ) {
+    final metadata = result.metadata;
+    final peerId = result.peerId;
+    if (metadata == null || peerId == null || result.transferId == null) {
+      return;
+    }
+    final session = ref.read(peerAuthSessionByPeerIdProvider(peerId));
+    final now = _now();
+    _upsertJob(
+      TransferJob(
+        id: result.transferId!,
+        transferId: result.transferId!,
+        direction: TransferDirection.incoming,
+        peerId: peerId,
+        peerDisplayName: session?.peerDisplayName ?? peerId,
+        fileName: metadata.fileName,
+        fileSize: metadata.fileSize,
+        bytesTransferred: 0,
+        totalChunks: metadata.chunkCount,
+        completedChunks: 0,
+        status: TransferJobStatus.receiving,
+        createdAt: now,
+        updatedAt: now,
+        destinationPath: metadata.destinationDirectory,
+        message: 'TCP data channel 수신을 시작했습니다.',
+        dataCapability: DataTransferCapability.tcpDataStreamV1,
+      ),
+    );
+  }
+
+  void _updateTcpIncomingChunkJob(
+    TcpIncomingStreamFrameEventCoordinatorResult result,
+  ) {
+    final transferId = result.transferId;
+    if (transferId == null) {
+      return;
+    }
+    _updateJob(transferId, (job) {
+      final bytesTransferred = min(
+        job.fileSize,
+        job.bytesTransferred + result.payloadBytes,
+      );
+      final completedChunks = min(job.totalChunks, job.completedChunks + 1);
+      return job.copyWith(
+        status: TransferJobStatus.receiving,
+        bytesTransferred: bytesTransferred,
+        completedChunks: completedChunks,
+        updatedAt: _now(),
+        message: 'TCP data channel 수신 중',
+        throughputBytesPerSec: _throughputBytesPerSec(
+          transferredBytes: bytesTransferred,
+          startedAt: job.createdAt,
+        ),
+      );
+    });
+  }
+
+  void _completeTcpIncomingJob(
+    TcpIncomingStreamFrameEventCoordinatorResult result,
+  ) {
+    final transferId = result.transferId;
+    if (transferId == null) {
+      return;
+    }
+    _updateJob(
+      transferId,
+      (job) => job.copyWith(
+        status: TransferJobStatus.completed,
+        bytesTransferred: job.fileSize,
+        completedChunks: job.totalChunks,
+        updatedAt: _now(),
+        message: 'TCP data channel 수신 완료',
+        throughputBytesPerSec: _throughputBytesPerSec(
+          transferredBytes: job.fileSize,
+          startedAt: job.createdAt,
+        ),
+      ),
+    );
+  }
+
+  void _markTcpIncomingIssue(String transferId, String? issueCode) {
+    final message = issueCode == null
+        ? 'TCP data channel 수신 중 오류가 발생했습니다.'
+        : 'TCP data channel 수신 중 오류가 발생했습니다: $issueCode';
+    final nextJob = TransferJobUpdateLookupCommand.updateById(
+      jobs: state.jobs,
+      jobId: transferId,
+      update: (job) => TransferJobTerminalStatusCommand.failed(
+        job,
+        updatedAt: _now(),
+        message: message,
+      ),
+    );
+    if (nextJob != null) {
+      _upsertJob(nextJob);
+      return;
+    }
+    state = state.copyWith(errorMessage: message);
+  }
+
+  // Legacy UDP outgoing path is intentionally retained until the dedicated
+  // removal task migrates or deletes old UDP-data controller tests.
+  // ignore: unused_element
   Future<void> _runOutgoingTransfer(
     String transferId,
     _OutgoingTransferContext context,
@@ -1335,6 +1598,181 @@ class TransferController extends Notifier<TransferState> {
         message: '수신 준비 중 알 수 없는 오류가 발생했습니다. 수신 노드 로그를 확인해 주세요.',
         localEndpoint: controlLocalEndpoint,
       );
+    }
+  }
+
+  Future<void> _onDataChannelOffer(
+    AuthPacket packet,
+    ControlDatagram datagram,
+  ) async {
+    final dataSessionId = packet.dataChannelSessionId;
+    final host = packet.dataChannelHost;
+    final port = packet.dataChannelPort;
+    if (dataSessionId == null ||
+        dataSessionId.isEmpty ||
+        host == null ||
+        host.isEmpty ||
+        port == null ||
+        !TcpDataEndpoint(host: host, port: port).hasValidPort) {
+      ref
+          .read(appLoggerProvider)
+          .debug(
+            AppLogCategory.transferControl,
+            'Ignored invalid DATA_CHANNEL_OFFER '
+            'session=${_safeSession(packet.sessionId)} '
+            'source=${datagram.address.address}:${datagram.port}',
+          );
+      return;
+    }
+
+    final localIdentity = _localIdentity;
+    if (localIdentity == null) {
+      ref
+          .read(appLoggerProvider)
+          .debug(
+            AppLogCategory.transferControl,
+            'Ignored DATA_CHANNEL_OFFER because local identity is missing '
+            'session=${_safeSession(packet.sessionId)}',
+          );
+      return;
+    }
+
+    if (!ref.mounted) {
+      return;
+    }
+    final packetPeerId = PeerIdentity.resolve(
+      userId: packet.fromUserId,
+      instanceId: packet.fromInstanceId,
+      deviceId: packet.fromDeviceId,
+    ).id;
+    final session = _authenticatedSessionForControlPacket(
+      packet,
+      datagram,
+      packetPeerId: packetPeerId,
+      packetLabel: 'DATA_CHANNEL_OFFER',
+    );
+    if (session == null) {
+      return;
+    }
+
+    final protocolVersion = _protocolMajor(
+      ref.read(appConfigProvider).protocolVersion,
+    );
+    final localPeerId = PeerIdentity.resolve(
+      userId: _currentUserId(),
+      instanceId: localIdentity.instanceId,
+      deviceId: localIdentity.deviceId,
+    ).id;
+    final result = await ref
+        .read(tcpDataOutboundChannelOpenCommandProvider)
+        .open(
+          connectRequest: TcpDataConnectRequest(
+            peerId: session.peerId,
+            authSessionId: session.sessionId,
+            sessionId: TcpDataSessionId(dataSessionId),
+            host: host,
+            port: port,
+          ),
+          hello: TcpDataSessionHello(
+            sessionId: TcpDataSessionId(dataSessionId),
+            peerId: localPeerId,
+            instanceId: localIdentity.instanceId,
+            authSessionId: session.sessionId,
+            protocolVersion: protocolVersion,
+            dataProtocolVersion: 1,
+            proof: session.sessionId,
+          ),
+        );
+    if (!ref.mounted) {
+      return;
+    }
+    if (!result.opened &&
+        result.issueCode != 'tcp_data_outbound_already_connected') {
+      ref
+          .read(appLoggerProvider)
+          .debug(
+            AppLogCategory.transferControl,
+            'DATA_CHANNEL_OFFER did not open TCP channel '
+            'peer=${session.peerId} issue=${result.issueCode}',
+          );
+    }
+  }
+
+  Future<void> _sendTcpDataChannelOffersToAuthenticatedPeers() async {
+    if (!ref.mounted) {
+      return;
+    }
+    for (final session
+        in ref.read(peerAuthControllerProvider).sessions.values) {
+      if (session.isAuthenticated) {
+        await _sendTcpDataChannelOffer(session);
+        if (!ref.mounted) {
+          return;
+        }
+      }
+    }
+  }
+
+  Future<void> _sendTcpDataChannelOffer(PeerAuthSession session) async {
+    if (!ref.mounted) {
+      return;
+    }
+    final binding = _tcpDataListenerBinding;
+    final localIdentity = _localIdentity;
+    if (binding == null || localIdentity == null || !session.isAuthenticated) {
+      return;
+    }
+    final offerKey = '${session.peerId}:${session.sessionId}';
+    if (_offeredTcpDataPeers.contains(offerKey)) {
+      return;
+    }
+    final path = ref
+        .read(peerPathRegistryProvider)
+        .selectedForPeer(session.peerId);
+    if (path == null) {
+      return;
+    }
+    final advertisedHost = path.controlEndpoint.localAddress;
+    if (advertisedHost.isEmpty ||
+        advertisedHost == InternetAddress.anyIPv4.address ||
+        advertisedHost == InternetAddress.anyIPv6.address) {
+      return;
+    }
+
+    _offeredTcpDataPeers.add(offerKey);
+    try {
+      await _send(
+        AuthPacket(
+          type: AuthPacketType.dataChannelOffer,
+          protocolVersion: ref.read(appConfigProvider).protocolVersion,
+          sessionId: session.sessionId,
+          fromUserId: _currentUserId(),
+          fromDeviceId: localIdentity.deviceId,
+          fromInstanceId: localIdentity.instanceId,
+          fromDisplayName: _currentDisplayName(),
+          sentAtEpochMs: _now().millisecondsSinceEpoch,
+          dataChannelSessionId: _randomHex(12),
+          dataChannelHost: advertisedHost,
+          dataChannelPort: binding.port,
+          dataChannelDirection: 'inbound',
+        ),
+        address: InternetAddress(path.candidate.remoteAddress),
+        port: path.candidate.remotePort,
+        localEndpoint: path.controlEndpoint,
+      );
+    } catch (error, stackTrace) {
+      _offeredTcpDataPeers.remove(offerKey);
+      if (!ref.mounted) {
+        return;
+      }
+      ref
+          .read(appLoggerProvider)
+          .debug(
+            AppLogCategory.transferControl,
+            'Failed to send DATA_CHANNEL_OFFER peer=${session.peerId}',
+            error: error,
+            stackTrace: stackTrace,
+          );
     }
   }
 
@@ -2684,6 +3122,55 @@ class TransferController extends Notifier<TransferState> {
     }
   }
 
+  Future<String?> _loadTcpIncomingSubscriptionDirectory() async {
+    const transferId = 'tcp-listener';
+    final repository = ref.read(settingsRepositoryProvider);
+    try {
+      final savedSettings = await repository.load();
+      final preparedSavedSettings =
+          await _prepareIncomingSettingsDirectoryOrNull(
+            savedSettings,
+            transferId: transferId,
+            source: 'tcp-listener-saved',
+          );
+      if (preparedSavedSettings != null) {
+        return preparedSavedSettings.defaultSavePath;
+      }
+    } catch (error, stackTrace) {
+      ref
+          .read(appLoggerProvider)
+          .warning(
+            AppLogCategory.transferControl,
+            'Failed to load saved TCP incoming receive path.',
+            error: error,
+            stackTrace: stackTrace,
+          );
+    }
+
+    try {
+      final defaultSavePath = await _loadDefaultReceivePathForTransfer(
+        transferId,
+      );
+      final preparedDefault = await _prepareIncomingSettingsDirectory(
+        AppSettings.initial(),
+        transferId: transferId,
+        fallbackSavePath: defaultSavePath,
+      );
+      return preparedDefault.defaultSavePath;
+    } catch (error, stackTrace) {
+      ref
+          .read(appLoggerProvider)
+          .warning(
+            AppLogCategory.transferControl,
+            'TCP incoming listener subscription skipped because receive path '
+            'is unavailable.',
+            error: error,
+            stackTrace: stackTrace,
+          );
+      return null;
+    }
+  }
+
   Future<String> _loadDefaultReceivePathForTransfer(String transferId) async {
     try {
       final defaultSavePath = await ref
@@ -2859,6 +3346,20 @@ class TransferController extends Notifier<TransferState> {
     ControlDatagram datagram, {
     required String packetPeerId,
   }) {
+    return _authenticatedSessionForControlPacket(
+      packet,
+      datagram,
+      packetPeerId: packetPeerId,
+      packetLabel: 'TRANSFER_INIT',
+    );
+  }
+
+  PeerAuthSession? _authenticatedSessionForControlPacket(
+    AuthPacket packet,
+    ControlDatagram datagram, {
+    required String packetPeerId,
+    required String packetLabel,
+  }) {
     final exact = ref.read(peerAuthSessionByPeerIdProvider(packetPeerId));
     if (exact?.isAuthenticated == true) {
       return exact;
@@ -2886,7 +3387,7 @@ class TransferController extends Notifier<TransferState> {
         .read(appLoggerProvider)
         .warning(
           AppLogCategory.transferControl,
-          'Rejected TRANSFER_INIT because authenticated session was not found '
+          'Rejected $packetLabel because authenticated session was not found '
           'packetPeer=$packetPeerId session=${_safeSession(packet.sessionId)} '
           'source=${datagram.address.address}:${datagram.port}',
         );
@@ -2902,6 +3403,12 @@ class TransferController extends Notifier<TransferState> {
       );
     }
     return session;
+  }
+
+  int _protocolMajor(String version) {
+    final dotIndex = version.indexOf('.');
+    final raw = dotIndex < 0 ? version : version.substring(0, dotIndex);
+    return int.tryParse(raw) ?? 1;
   }
 
   int _chunkByteLength(PreparedTransferMetadata file, int chunkIndex) {
@@ -3688,8 +4195,18 @@ class TransferController extends Notifier<TransferState> {
   }
 
   Future<void> _dispose() async {
+    await _tcpIncomingResultSubscription?.cancel();
+    _tcpIncomingResultSubscription = null;
     await _packetSubscription?.cancel();
     await _dataFrameSubscription?.cancel();
+    await _tcpIncomingSubscription?.stop();
+    _tcpIncomingSubscription = null;
+    await _tcpDataListener?.close();
+    _tcpDataListener = null;
+    _tcpDataListenerBinding = null;
+    await _tcpDataConnector?.close();
+    _tcpDataConnector = null;
+    _offeredTcpDataPeers.clear();
     for (final transferId in _outgoingTransfers.keys.toList(growable: false)) {
       final context = _removeOutgoingTransfer(transferId);
       await context?.dispose();
@@ -3715,6 +4232,7 @@ class _OutgoingTransferContext {
     required this.authContext,
     required String transferId,
     required this.routeSnapshot,
+    // ignore: unused_element_parameter
     this.controlEndpoint,
   }) : transferIdBytes = transferIdBytesFromString(transferId);
 

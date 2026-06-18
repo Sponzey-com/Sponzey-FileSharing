@@ -9,6 +9,7 @@ enum TransferControlPacketRoute {
   transferWindowUpdate,
   transferComplete,
   transferCompleteAck,
+  dataChannelOffer,
   ignored,
 }
 
@@ -33,12 +34,17 @@ class TransferControlPacketDispatcher {
         return TransferControlPacketRoute.transferComplete;
       case AuthPacketType.transferCompleteAck:
         return TransferControlPacketRoute.transferCompleteAck;
+      case AuthPacketType.dataChannelOffer:
+        return TransferControlPacketRoute.dataChannelOffer;
       case AuthPacketType.connectRequest:
       case AuthPacketType.authChallenge:
       case AuthPacketType.authToken:
       case AuthPacketType.authTokenAck:
       case AuthPacketType.authAccept:
       case AuthPacketType.authReject:
+      case AuthPacketType.dataChannelConnect:
+      case AuthPacketType.dataChannelAccept:
+      case AuthPacketType.dataChannelReject:
         return TransferControlPacketRoute.ignored;
     }
   }

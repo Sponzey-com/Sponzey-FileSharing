@@ -100,6 +100,21 @@ class TransferFailurePolicy {
       );
     }
 
+    if (job.usesTcpDataChannel &&
+        _containsAny(message, const [
+          'route',
+          '연결 경로가 만료',
+          '연결 경로가 변경',
+          'endpoint',
+        ])) {
+      return const TransferFailureDecision(
+        category: TransferFailureCategory.network,
+        retryable: true,
+        userMessage: 'TCP 데이터 채널 연결이 종료되었습니다. 피어 연결 상태를 확인한 뒤 다시 전송해 주세요.',
+        diagnosticCode: 'transfer.failure.tcp_data_channel',
+      );
+    }
+
     if (_containsAny(message, const ['route', '경로', 'endpoint', 'data udp'])) {
       return const TransferFailureDecision(
         category: TransferFailureCategory.route,

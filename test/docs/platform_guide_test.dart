@@ -9,6 +9,7 @@ void main() {
     expect(readme, contains('Windows Defender Firewall'));
     expect(readme, contains('Developer Mode'));
     expect(readme, contains('UDP ports'));
+    expect(readme, contains('TCP Data Channel'));
     expect(readme, contains('Ubuntu 22.04'));
     expect(readme, contains('libgtk-3-dev'));
     expect(readme, contains('libsecret-1-dev'));
@@ -22,6 +23,7 @@ void main() {
     expect(readme, contains('Windows Defender Firewall'));
     expect(readme, contains('개발자 모드'));
     expect(readme, contains('UDP 포트'));
+    expect(readme, contains('TCP Data Channel'));
     expect(readme, contains('Ubuntu 22.04'));
     expect(readme, contains('libgtk-3-dev'));
     expect(readme, contains('libsecret-1-dev'));

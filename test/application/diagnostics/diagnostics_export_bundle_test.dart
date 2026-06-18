@@ -15,6 +15,7 @@ import 'package:sponzey_file_sharing/domain/entities/user_account.dart';
 import 'package:sponzey_file_sharing/domain/network/network_interface_models.dart';
 import 'package:sponzey_file_sharing/domain/network/peer_connection_path.dart';
 import 'package:sponzey_file_sharing/domain/network/peer_route_candidate.dart';
+import 'package:sponzey_file_sharing/domain/transfer/tcp_data_peer_session_state_machine.dart';
 import 'package:sponzey_file_sharing/domain/transfer/transfer_route_snapshot.dart';
 
 void main() {
@@ -181,6 +182,64 @@ void main() {
       _errorCodeForJobMessage('기본 수신 경로를 준비하지 못했습니다.'),
       'STORAGE_PATH_FAILED',
     );
+  });
+
+  test('exports redacted TCP data session diagnostics', () {
+    final now = DateTime.utc(2026, 6, 18, 1, 2, 3);
+    final bundle = DiagnosticsExportBundleBuilder().build(
+      DiagnosticsExportInput(
+        generatedAt: now,
+        appName: 'Sponzey FileSharing',
+        protocolVersion: '1.0',
+        operatingSystem: 'windows',
+        logLevel: AppLogLevel.debug,
+        authState: const AuthState(status: AuthStatus.authenticated),
+        peerAuthState: const PeerAuthState(sessions: {}),
+        discoveryState: const DiscoveryState(peers: []),
+        transferState: const TransferState(jobs: []),
+        settingsState: SettingsState(
+          settings: const AppSettings(
+            defaultSavePath: r'C:\Users\atom\Downloads\Sponzey FileSharing',
+            autoReceiveEnabled: true,
+            receivePolicy: ReceivePolicy.autoReceiveAll,
+            logLevel: AppLogLevel.debug,
+          ),
+        ),
+        routeCandidates: const [],
+        activePaths: const [],
+        tcpDataSessions: const [
+          TcpDataPeerSessionSnapshot(
+            peerId: 'peer-a',
+            sessionId: TcpDataSessionId('session-id-with-secret-key'),
+            channelId: TcpDataChannelId('channel-id-with-secret-key'),
+            direction: TcpDataChannelDirection.outbound,
+            status: TcpDataPeerSessionStatus.connected,
+            localEndpointLabel: '10.211.55.2:51352',
+            remoteEndpointLabel: '10.211.55.3:23200',
+            lastCloseReason: 'tcp_data_socket_closed',
+          ),
+        ],
+      ),
+    );
+
+    final debug = bundle.toJson()['debug'] as Map<String, Object?>;
+    final sessions = debug['tcpDataSessions'] as List<Object?>;
+    final session = sessions.single as Map<String, Object?>;
+    final jsonText = const JsonEncoder.withIndent(
+      '  ',
+    ).convert(bundle.toJson());
+
+    expect(session['peerId'], 'peer-a');
+    expect(session['direction'], 'outbound');
+    expect(session['status'], 'connected');
+    expect(session['localEndpoint'], '10.211.55.2:51352');
+    expect(session['remoteEndpoint'], '10.211.55.3:23200');
+    expect(session['lastCloseReason'], 'tcp_data_socket_closed');
+    expect(session['sessionId'], 'session-...-key');
+    expect(session['channelId'], 'channel-...-key');
+    expect(jsonText, isNot(contains('session-id-with-secret-key')));
+    expect(jsonText, isNot(contains('channel-id-with-secret-key')));
+    expect(jsonText, isNot(contains('C:\\Users\\atom')));
   });
 }
 

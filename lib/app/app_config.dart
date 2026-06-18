@@ -25,6 +25,7 @@ class AppConfig {
     required this.discoveryStaleAfter,
     required this.discoveryOfflineAfter,
     required this.defaultLogLevel,
+    this.allowLegacyUdpDataFallback = false,
   }) : controlPort = controlPort ?? authPort ?? 38401;
 
   factory AppConfig.production() {
@@ -61,6 +62,7 @@ class AppConfig {
   final Duration discoveryStaleAfter;
   final Duration discoveryOfflineAfter;
   final AppLogLevel defaultLogLevel;
+  final bool allowLegacyUdpDataFallback;
 
   bool get isDevelopment => environment == AppEnvironment.development;
 

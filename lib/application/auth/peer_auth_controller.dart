@@ -510,6 +510,10 @@ class PeerAuthController extends Notifier<PeerAuthState> {
       case AuthPacketType.transferWindowUpdate:
       case AuthPacketType.transferComplete:
       case AuthPacketType.transferCompleteAck:
+      case AuthPacketType.dataChannelOffer:
+      case AuthPacketType.dataChannelConnect:
+      case AuthPacketType.dataChannelAccept:
+      case AuthPacketType.dataChannelReject:
         return;
     }
   }
