@@ -118,6 +118,7 @@ class _RecordingStreamSender implements TcpOutgoingTransferStreamSenderPort {
     required String transferId,
     required String filePath,
     required int chunkSize,
+    void Function(TcpOutgoingTransferStreamProgress progress)? onProgress,
   }) async {
     calls.add('send:${channelId.value}:$transferId:$filePath:$chunkSize');
     return result;

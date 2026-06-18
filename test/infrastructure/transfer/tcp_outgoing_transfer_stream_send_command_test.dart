@@ -23,12 +23,14 @@ void main() {
       connector: connector,
       metadataCodec: const TcpIncomingTransferMetadataCodec(),
     );
+    final progressEvents = <TcpOutgoingTransferStreamProgress>[];
 
     final result = await command.send(
       channelId: channelId,
       transferId: 'transfer-1',
       filePath: '/files/report.pdf',
       chunkSize: 3,
+      onProgress: progressEvents.add,
     );
 
     expect(result.sent, isTrue);
@@ -51,6 +53,9 @@ void main() {
     expect(metadata.sha256, 'sha256-report');
     expect(fileService.openedReaders, 1);
     expect(fileService.reader.closeCount, 1);
+    expect(progressEvents.map((event) => event.framesSent), [1, 2, 3, 4]);
+    expect(progressEvents.map((event) => event.bytesSent), [0, 3, 6, 6]);
+    expect(progressEvents.map((event) => event.completedChunks), [0, 1, 2, 2]);
   });
 
   test(

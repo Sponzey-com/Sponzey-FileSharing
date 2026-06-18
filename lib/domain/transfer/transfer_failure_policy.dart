@@ -106,6 +106,10 @@ class TransferFailurePolicy {
           '연결 경로가 만료',
           '연결 경로가 변경',
           'endpoint',
+          'tcp data channel',
+          'tcp 파일 전송',
+          'tcp_outgoing',
+          'missing_tcp',
         ])) {
       return const TransferFailureDecision(
         category: TransferFailureCategory.network,

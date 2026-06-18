@@ -62,7 +62,7 @@ class _TransfersScreenState extends ConsumerState<TransfersScreen> {
       children: [
         PageHeader(
           title: 'Transfers',
-          description: '인증된 피어를 선택하고 파일을 드롭하면 UDP 기반 파이프라인으로 즉시 전송합니다.',
+          description: '인증된 피어를 선택하고 파일을 드롭하면 TCP Data Channel로 즉시 전송합니다.',
           trailing: StatusBadge(
             label: transferState.isListening
                 ? 'Transfer Ready'

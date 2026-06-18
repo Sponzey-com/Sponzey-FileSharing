@@ -24,6 +24,7 @@ abstract interface class TcpPeerFileSenderPort {
     required String transferId,
     required String filePath,
     required int chunkSize,
+    void Function(TcpOutgoingTransferStreamProgress progress)? onProgress,
   });
 }
 
@@ -44,6 +45,7 @@ class TcpPeerFileSendCommand implements TcpPeerFileSenderPort {
     required String transferId,
     required String filePath,
     required int chunkSize,
+    void Function(TcpOutgoingTransferStreamProgress progress)? onProgress,
   }) async {
     final channel = channelLookupCommand.lookup(
       registry: registry,
@@ -59,6 +61,7 @@ class TcpPeerFileSendCommand implements TcpPeerFileSenderPort {
       transferId: transferId,
       filePath: filePath,
       chunkSize: chunkSize,
+      onProgress: onProgress,
     );
     return TcpPeerFileSendResult(
       sent: result.sent,

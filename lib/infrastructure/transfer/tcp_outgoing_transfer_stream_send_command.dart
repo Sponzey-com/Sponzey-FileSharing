@@ -20,12 +20,25 @@ class TcpOutgoingTransferStreamSendResult {
   final String? issueCode;
 }
 
+class TcpOutgoingTransferStreamProgress {
+  const TcpOutgoingTransferStreamProgress({
+    required this.framesSent,
+    required this.bytesSent,
+    required this.completedChunks,
+  });
+
+  final int framesSent;
+  final int bytesSent;
+  final int completedChunks;
+}
+
 abstract interface class TcpOutgoingTransferStreamSenderPort {
   Future<TcpOutgoingTransferStreamSendResult> send({
     required TcpDataChannelId channelId,
     required String transferId,
     required String filePath,
     required int chunkSize,
+    void Function(TcpOutgoingTransferStreamProgress progress)? onProgress,
   });
 }
 
@@ -47,6 +60,7 @@ class TcpOutgoingTransferStreamSendCommand
     required String transferId,
     required String filePath,
     required int chunkSize,
+    void Function(TcpOutgoingTransferStreamProgress progress)? onProgress,
   }) async {
     var framesSent = 0;
     var bytesSent = 0;
@@ -73,6 +87,13 @@ class TcpOutgoingTransferStreamSendCommand
         ),
       );
       framesSent += 1;
+      onProgress?.call(
+        TcpOutgoingTransferStreamProgress(
+          framesSent: framesSent,
+          bytesSent: bytesSent,
+          completedChunks: 0,
+        ),
+      );
 
       for (var index = 0; index < prepared.chunkCount; index += 1) {
         final chunk = await reader.readAt(
@@ -91,6 +112,13 @@ class TcpOutgoingTransferStreamSendCommand
         );
         framesSent += 1;
         bytesSent += payload.length;
+        onProgress?.call(
+          TcpOutgoingTransferStreamProgress(
+            framesSent: framesSent,
+            bytesSent: bytesSent,
+            completedChunks: index + 1,
+          ),
+        );
       }
 
       await connector.sendFrame(
@@ -103,6 +131,13 @@ class TcpOutgoingTransferStreamSendCommand
         ),
       );
       framesSent += 1;
+      onProgress?.call(
+        TcpOutgoingTransferStreamProgress(
+          framesSent: framesSent,
+          bytesSent: bytesSent,
+          completedChunks: prepared.chunkCount,
+        ),
+      );
       return TcpOutgoingTransferStreamSendResult(
         sent: true,
         framesSent: framesSent,

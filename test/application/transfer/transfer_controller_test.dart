@@ -47,6 +47,7 @@ import 'package:sponzey_file_sharing/infrastructure/platform/local_device_identi
 import 'package:sponzey_file_sharing/infrastructure/repositories/settings_repository.dart';
 import 'package:sponzey_file_sharing/infrastructure/repositories/transfer_history_repository.dart';
 import 'package:sponzey_file_sharing/infrastructure/transfer/tcp_peer_file_send_command.dart';
+import 'package:sponzey_file_sharing/infrastructure/transfer/tcp_outgoing_transfer_stream_send_command.dart';
 import 'package:sponzey_file_sharing/infrastructure/transfer/transfer_file_service.dart';
 import 'package:sponzey_file_sharing/infrastructure/transfer/tcp_transfer_pipeline_providers.dart';
 import 'package:sponzey_file_sharing/infrastructure/transfer_data/data_frame_codec.dart';
@@ -773,6 +774,95 @@ void main() {
       expect(jobs.single.fileName, 'source.txt');
       expect(jobs.single.bytesTransferred, await sourceFile.length());
       expect(bob.container.read(transferJobsProvider), isEmpty);
+    },
+  );
+
+  test(
+    'projects outgoing TCP transfer as sending while stream send is in progress',
+    () async {
+      final network = _LinkedFakeAuthNetwork();
+      final sourceFile = File(
+        '${workspaceDirectory.path}/tcp-progress/source.txt',
+      );
+      await sourceFile.parent.create(recursive: true);
+      await sourceFile.writeAsString('tcp sender should show progress');
+      final fileSize = await sourceFile.length();
+      final tcpSendUseCase = _DelayedTcpTransferSendUseCase(
+        filePath: sourceFile.path,
+        fileName: 'source.txt',
+        fileSize: fileSize,
+        chunkSize: 8192,
+        chunkCount: 1,
+      );
+      final alice = await _createNode(
+        network: network,
+        tcpTransferSendUseCase: tcpSendUseCase,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-a',
+        authPort: 41224,
+        receivePath: '${workspaceDirectory.path}/alice-tcp-progress',
+      );
+      final bob = await _createNode(
+        network: network,
+        clock: clock,
+        loginUserId: _sharedUserId,
+        loginPassword: _sharedPassword,
+        localDeviceId: 'device-b',
+        authPort: 41225,
+        receivePath: '${workspaceDirectory.path}/bob-tcp-progress',
+      );
+      addTearDown(alice.dispose);
+      addTearDown(bob.dispose);
+
+      await _prepareAuthenticatedPair(
+        alice: alice,
+        bob: bob,
+        bobReceivePath: '${workspaceDirectory.path}/bob-tcp-progress',
+        bobPort: 41225,
+        alicePort: 41224,
+        clock: clock,
+      );
+
+      final sendFuture = alice.transferController.sendFile(
+        peerId: 'team@instance-device-b',
+        filePath: sourceFile.path,
+      );
+
+      final sendingJob = await _waitForTransferJobMatching(
+        alice.container,
+        (job) =>
+            job.direction == TransferDirection.outgoing &&
+            job.status == TransferJobStatus.sending &&
+            job.dataCapability == DataTransferCapability.tcpDataStreamV1,
+      );
+      expect(sendingJob.fileName, 'source.txt');
+      expect(sendingJob.fileSize, fileSize);
+      expect(sendingJob.bytesTransferred, 0);
+      expect(sendingJob.message, 'TCP data channel 전송 중');
+
+      tcpSendUseCase.complete(
+        TcpTransferSendUseCaseResult(
+          sent: true,
+          filePath: sourceFile.path,
+          fileName: 'source.txt',
+          fileSize: fileSize,
+          chunkSize: 8192,
+          chunkCount: 1,
+          framesSent: 3,
+          bytesSent: fileSize,
+        ),
+      );
+      await sendFuture;
+
+      final completedJob = await _waitForTerminalTransfer(alice.container);
+      expect(completedJob.status, TransferJobStatus.completed);
+      expect(completedJob.bytesTransferred, fileSize);
+      expect(
+        completedJob.dataCapability,
+        DataTransferCapability.tcpDataStreamV1,
+      );
     },
   );
 
@@ -4005,6 +4095,48 @@ class _RecordingTcpTransferSendUseCase extends TcpTransferSendUseCase {
   }
 }
 
+class _DelayedTcpTransferSendUseCase extends TcpTransferSendUseCase {
+  _DelayedTcpTransferSendUseCase({
+    required this.filePath,
+    required this.fileName,
+    required this.fileSize,
+    required this.chunkSize,
+    required this.chunkCount,
+  }) : super(
+         fileService: LocalTransferFileService(),
+         peerSender: const _ThrowingTcpPeerFileSender(),
+         dataChannelRegistry: InMemoryDataChannelSessionRegistry(
+           mode: DataChannelMode.tcp,
+         ),
+       );
+
+  final String filePath;
+  final String fileName;
+  final int fileSize;
+  final int chunkSize;
+  final int chunkCount;
+  final Completer<TcpTransferSendUseCaseResult> _completer =
+      Completer<TcpTransferSendUseCaseResult>();
+
+  void complete(TcpTransferSendUseCaseResult result) {
+    _completer.complete(result);
+  }
+
+  @override
+  Future<TcpTransferSendUseCaseResult> send(TcpTransferSendUseCaseInput input) {
+    input.onPrepared?.call(
+      PreparedTransferMetadata(
+        filePath: filePath,
+        fileName: fileName,
+        fileSize: fileSize,
+        chunkSize: chunkSize,
+        chunkCount: chunkCount,
+      ),
+    );
+    return _completer.future;
+  }
+}
+
 class _ThrowingTcpPeerFileSender implements TcpPeerFileSenderPort {
   const _ThrowingTcpPeerFileSender();
 
@@ -4016,6 +4148,7 @@ class _ThrowingTcpPeerFileSender implements TcpPeerFileSenderPort {
     required String transferId,
     required String filePath,
     required int chunkSize,
+    void Function(TcpOutgoingTransferStreamProgress progress)? onProgress,
   }) {
     throw StateError('TCP peer sender should not be called by this fake.');
   }

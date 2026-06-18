@@ -447,10 +447,13 @@ class TransferController extends Notifier<TransferState> {
     required String filePath,
   }) async {
     state = state.copyWith(clearError: true, clearInfo: true);
+    String? pendingTcpTransferId;
 
     try {
       final session = _requireAuthenticatedSession(peerId);
       final tcpTransferId = _randomHex(12);
+      pendingTcpTransferId = tcpTransferId;
+      DateTime? tcpStartedAt;
       final tcpSendResult = await ref
           .read(tcpTransferSendUseCaseProvider)
           .send(
@@ -460,6 +463,52 @@ class TransferController extends Notifier<TransferState> {
               transferId: tcpTransferId,
               filePath: filePath,
               chunkSize: _dataChunkSize,
+              onPrepared: (metadata) {
+                final now = _now();
+                tcpStartedAt = now;
+                _upsertJob(
+                  TransferJob(
+                    id: tcpTransferId,
+                    transferId: tcpTransferId,
+                    direction: TransferDirection.outgoing,
+                    peerId: peerId,
+                    peerDisplayName: session.peerDisplayName,
+                    fileName: metadata.fileName,
+                    fileSize: metadata.fileSize,
+                    bytesTransferred: 0,
+                    totalChunks: metadata.chunkCount,
+                    completedChunks: 0,
+                    status: TransferJobStatus.sending,
+                    createdAt: now,
+                    updatedAt: now,
+                    localFilePath: metadata.filePath,
+                    message: 'TCP data channel 전송 중',
+                    dataCapability: DataTransferCapability.tcpDataStreamV1,
+                  ),
+                );
+              },
+              onProgress: (progress) {
+                _updateJob(tcpTransferId, (job) {
+                  final now = _now();
+                  final startedAt = tcpStartedAt ?? job.createdAt;
+                  final elapsedMs = max(
+                    1,
+                    now.difference(startedAt).inMilliseconds,
+                  );
+                  return job.copyWith(
+                    status: TransferJobStatus.sending,
+                    bytesTransferred: min(job.fileSize, progress.bytesSent),
+                    completedChunks: min(
+                      job.totalChunks,
+                      progress.completedChunks,
+                    ),
+                    throughputBytesPerSec:
+                        progress.bytesSent * 1000 / elapsedMs,
+                    updatedAt: now,
+                    message: 'TCP data channel 전송 중',
+                  );
+                });
+              },
             ),
           );
       if (tcpSendResult.sent) {
@@ -495,6 +544,7 @@ class TransferController extends Notifier<TransferState> {
         return;
       }
       if (ref.read(appConfigProvider).allowLegacyUdpDataFallback) {
+        _removeJob(tcpTransferId);
         final activeRoute = _requireActiveTransferRoute(
           peerId: peerId,
           session: session,
@@ -621,9 +671,15 @@ class TransferController extends Notifier<TransferState> {
             peerDisplayName: session.peerDisplayName,
             fileName: tcpSendResult.fileName ?? filePath.split('/').last,
             fileSize: tcpSendResult.fileSize,
-            bytesTransferred: 0,
+            bytesTransferred: min(
+              tcpSendResult.bytesSent,
+              tcpSendResult.fileSize,
+            ),
             totalChunks: tcpSendResult.chunkCount,
-            completedChunks: 0,
+            completedChunks: min(
+              tcpSendResult.chunkCount,
+              tcpSendResult.framesSent > 0 ? tcpSendResult.framesSent - 1 : 0,
+            ),
             status: TransferJobStatus.preparing,
             createdAt: now,
             updatedAt: now,
@@ -637,6 +693,9 @@ class TransferController extends Notifier<TransferState> {
       state = state.copyWith(errorMessage: failureMessage, clearInfo: true);
       return;
     } on AppException catch (error) {
+      if (pendingTcpTransferId != null) {
+        _markFailed(pendingTcpTransferId, error.message);
+      }
       state = state.copyWith(errorMessage: error.message);
     } catch (error, stackTrace) {
       ref
@@ -647,6 +706,9 @@ class TransferController extends Notifier<TransferState> {
             error: error,
             stackTrace: stackTrace,
           );
+      if (pendingTcpTransferId != null) {
+        _markFailed(pendingTcpTransferId, '파일 전송을 시작하지 못했습니다.');
+      }
       state = state.copyWith(errorMessage: '파일 전송을 시작하지 못했습니다.');
     }
   }
@@ -3596,6 +3658,17 @@ class TransferController extends Notifier<TransferState> {
       return;
     }
     _upsertJob(nextJob);
+  }
+
+  void _removeJob(String transferId) {
+    final jobs = [
+      for (final job in state.jobs)
+        if (job.id != transferId) job,
+    ];
+    if (jobs.length == state.jobs.length) {
+      return;
+    }
+    state = state.copyWith(jobs: jobs);
   }
 
   void _markRejected(String transferId, String message) {

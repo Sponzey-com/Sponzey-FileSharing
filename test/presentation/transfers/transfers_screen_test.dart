@@ -113,6 +113,66 @@ void main() {
     expect(find.textContaining('route='), findsNothing);
   });
 
+  testWidgets('shows TCP data channel message for outgoing TCP send failures', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 800);
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          transferControllerProvider.overrideWith(
+            _TcpSendFailureFakeController.new,
+          ),
+          authenticatedTransferPeersProvider.overrideWith((ref) => const []),
+          peerAuthControllerProvider.overrideWith(_PeerAuthFakeController.new),
+          settingsControllerProvider.overrideWith(_SettingsFakeController.new),
+        ],
+        child: const MaterialApp(home: Scaffold(body: TransfersScreen())),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('tcp-send-failure.txt'), findsOneWidget);
+    expect(find.textContaining('TCP 데이터 채널'), findsOneWidget);
+    expect(find.textContaining('전송 실패 원인을 분류하지 못했습니다'), findsNothing);
+  });
+
+  testWidgets('describes transfers as TCP Data Channel based', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 800);
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          transferControllerProvider.overrideWith(
+            _TcpTransferFakeController.new,
+          ),
+          authenticatedTransferPeersProvider.overrideWith((ref) => const []),
+          peerAuthControllerProvider.overrideWith(_PeerAuthFakeController.new),
+          settingsControllerProvider.overrideWith(_SettingsFakeController.new),
+        ],
+        child: const MaterialApp(home: Scaffold(body: TransfersScreen())),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(find.textContaining('TCP Data Channel'), findsOneWidget);
+    expect(find.textContaining('UDP 기반 파이프라인'), findsNothing);
+  });
+
   testWidgets('hides legacy route snapshot for TCP transfer jobs', (
     tester,
   ) async {
@@ -230,6 +290,37 @@ class _TcpTransferFakeController extends TransferController {
           retryCount: 9,
           lossRate: 0.25,
           rttMs: 42,
+          dataCapability: DataTransferCapability.tcpDataStreamV1,
+        ),
+      ],
+      isLoading: false,
+      isListening: true,
+    );
+  }
+}
+
+class _TcpSendFailureFakeController extends TransferController {
+  @override
+  TransferState build() {
+    final now = DateTime.utc(2026, 1, 1, 12);
+    return TransferState(
+      jobs: [
+        TransferJob(
+          id: 'job-tcp-send-failure',
+          transferId: 'transfer-tcp-send-failure',
+          direction: TransferDirection.outgoing,
+          peerId: 'peer-1',
+          peerDisplayName: 'peer',
+          fileName: 'tcp-send-failure.txt',
+          fileSize: 128,
+          bytesTransferred: 0,
+          totalChunks: 1,
+          completedChunks: 0,
+          status: TransferJobStatus.failed,
+          createdAt: now,
+          updatedAt: now,
+          localFilePath: '/tmp/tcp-send-failure.txt',
+          message: 'TCP 파일 전송을 시작하지 못했습니다.',
           dataCapability: DataTransferCapability.tcpDataStreamV1,
         ),
       ],

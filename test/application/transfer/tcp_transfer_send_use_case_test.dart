@@ -3,6 +3,7 @@ import 'package:sponzey_file_sharing/application/transfer/data_channel_session_r
 import 'package:sponzey_file_sharing/application/transfer/tcp_transfer_send_use_case.dart';
 import 'package:sponzey_file_sharing/domain/transfer/tcp_data_peer_session_state_machine.dart';
 import 'package:sponzey_file_sharing/infrastructure/transfer/tcp_peer_file_send_command.dart';
+import 'package:sponzey_file_sharing/infrastructure/transfer/tcp_outgoing_transfer_stream_send_command.dart';
 import 'package:sponzey_file_sharing/infrastructure/transfer/transfer_file_service.dart';
 
 void main() {
@@ -115,6 +116,7 @@ class _RecordingPeerSender implements TcpPeerFileSenderPort {
     required String transferId,
     required String filePath,
     required int chunkSize,
+    void Function(TcpOutgoingTransferStreamProgress progress)? onProgress,
   }) async {
     calls.add('send:$peerId:$authSessionId:$transferId:$filePath:$chunkSize');
     return result;

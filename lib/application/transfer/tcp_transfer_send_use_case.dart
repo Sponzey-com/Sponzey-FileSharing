@@ -1,5 +1,6 @@
 import 'package:sponzey_file_sharing/application/transfer/data_channel_session_registry.dart';
 import 'package:sponzey_file_sharing/infrastructure/transfer/tcp_peer_file_send_command.dart';
+import 'package:sponzey_file_sharing/infrastructure/transfer/tcp_outgoing_transfer_stream_send_command.dart';
 import 'package:sponzey_file_sharing/infrastructure/transfer/transfer_file_service.dart';
 
 class TcpTransferSendUseCaseInput {
@@ -9,6 +10,8 @@ class TcpTransferSendUseCaseInput {
     required this.transferId,
     required this.filePath,
     required this.chunkSize,
+    this.onPrepared,
+    this.onProgress,
   });
 
   final String peerId;
@@ -16,6 +19,8 @@ class TcpTransferSendUseCaseInput {
   final String transferId;
   final String filePath;
   final int chunkSize;
+  final void Function(PreparedTransferMetadata metadata)? onPrepared;
+  final void Function(TcpOutgoingTransferStreamProgress progress)? onProgress;
 }
 
 class TcpTransferSendUseCaseResult {
@@ -71,6 +76,7 @@ class TcpTransferSendUseCase {
         message: '전송할 파일 정보를 준비하지 못했습니다.',
       );
     }
+    input.onPrepared?.call(metadata);
 
     final result = await peerSender.send(
       registry: dataChannelRegistry,
@@ -79,6 +85,7 @@ class TcpTransferSendUseCase {
       transferId: input.transferId,
       filePath: metadata.filePath,
       chunkSize: metadata.chunkSize,
+      onProgress: input.onProgress,
     );
     return TcpTransferSendUseCaseResult(
       sent: result.sent,

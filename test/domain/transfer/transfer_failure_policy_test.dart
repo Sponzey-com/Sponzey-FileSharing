@@ -99,6 +99,37 @@ void main() {
     expect(decision.category, TransferFailureCategory.route);
     expect(decision.diagnosticCode, 'transfer.failure.route');
   });
+
+  test(
+    'classifies TCP outgoing send start failures as TCP data channel failures',
+    () {
+      final now = DateTime.utc(2026, 1, 1);
+      final job = TransferJob(
+        id: 'job-tcp-send',
+        transferId: 'transfer-tcp-send',
+        direction: TransferDirection.outgoing,
+        peerId: 'peer',
+        peerDisplayName: 'peer',
+        fileName: 'demo.bin',
+        fileSize: 1024,
+        bytesTransferred: 0,
+        totalChunks: 1,
+        completedChunks: 0,
+        status: TransferJobStatus.failed,
+        createdAt: now,
+        updatedAt: now,
+        message: 'TCP 파일 전송을 시작하지 못했습니다.',
+        dataCapability: DataTransferCapability.tcpDataStreamV1,
+      );
+
+      final decision = const TransferFailurePolicy().classify(job);
+
+      expect(decision.category, TransferFailureCategory.network);
+      expect(decision.retryable, isTrue);
+      expect(decision.diagnosticCode, 'transfer.failure.tcp_data_channel');
+      expect(decision.userMessage, contains('TCP 데이터 채널'));
+    },
+  );
 }
 
 TransferJob _job({
