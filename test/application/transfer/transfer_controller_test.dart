@@ -4120,7 +4120,7 @@ Future<_TransferHarness> _createNode({
       .signIn(userId: loginUserId, password: loginPassword);
   container.read(peerAuthControllerProvider);
   container.read(transferControllerProvider);
-  await _flush();
+  await _waitForTransferInitialization(container);
 
   return _TransferHarness(
     container: container,
@@ -4320,6 +4320,16 @@ Future<List<TransferHistorySnapshot>> _waitForHistory(
 Future<void> _flush() async {
   await Future<void>.delayed(Duration.zero);
   await Future<void>.delayed(const Duration(milliseconds: 20));
+}
+
+Future<void> _waitForTransferInitialization(ProviderContainer container) async {
+  for (var attempt = 0; attempt < 100; attempt += 1) {
+    if (!container.read(transferControllerProvider).isLoading) {
+      return;
+    }
+    await _flush();
+  }
+  fail('Transfer controller initialization did not complete.');
 }
 
 AuthPacket _copyPacket(

@@ -45,13 +45,13 @@ void main() {
       ),
     );
 
-    expect(find.text('로그인'), findsAtLeastNWidgets(2));
-    expect(find.widgetWithText(ElevatedButton, '로그인'), findsOneWidget);
+    expect(find.text('간단히 연결'), findsOneWidget);
+    expect(find.widgetWithText(ElevatedButton, '내 기기 켜기'), findsOneWidget);
 
     await tester.enterText(find.byType(TextFormField).at(0), 'admin');
     await tester.enterText(find.byType(TextFormField).at(1), 'secret');
     await tester.pump();
-    await tester.tap(find.widgetWithText(ElevatedButton, '로그인'));
+    await tester.tap(find.widgetWithText(ElevatedButton, '내 기기 켜기'));
     await tester.pumpAndSettle();
 
     expect(find.text('Dashboard'), findsNWidgets(2));

@@ -219,10 +219,12 @@ class TransferController extends Notifier<TransferState> {
   final TransferDataFrameKeyRegistry _frameKeyRegistry =
       TransferDataFrameKeyRegistry();
   final Map<String, TransferDiagnosticsRingBuffer> _diagnosticFrameTraces = {};
+  bool _isDisposed = false;
 
   @override
   TransferState build() {
     ref.onDispose(() {
+      _isDisposed = true;
       unawaited(_dispose());
     });
     ref.listen<PeerAuthState>(peerAuthControllerProvider, (previous, next) {
@@ -778,13 +780,21 @@ class TransferController extends Notifier<TransferState> {
   }
 
   Future<void> _initialize() async {
+    final logger = ref.read(appLoggerProvider);
     try {
       _localIdentity = await ref
           .read(localDeviceIdentityServiceProvider)
           .load();
+      if (_isDisposed || !ref.mounted) {
+        return;
+      }
       await ref
           .read(controlTransportProvider)
           .start(preferredPort: ref.read(appConfigProvider).authPort);
+      if (_isDisposed || !ref.mounted) {
+        await _dispose();
+        return;
+      }
       _packetSubscription = ref.read(controlTransportProvider).packets.listen((
         datagram,
       ) {
@@ -797,19 +807,35 @@ class TransferController extends Notifier<TransferState> {
       });
       final tcpIncomingDirectory =
           await _loadTcpIncomingSubscriptionDirectory();
+      if (_isDisposed || !ref.mounted) {
+        await _dispose();
+        return;
+      }
       if (tcpIncomingDirectory != null) {
         _tcpDataListener = ref.read(tcpDataListenerProvider);
         _tcpDataConnector = ref.read(tcpDataConnectorProvider);
         _tcpDataListenerBinding = await _tcpDataListener!.bind(
           const TcpDataListenerBindRequest(host: '0.0.0.0', port: 0),
         );
+        if (_isDisposed || !ref.mounted) {
+          await _dispose();
+          return;
+        }
         _tcpIncomingSubscription = ref.read(
           tcpIncomingListenerSubscriptionProvider(tcpIncomingDirectory),
         );
         _tcpIncomingResultSubscription = _tcpIncomingSubscription!.results
             .listen(_handleTcpIncomingResult);
         await _tcpIncomingSubscription!.start();
+        if (_isDisposed || !ref.mounted) {
+          await _dispose();
+          return;
+        }
         await _sendTcpDataChannelOffersToAuthenticatedPeers();
+      }
+      if (_isDisposed || !ref.mounted) {
+        await _dispose();
+        return;
       }
       state = state.copyWith(
         isListening: true,
@@ -817,15 +843,16 @@ class TransferController extends Notifier<TransferState> {
         clearError: true,
       );
     } catch (error, stackTrace) {
-      ref
-          .read(appLoggerProvider)
-          .error(
-            AppLogCategory.transferControl,
-            'Failed to initialize transfer controller',
-            error: error,
-            stackTrace: stackTrace,
-          );
+      logger.error(
+        AppLogCategory.transferControl,
+        'Failed to initialize transfer controller',
+        error: error,
+        stackTrace: stackTrace,
+      );
       await _dispose();
+      if (_isDisposed || !ref.mounted) {
+        return;
+      }
       state = state.copyWith(
         isListening: false,
         isLoading: false,
