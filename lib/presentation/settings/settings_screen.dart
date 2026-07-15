@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:sponzey_file_sharing/app/theme/app_colors.dart';
 import 'package:sponzey_file_sharing/app/theme/app_spacing.dart';
 import 'package:sponzey_file_sharing/application/settings/settings_controller.dart';
 import 'package:sponzey_file_sharing/core/logger/app_logger.dart';
@@ -56,6 +57,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             controller: _scrollController,
             child: ListView(
               controller: _scrollController,
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.xl,
+                0,
+                AppSpacing.xl,
+                AppSpacing.xl,
+              ),
               children: [
                 _SettingsCard(
                   title: 'Receive Policy',
@@ -115,17 +122,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 const SizedBox(height: AppSpacing.lg),
                 _SettingsCard(
                   title: 'Peer Access',
+                  backgroundColor: AppColors.techDark,
+                  foregroundColor: AppColors.paper,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         '별도의 허용 사용자 등록은 사용하지 않습니다.',
-                        style: Theme.of(context).textTheme.bodyLarge,
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodyLarge?.copyWith(color: AppColors.paper),
                       ),
                       const SizedBox(height: AppSpacing.sm),
                       Text(
                         '연결 요청을 받은 피어는 별도 검증 없이 바로 인증되고 파일을 주고받을 수 있습니다.',
-                        style: Theme.of(context).textTheme.bodyMedium,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: AppColors.techTextOnDark,
+                        ),
                       ),
                     ],
                   ),
@@ -171,18 +184,31 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 }
 
 class _SettingsCard extends StatelessWidget {
-  const _SettingsCard({required this.title, required this.child});
+  const _SettingsCard({
+    required this.title,
+    required this.child,
+    this.backgroundColor = AppColors.paper,
+    this.foregroundColor = AppColors.ink,
+  });
 
   final String title;
   final Widget child;
+  final Color backgroundColor;
+  final Color foregroundColor;
 
   @override
   Widget build(BuildContext context) {
     return SponzeyCard(
+      backgroundColor: backgroundColor,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: Theme.of(context).textTheme.titleLarge),
+          Text(
+            title,
+            style: Theme.of(
+              context,
+            ).textTheme.titleLarge?.copyWith(color: foregroundColor),
+          ),
           const SizedBox(height: AppSpacing.md),
           child,
         ],

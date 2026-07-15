@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.atomsoft" "\0"
-            VALUE "FileDescription", "sponzey_file_sharing" "\0"
+            VALUE "FileDescription", "Sponzey File Sharing" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "sponzey_file_sharing" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 com.atomsoft. All rights reserved." "\0"
             VALUE "OriginalFilename", "sponzey_file_sharing.exe" "\0"
-            VALUE "ProductName", "sponzey_file_sharing" "\0"
+            VALUE "ProductName", "Sponzey File Sharing" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

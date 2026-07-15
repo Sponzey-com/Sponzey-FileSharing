@@ -74,232 +74,249 @@ class _TransfersScreenState extends ConsumerState<TransfersScreen> {
         ),
         const SizedBox(height: AppSpacing.lg),
         Expanded(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                flex: 4,
-                child: SponzeyCard(
-                  backgroundColor: AppColors.brandYellowMist,
-                  child: SponzeyScrollCue(
-                    controller: _formScrollController,
-                    child: ListView(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.xl,
+              0,
+              AppSpacing.xl,
+              AppSpacing.xl,
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  flex: 4,
+                  child: SponzeyCard(
+                    backgroundColor: AppColors.paper,
+                    child: SponzeyScrollCue(
                       controller: _formScrollController,
-                      padding: EdgeInsets.zero,
+                      child: ListView(
+                        controller: _formScrollController,
+                        padding: EdgeInsets.zero,
+                        children: [
+                          Text(
+                            'New Transfer',
+                            style: Theme.of(context).textTheme.titleLarge,
+                          ),
+                          const SizedBox(height: AppSpacing.md),
+                          Text(
+                            '드롭한 파일은 인증된 피어로 바로 전송됩니다. 수신 노드는 기본 저장 경로에 즉시 저장합니다.',
+                            style: Theme.of(context).textTheme.bodyLarge,
+                          ),
+                          const SizedBox(height: AppSpacing.sm),
+                          Text(
+                            peers.isEmpty
+                                ? '자동 연결 완료를 기다리는 중입니다. 같은 ID/PW로 로그인한 피어가 있으면 곧 전송 대상으로 나타납니다.'
+                                : '연결된 피어 ${peers.length}개가 전송 대상으로 준비되었습니다.',
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                          const SizedBox(height: AppSpacing.lg),
+                          DropdownButtonFormField<String>(
+                            isExpanded: true,
+                            initialValue:
+                                _selectedPeerId != null &&
+                                    peers.any(
+                                      (peer) => peer.id == _selectedPeerId,
+                                    )
+                                ? _selectedPeerId
+                                : null,
+                            decoration: const InputDecoration(
+                              labelText: '대상 피어',
+                            ),
+                            items: [
+                              for (final peer in peers)
+                                DropdownMenuItem(
+                                  value: peer.id,
+                                  child: Text(
+                                    '${peer.displayName} • ${peer.deviceName}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                            ],
+                            selectedItemBuilder: (context) {
+                              return peers
+                                  .map(
+                                    (peer) => Align(
+                                      alignment: Alignment.centerLeft,
+                                      child: Text(
+                                        '${peer.displayName} • ${peer.deviceName}',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  )
+                                  .toList(growable: false);
+                            },
+                            onChanged: peers.isEmpty
+                                ? null
+                                : (value) {
+                                    setState(() {
+                                      _selectedPeerId = value;
+                                    });
+                                  },
+                          ),
+                          const SizedBox(height: AppSpacing.md),
+                          DropTarget(
+                            onDragEntered: (_) {
+                              setState(() {
+                                _isDraggingFiles = true;
+                              });
+                            },
+                            onDragExited: (_) {
+                              setState(() {
+                                _isDraggingFiles = false;
+                              });
+                            },
+                            onDragDone: (detail) async {
+                              setState(() {
+                                _isDraggingFiles = false;
+                              });
+                              await _sendDroppedFiles(detail.files, peers);
+                            },
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 180),
+                              curve: Curves.easeInOut,
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(AppSpacing.md),
+                              decoration: BoxDecoration(
+                                color: _isDraggingFiles
+                                    ? AppColors.infoSoft
+                                    : AppColors.techInput,
+                                borderRadius: BorderRadius.circular(24),
+                                border: Border.all(
+                                  color: _isDraggingFiles
+                                      ? AppColors.techBlue
+                                      : AppColors.techBorderStrong,
+                                  width: _isDraggingFiles ? 2 : 1,
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        Icons.file_open_rounded,
+                                        color: AppColors.techBlue,
+                                      ),
+                                      const SizedBox(width: AppSpacing.sm),
+                                      Expanded(
+                                        child: Text(
+                                          _isDraggingFiles
+                                              ? '파일을 놓으면 즉시 전송합니다'
+                                              : '파일을 여기로 드래그 앤 드롭',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.titleMedium,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: AppSpacing.xs),
+                                  Text(
+                                    '여러 파일을 드롭하면 선택한 피어로 순차 전송합니다.',
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.bodyMedium,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: AppSpacing.md),
+                          _InfoLine(
+                            label: '기본 수신 경로',
+                            value:
+                                settingsState.settings.defaultSavePath
+                                    .trim()
+                                    .isEmpty
+                                ? '설정 로딩 중'
+                                : settingsState.settings.defaultSavePath,
+                          ),
+                          const SizedBox(height: AppSpacing.sm),
+                          _InfoLine(label: '수신 동작', value: '승인 없이 즉시 저장'),
+                          const SizedBox(height: AppSpacing.sm),
+                          _InfoLine(
+                            label: '연결 세션',
+                            value: peers.isEmpty
+                                ? '연결 완료 0 / 전체 세션 ${sessions.length}'
+                                : '연결 완료 ${peers.length} / 전체 세션 ${sessions.length}',
+                          ),
+                          if (transferState.errorMessage != null) ...[
+                            const SizedBox(height: AppSpacing.md),
+                            Text(
+                              transferState.errorMessage!,
+                              style: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(color: AppColors.danger),
+                            ),
+                          ],
+                          if (transferState.infoMessage != null) ...[
+                            const SizedBox(height: AppSpacing.md),
+                            Text(
+                              transferState.infoMessage!,
+                              style: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(color: AppColors.success),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.lg),
+                Expanded(
+                  flex: 6,
+                  child: SponzeyCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'New Transfer',
+                          'Transfer Queue',
                           style: Theme.of(context).textTheme.titleLarge,
                         ),
                         const SizedBox(height: AppSpacing.md),
-                        Text(
-                          '드롭한 파일은 인증된 피어로 바로 전송됩니다. 수신 노드는 기본 저장 경로에 즉시 저장합니다.',
-                          style: Theme.of(context).textTheme.bodyLarge,
-                        ),
-                        const SizedBox(height: AppSpacing.sm),
-                        Text(
-                          peers.isEmpty
-                              ? '자동 연결 완료를 기다리는 중입니다. 같은 ID/PW로 로그인한 피어가 있으면 곧 전송 대상으로 나타납니다.'
-                              : '연결된 피어 ${peers.length}개가 전송 대상으로 준비되었습니다.',
-                          style: Theme.of(context).textTheme.bodyMedium,
-                        ),
-                        const SizedBox(height: AppSpacing.lg),
-                        DropdownButtonFormField<String>(
-                          isExpanded: true,
-                          initialValue:
-                              _selectedPeerId != null &&
-                                  peers.any(
-                                    (peer) => peer.id == _selectedPeerId,
-                                  )
-                              ? _selectedPeerId
-                              : null,
-                          decoration: const InputDecoration(labelText: '대상 피어'),
-                          items: [
-                            for (final peer in peers)
-                              DropdownMenuItem(
-                                value: peer.id,
-                                child: Text(
-                                  '${peer.displayName} • ${peer.deviceName}',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                          ],
-                          selectedItemBuilder: (context) {
-                            return peers
-                                .map(
-                                  (peer) => Align(
-                                    alignment: Alignment.centerLeft,
-                                    child: Text(
-                                      '${peer.displayName} • ${peer.deviceName}',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                )
-                                .toList(growable: false);
-                          },
-                          onChanged: peers.isEmpty
-                              ? null
-                              : (value) {
-                                  setState(() {
-                                    _selectedPeerId = value;
-                                  });
-                                },
-                        ),
-                        const SizedBox(height: AppSpacing.md),
-                        DropTarget(
-                          onDragEntered: (_) {
-                            setState(() {
-                              _isDraggingFiles = true;
-                            });
-                          },
-                          onDragExited: (_) {
-                            setState(() {
-                              _isDraggingFiles = false;
-                            });
-                          },
-                          onDragDone: (detail) async {
-                            setState(() {
-                              _isDraggingFiles = false;
-                            });
-                            await _sendDroppedFiles(detail.files, peers);
-                          },
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 180),
-                            curve: Curves.easeInOut,
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(AppSpacing.md),
-                            decoration: BoxDecoration(
-                              color: _isDraggingFiles
-                                  ? AppColors.brandYellowSoft
-                                  : Colors.white,
-                              borderRadius: BorderRadius.circular(24),
-                              border: Border.all(
-                                color: AppColors.ink,
-                                width: _isDraggingFiles ? 2.5 : 1.5,
-                              ),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    const Icon(Icons.file_open_rounded),
-                                    const SizedBox(width: AppSpacing.sm),
-                                    Expanded(
-                                      child: Text(
-                                        _isDraggingFiles
-                                            ? '파일을 놓으면 즉시 전송합니다'
-                                            : '파일을 여기로 드래그 앤 드롭',
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: Theme.of(
-                                          context,
-                                        ).textTheme.titleMedium,
+                        Expanded(
+                          child: SponzeyScrollCue(
+                            controller: _scrollController,
+                            child: jobs.isEmpty
+                                ? ListView(
+                                    controller: _scrollController,
+                                    children: [
+                                      ListTile(
+                                        contentPadding: EdgeInsets.zero,
+                                        leading: const Icon(
+                                          Icons.local_shipping_rounded,
+                                        ),
+                                        title: const Text('진행 중인 전송이 없습니다'),
+                                        subtitle: Text(
+                                          peers.isEmpty
+                                              ? '자동 연결이 완료되면 전송 대상이 여기서 바로 선택됩니다.'
+                                              : '피어를 선택하고 파일을 드롭하면 즉시 전송됩니다.',
+                                        ),
                                       ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: AppSpacing.xs),
-                                Text(
-                                  '여러 파일을 드롭하면 선택한 피어로 순차 전송합니다.',
-                                  style: Theme.of(context).textTheme.bodyMedium,
-                                ),
-                              ],
-                            ),
+                                    ],
+                                  )
+                                : ListView.separated(
+                                    controller: _scrollController,
+                                    itemBuilder: (context, index) {
+                                      final job = jobs[index];
+                                      return _TransferJobTile(job: job);
+                                    },
+                                    separatorBuilder: (_, _) =>
+                                        const Divider(height: 1),
+                                    itemCount: jobs.length,
+                                  ),
                           ),
                         ),
-                        const SizedBox(height: AppSpacing.md),
-                        _InfoLine(
-                          label: '기본 수신 경로',
-                          value:
-                              settingsState.settings.defaultSavePath
-                                  .trim()
-                                  .isEmpty
-                              ? '설정 로딩 중'
-                              : settingsState.settings.defaultSavePath,
-                        ),
-                        const SizedBox(height: AppSpacing.sm),
-                        _InfoLine(label: '수신 동작', value: '승인 없이 즉시 저장'),
-                        const SizedBox(height: AppSpacing.sm),
-                        _InfoLine(
-                          label: '연결 세션',
-                          value: peers.isEmpty
-                              ? '연결 완료 0 / 전체 세션 ${sessions.length}'
-                              : '연결 완료 ${peers.length} / 전체 세션 ${sessions.length}',
-                        ),
-                        if (transferState.errorMessage != null) ...[
-                          const SizedBox(height: AppSpacing.md),
-                          Text(
-                            transferState.errorMessage!,
-                            style: Theme.of(context).textTheme.bodyMedium
-                                ?.copyWith(color: AppColors.danger),
-                          ),
-                        ],
-                        if (transferState.infoMessage != null) ...[
-                          const SizedBox(height: AppSpacing.md),
-                          Text(
-                            transferState.infoMessage!,
-                            style: Theme.of(context).textTheme.bodyMedium
-                                ?.copyWith(color: AppColors.success),
-                          ),
-                        ],
                       ],
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(width: AppSpacing.lg),
-              Expanded(
-                flex: 6,
-                child: SponzeyCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Transfer Queue',
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                      const SizedBox(height: AppSpacing.md),
-                      Expanded(
-                        child: SponzeyScrollCue(
-                          controller: _scrollController,
-                          child: jobs.isEmpty
-                              ? ListView(
-                                  controller: _scrollController,
-                                  children: [
-                                    ListTile(
-                                      contentPadding: EdgeInsets.zero,
-                                      leading: const Icon(
-                                        Icons.local_shipping_rounded,
-                                      ),
-                                      title: const Text('진행 중인 전송이 없습니다'),
-                                      subtitle: Text(
-                                        peers.isEmpty
-                                            ? '자동 연결이 완료되면 전송 대상이 여기서 바로 선택됩니다.'
-                                            : '피어를 선택하고 파일을 드롭하면 즉시 전송됩니다.',
-                                      ),
-                                    ),
-                                  ],
-                                )
-                              : ListView.separated(
-                                  controller: _scrollController,
-                                  itemBuilder: (context, index) {
-                                    final job = jobs[index];
-                                    return _TransferJobTile(job: job);
-                                  },
-                                  separatorBuilder: (_, _) =>
-                                      const Divider(height: 1),
-                                  itemCount: jobs.length,
-                                ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ],
@@ -430,8 +447,8 @@ class _TransferJobTile extends ConsumerWidget {
           LinearProgressIndicator(
             value: progress,
             minHeight: 12,
-            color: AppColors.brandYellow,
-            backgroundColor: AppColors.brandYellowMist,
+            color: AppColors.techBlue,
+            backgroundColor: AppColors.techBorder,
             borderRadius: BorderRadius.circular(999),
           ),
           if (primaryMessage != null) ...[

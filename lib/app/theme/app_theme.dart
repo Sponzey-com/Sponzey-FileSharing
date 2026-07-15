@@ -6,13 +6,14 @@ abstract final class AppTheme {
   static ThemeData light() {
     final base = ThemeData(
       useMaterial3: true,
+      fontFamily: 'Noto Sans KR',
       colorScheme: ColorScheme.fromSeed(
-        seedColor: AppColors.brandYellow,
-        primary: AppColors.brandYellow,
-        secondary: AppColors.info,
+        seedColor: AppColors.techBlue,
+        primary: AppColors.techBlue,
+        secondary: AppColors.techCyan,
         surface: AppColors.paper,
       ),
-      scaffoldBackgroundColor: AppColors.brandYellowMist,
+      scaffoldBackgroundColor: AppColors.techBackground,
       textTheme: const TextTheme(
         displayLarge: TextStyle(
           fontSize: 40,
@@ -71,7 +72,7 @@ abstract final class AppTheme {
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadius.large),
-          side: const BorderSide(color: AppColors.ink, width: 2),
+          side: const BorderSide(color: AppColors.techBorder),
         ),
         elevation: 0,
         margin: EdgeInsets.zero,
@@ -79,36 +80,37 @@ abstract final class AppTheme {
       dividerColor: AppColors.borderSoft,
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: AppColors.paper,
+        fillColor: AppColors.techInput,
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 16,
           vertical: 14,
         ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppRadius.medium),
-          borderSide: const BorderSide(color: AppColors.ink, width: 2),
+          borderSide: const BorderSide(color: AppColors.techBorder),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppRadius.medium),
-          borderSide: const BorderSide(color: AppColors.ink, width: 2),
+          borderSide: const BorderSide(color: AppColors.techBorder),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppRadius.medium),
-          borderSide: const BorderSide(color: AppColors.info, width: 2),
+          borderSide: const BorderSide(color: AppColors.techBlue, width: 1.5),
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppRadius.medium),
-          borderSide: const BorderSide(color: AppColors.danger, width: 2),
+          borderSide: const BorderSide(color: AppColors.danger, width: 1.5),
         ),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          foregroundColor: AppColors.ink,
-          backgroundColor: AppColors.brandYellow,
-          minimumSize: const Size(0, 48),
+          foregroundColor: AppColors.paper,
+          backgroundColor: AppColors.techBlue,
+          disabledForegroundColor: AppColors.techTextMuted,
+          disabledBackgroundColor: const Color(0xFFE8EEF6),
+          minimumSize: const Size(0, 52),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppRadius.medium),
-            side: const BorderSide(color: AppColors.ink, width: 2),
           ),
           elevation: 0,
         ),
@@ -117,26 +119,27 @@ abstract final class AppTheme {
         style: OutlinedButton.styleFrom(
           foregroundColor: AppColors.ink,
           minimumSize: const Size(0, 48),
-          side: const BorderSide(color: AppColors.ink, width: 2),
+          side: const BorderSide(color: AppColors.techBorderStrong),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppRadius.medium),
           ),
         ),
       ),
       chipTheme: base.chipTheme.copyWith(
-        side: const BorderSide(color: AppColors.ink, width: 1.5),
+        backgroundColor: AppColors.techInput,
+        side: const BorderSide(color: AppColors.techBorder),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadius.pill),
         ),
       ),
       scrollbarTheme: ScrollbarThemeData(
         thumbColor: WidgetStatePropertyAll(
-          AppColors.ink.withValues(alpha: 0.75),
+          AppColors.techTextMuted.withValues(alpha: 0.7),
         ),
-        trackColor: const WidgetStatePropertyAll(AppColors.brandYellowMist),
+        trackColor: const WidgetStatePropertyAll(AppColors.techInput),
         trackBorderColor: const WidgetStatePropertyAll(AppColors.borderSoft),
         radius: const Radius.circular(AppRadius.pill),
-        thickness: const WidgetStatePropertyAll(10),
+        thickness: const WidgetStatePropertyAll(8),
         thumbVisibility: const WidgetStatePropertyAll(true),
         trackVisibility: const WidgetStatePropertyAll(true),
       ),

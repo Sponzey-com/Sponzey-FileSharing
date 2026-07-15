@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sponzey_file_sharing/app/theme/app_colors.dart';
+import 'package:sponzey_file_sharing/app/theme/app_radius.dart';
 import 'package:sponzey_file_sharing/app/theme/app_spacing.dart';
 import 'package:sponzey_file_sharing/application/auth/auth_controller.dart';
 import 'package:sponzey_file_sharing/presentation/shared/sponzey_card.dart';
@@ -71,12 +72,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         final isCompact = constraints.maxWidth < 960;
 
         final formCard = SponzeyCard(
+          padding: const EdgeInsets.all(AppSpacing.xxl),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('로그인', style: Theme.of(context).textTheme.headlineMedium),
-              const SizedBox(height: AppSpacing.xs),
+              Text('간단히 연결', style: Theme.of(context).textTheme.headlineMedium),
+              const SizedBox(height: AppSpacing.lg),
               Text(
                 '가입 없이 아이디와 비밀번호로 현재 실행 세션만 시작합니다. 자격 증명은 앱 메모리에서만 유지됩니다.',
                 style: Theme.of(context).textTheme.bodyMedium,
@@ -109,6 +111,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             ? Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  const _LoginTopBar(),
+                  const SizedBox(height: AppSpacing.lg),
                   const _BrandPanel(),
                   const SizedBox(height: AppSpacing.lg),
                   formCard,
@@ -117,10 +121,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             : Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Expanded(flex: 4, child: _BrandPanel()),
-                  const SizedBox(width: AppSpacing.lg),
+                  const Expanded(flex: 5, child: _BrandPanel()),
+                  const SizedBox(width: AppSpacing.xxl),
                   Expanded(
-                    flex: 6,
+                    flex: 5,
                     child: Align(
                       alignment: Alignment.topCenter,
                       child: formCard,
@@ -132,17 +136,28 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         return Scaffold(
           body: SafeArea(
             child: Padding(
-              padding: const EdgeInsets.all(AppSpacing.lg),
+              padding: const EdgeInsets.all(0),
               child: SponzeyScrollCue(
                 controller: _scrollController,
                 child: SingleChildScrollView(
                   controller: _scrollController,
-                  padding: EdgeInsets.zero,
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.xxxl,
+                    0,
+                    AppSpacing.xxxl,
+                    AppSpacing.xxxl,
+                  ),
                   child: ConstrainedBox(
                     constraints: BoxConstraints(
-                      minHeight: constraints.maxHeight - (AppSpacing.lg * 2),
+                      minHeight: constraints.maxHeight,
                     ),
-                    child: body,
+                    child: Column(
+                      children: [
+                        if (!isCompact) const _LoginTopBar(),
+                        SizedBox(height: isCompact ? 0 : AppSpacing.xxxl),
+                        body,
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -171,6 +186,43 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 }
 
+class _LoginTopBar extends StatelessWidget {
+  const _LoginTopBar();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 72,
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
+      decoration: const BoxDecoration(
+        color: AppColors.paper,
+        border: Border(bottom: BorderSide(color: AppColors.techBorder)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 10,
+            height: 10,
+            decoration: const BoxDecoration(
+              color: AppColors.techGreen,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Text('로그인', style: Theme.of(context).textTheme.headlineMedium),
+          const Spacer(),
+          Text(
+            '같은 이름과 비밀번호로 바로 연결',
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: AppColors.techTextMuted),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _BrandPanel extends StatelessWidget {
   const _BrandPanel();
 
@@ -178,30 +230,32 @@ class _BrandPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        gradient: AppColors.pageGradient,
-        borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: AppColors.ink, width: 2),
+        color: AppColors.techDark,
+        borderRadius: BorderRadius.circular(AppRadius.large),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.xl),
+        padding: const EdgeInsets.all(AppSpacing.xxl),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              'Sponzey FileSharing',
-              style: Theme.of(context).textTheme.displayMedium,
+              '내 기기로 시작',
+              style: Theme.of(
+                context,
+              ).textTheme.displayMedium?.copyWith(color: AppColors.paper),
             ),
-            const SizedBox(height: AppSpacing.md),
+            const SizedBox(height: AppSpacing.lg),
             Text(
-              '같은 네트워크 안에서 인증된 장치끼리 빠르게 파일을 주고받는 데스크톱 앱.',
-              style: Theme.of(context).textTheme.bodyLarge,
+              '주변 기기를 자동으로 찾고, 같은 비밀번호를 쓰는 기기끼리 파일을 주고받습니다.',
+              style: Theme.of(
+                context,
+              ).textTheme.bodyLarge?.copyWith(color: AppColors.techTextOnDark),
             ),
-            const SizedBox(height: AppSpacing.xl),
-            const _ValuePoint(
-              title: 'Fast local transfer',
-              description: '로컬 네트워크 중심의 빠른 파일 전송 흐름',
-            ),
+            const SizedBox(height: 72),
+            const _SignalCard(),
+            const SizedBox(height: AppSpacing.xxxl),
+            const _CyanCallout(label: '시작하기'),
           ],
         ),
       ),
@@ -209,39 +263,78 @@ class _BrandPanel extends StatelessWidget {
   }
 }
 
-class _ValuePoint extends StatelessWidget {
-  const _ValuePoint({required this.title, required this.description});
-
-  final String title;
-  final String description;
+class _SignalCard extends StatelessWidget {
+  const _SignalCard();
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 14,
-          height: 14,
-          margin: const EdgeInsets.only(top: 4),
-          decoration: BoxDecoration(
-            color: AppColors.brandYellow,
-            shape: BoxShape.circle,
-            border: Border.all(color: AppColors.ink, width: 2),
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.xl,
+        vertical: AppSpacing.lg,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.techDarkRaised,
+        borderRadius: BorderRadius.circular(AppRadius.small),
+        border: Border.all(color: AppColors.techBorder.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        children: [
+          const _SignalDot(color: AppColors.techCyan),
+          const SizedBox(width: AppSpacing.md),
+          const _SignalDot(color: AppColors.techBlue),
+          const SizedBox(width: AppSpacing.md),
+          const _SignalDot(color: AppColors.techGreen),
+          const Spacer(),
+          Text(
+            '주변 기기 3개',
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(color: AppColors.paper),
           ),
-        ),
-        const SizedBox(width: AppSpacing.sm),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(title, style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height: AppSpacing.xxs),
-              Text(description, style: Theme.of(context).textTheme.bodyMedium),
-            ],
-          ),
-        ),
-      ],
+        ],
+      ),
+    );
+  }
+}
+
+class _SignalDot extends StatelessWidget {
+  const _SignalDot({required this.color});
+
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 12,
+      height: 12,
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+    );
+  }
+}
+
+class _CyanCallout extends StatelessWidget {
+  const _CyanCallout({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      height: 52,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: AppColors.techCyan,
+        borderRadius: BorderRadius.circular(AppRadius.small),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(
+          context,
+        ).textTheme.labelLarge?.copyWith(color: AppColors.techDark),
+      ),
     );
   }
 }
@@ -315,7 +408,7 @@ class _LoginForm extends StatelessWidget {
               key: const ValueKey('login-submit-button'),
               onPressed: isBusy || !canSubmit ? null : onSubmit,
               icon: const Icon(Icons.login_rounded),
-              label: const Text('로그인'),
+              label: const Text('내 기기 켜기'),
             ),
           ),
         ],

@@ -59,7 +59,7 @@ class SponzeyShell extends ConsumerWidget {
         decoration: const BoxDecoration(gradient: AppColors.pageGradient),
         child: SafeArea(
           child: Padding(
-            padding: const EdgeInsets.all(AppSpacing.lg),
+            padding: const EdgeInsets.all(AppSpacing.md),
             child: Column(
               children: [
                 Expanded(
@@ -105,7 +105,7 @@ class ShellContentPane extends StatelessWidget {
 
     return ClipRect(
       child: DecoratedBox(
-        decoration: const BoxDecoration(color: AppColors.brandYellowMist),
+        decoration: const BoxDecoration(color: AppColors.techBackground),
         child: AnimatedSwitcher(
           duration: const Duration(milliseconds: 360),
           switchInCurve: Curves.easeInOutCubic,
@@ -189,8 +189,10 @@ class _NavigationRailState extends ConsumerState<_NavigationRail> {
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 Text(
-                  'Task001 shell routes and navigation skeleton',
-                  style: Theme.of(context).textTheme.bodyMedium,
+                  '로컬 네트워크 파일 전송 워크스페이스',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.techTextMuted,
+                  ),
                 ),
                 const SizedBox(height: AppSpacing.lg),
                 for (final item in SponzeyShell._navigationItems) ...[
@@ -226,6 +228,7 @@ class _NavButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final background = selected ? AppColors.brandYellow : AppColors.paper;
+    final foreground = selected ? AppColors.paper : AppColors.ink;
 
     return InkWell(
       onTap: () => context.go(item.route),
@@ -238,13 +241,20 @@ class _NavButton extends StatelessWidget {
         decoration: BoxDecoration(
           color: background,
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: AppColors.ink, width: 2),
+          border: Border.all(
+            color: selected ? AppColors.techBlue : AppColors.techBorder,
+          ),
         ),
         child: Row(
           children: [
-            Icon(item.icon, color: AppColors.ink),
+            Icon(item.icon, color: foreground),
             const SizedBox(width: AppSpacing.sm),
-            Text(item.label, style: Theme.of(context).textTheme.labelLarge),
+            Text(
+              item.label,
+              style: Theme.of(
+                context,
+              ).textTheme.labelLarge?.copyWith(color: foreground),
+            ),
           ],
         ),
       ),
@@ -260,18 +270,18 @@ class _TransferDock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SponzeyCard(
-      backgroundColor: AppColors.surfaceAlt,
+      backgroundColor: AppColors.paper,
       padding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.lg,
         vertical: AppSpacing.md,
       ),
       child: Row(
         children: [
-          Icon(Icons.local_shipping_rounded, color: AppColors.ink),
+          Icon(Icons.local_shipping_rounded, color: AppColors.techBlue),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
-              'Active queue summary placeholder. $activeCount transfer batches are visible across the shell.',
+              '$activeCount개의 전송 작업을 확인 중입니다.',
               style: Theme.of(context).textTheme.bodyMedium,
             ),
           ),

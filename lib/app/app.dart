@@ -11,7 +11,7 @@ class SponzeyFileSharingApp extends ConsumerWidget {
     final router = ref.watch(goRouterProvider);
 
     return MaterialApp.router(
-      title: 'Sponzey FileSharing',
+      title: 'Sponzey File Sharing',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light(),
       routerConfig: router,

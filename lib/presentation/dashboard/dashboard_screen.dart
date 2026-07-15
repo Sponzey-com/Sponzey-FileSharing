@@ -69,50 +69,25 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             controller: _scrollController,
             child: ListView(
               controller: _scrollController,
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.xl,
+                0,
+                AppSpacing.xl,
+                AppSpacing.xl,
+              ),
               children: [
-                SponzeyCard(
-                  backgroundColor: AppColors.brandYellowSoft,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '로컬 네트워크에서 빠르게 보내고, 바로 상태를 확인하는 워크스페이스',
-                        style: Theme.of(context).textTheme.headlineMedium,
-                      ),
-                      const SizedBox(height: AppSpacing.md),
-                      Text(
-                        '디스커버리, 인증, 단일 파일 전송 MVP 상태를 같은 대시보드에서 함께 확인합니다.',
-                        style: Theme.of(context).textTheme.bodyLarge,
-                      ),
-                      const SizedBox(height: AppSpacing.lg),
-                      Wrap(
-                        spacing: AppSpacing.md,
-                        runSpacing: AppSpacing.md,
-                        children: [
-                          _MetricCard(
-                            label: 'Online Peers',
-                            value: '${overview.onlineCount}',
-                          ),
-                          _MetricCard(
-                            label: 'Stale Nodes',
-                            value: '${overview.staleCount}',
-                          ),
-                          _MetricCard(
-                            label: 'Active Batches',
-                            value: '${activeJobs.length}',
-                          ),
-                          _MetricCard(
-                            label: 'Version Mismatch',
-                            value: '${overview.incompatibleCount}',
-                          ),
-                          _MetricCard(
-                            label: 'Offline Peers',
-                            value: '${overview.offlineCount}',
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
+                Wrap(
+                  spacing: AppSpacing.lg,
+                  runSpacing: AppSpacing.lg,
+                  children: [
+                    _MetricCard(label: '내 기기', value: '켜짐'),
+                    _MetricCard(
+                      label: '보낼 기기',
+                      value: '${overview.onlineCount}개',
+                    ),
+                    _MetricCard(label: '전송 중', value: '${activeJobs.length}개'),
+                    const _SendShortcutCard(),
+                  ],
                 ),
                 const SizedBox(height: AppSpacing.lg),
                 Row(
@@ -191,8 +166,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                                   child: LinearProgressIndicator(
                                     value: job.progress,
                                     minHeight: 10,
-                                    color: AppColors.brandYellow,
-                                    backgroundColor: AppColors.brandYellowMist,
+                                    color: AppColors.techBlue,
+                                    backgroundColor: AppColors.techBorder,
                                     borderRadius: BorderRadius.circular(999),
                                   ),
                                 ),
@@ -237,13 +212,26 @@ class _MetricCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 180,
+      width: 220,
       child: SponzeyCard(
         backgroundColor: AppColors.paper,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label, style: Theme.of(context).textTheme.bodyMedium),
+            Row(
+              children: [
+                Container(
+                  width: 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    color: _metricDotColor(label),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Text(label, style: Theme.of(context).textTheme.bodyMedium),
+              ],
+            ),
             const SizedBox(height: AppSpacing.xs),
             Text(value, style: Theme.of(context).textTheme.displayMedium),
           ],
@@ -251,4 +239,45 @@ class _MetricCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _SendShortcutCard extends StatelessWidget {
+  const _SendShortcutCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 250,
+      child: SponzeyCard(
+        backgroundColor: AppColors.techDark,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '파일 보내기',
+              style: Theme.of(
+                context,
+              ).textTheme.headlineMedium?.copyWith(color: AppColors.paper),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              '기기를 고르고 바로 전송',
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: AppColors.techTextOnDark),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+Color _metricDotColor(String label) {
+  return switch (label) {
+    '내 기기' => AppColors.techGreen,
+    '보낼 기기' => AppColors.techBlue,
+    '전송 중' => AppColors.techCyan,
+    _ => AppColors.techTextMuted,
+  };
 }

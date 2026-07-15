@@ -21,7 +21,7 @@ class SponzeyCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: backgroundColor,
         borderRadius: BorderRadius.circular(AppRadius.large),
-        border: Border.all(color: AppColors.ink, width: 2),
+        border: Border.all(color: AppColors.techBorder),
       ),
       child: Padding(padding: padding, child: child),
     );
