@@ -88,8 +88,4 @@ app.*.map.json
 **/linux/flutter/generated_plugin_registrant.h
 **/linux/flutter/generated_plugins.cmake
 
-.tasks/*
-!.tasks/
-!.tasks/*.md
-!.tasks/phase*/
-!.tasks/phase*/*.md
+.tasks/
